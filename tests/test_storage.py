@@ -111,3 +111,15 @@ def test_reextraction_applies_config_fixes_without_refetch(conn, cfg, tmp_path):
     row = db.open_jobs(conn)[0]
     assert row["track"] == "full_time" and row["location_us"] == 0 and row["job_status"] == "new"
     assert ensure_extraction_current(conn, cfg) == 0           # fingerprint unchanged -> nothing to do
+
+
+def test_merge_canonical_duplicates_keeps_the_job_you_acted_on(conn):
+    from jobsearch.adapters.canonical import canonical_key
+    u = "https://demo.wd1.myworkdayjobs.com/UR/job/Boston/SWE-Intern_2641701"
+    a, _ = db.upsert_job(conn, rec(job_id="a", apply_url=u, company="DemoCo"))
+    b, _ = db.upsert_job(conn, rec(job_id="b", apply_url=u.replace("/UR/", "/Search/") + "-1", company="DemoCo Corporation",
+                                   normalized_title="other"))
+    conn.execute("UPDATE jobs SET user_status='shortlisted', user_status_at='2026-10-12T00:00:00+00:00' WHERE id=?", (b,))
+    assert db.merge_canonical_duplicates(conn, canonical_key) == 1
+    assert count(conn) == 1 and conn.execute("SELECT id FROM jobs").fetchone()[0] == b
+    assert conn.execute("SELECT COUNT(*) FROM job_sources WHERE job_pk=?", (b,)).fetchone()[0] == 2

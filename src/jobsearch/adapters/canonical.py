@@ -39,7 +39,9 @@ def canonical_key(url: str | None) -> str | None:
     if host.endswith("myworkdayjobs.com") or host.endswith("myworkdaysite.com"):
         tenant = host.split(".")[0]
         if m := re.search(r"/job/(?:[^/]+/)*([^/?#]+)", path):
-            return f"workday:{tenant}:{m.group(1).lower()}"
+            # "..._R260021450-1" is the same requisition re-posted (another location): same job
+            slug = re.sub(r"(_[a-z]{0,4}-?\d{4,})-\d{1,2}$", r"\1", m.group(1).lower())
+            return f"workday:{tenant}:{slug}"
     if "smartrecruiters.com" in host and (m := re.search(r"/(\d{6,})", path)):
         return f"smartrecruiters:{m.group(1)}"
     if host.endswith("amazon.jobs") and (m := re.search(r"/jobs/(\d+)", path)):

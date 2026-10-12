@@ -503,3 +503,13 @@ def test_name_probe_rejects_board_owned_by_another_company():
 def test_seed_lookup_ignores_legal_suffixes():
     d = Detector(mock_client(router({})), [Company(name="Akamai Technologies", source="workday", host="h", board="b", site="s")], {})
     assert d.detect("Akamai").company.source == "workday"
+
+
+def test_workday_canonical_key_ignores_repost_suffix():
+    from jobsearch.adapters.canonical import canonical_key
+    a = canonical_key("https://demo.wd5.myworkdayjobs.com/en-US/Ext/job/Boston-MA/Software-Developer---Early-Career---15_R260021450")
+    b = canonical_key("https://demo.wd5.myworkdayjobs.com/en-US/Ext/job/Boston-MA/Software-Developer---Early-Career---15_R260021450-1")
+    assert a == b == "workday:demo:software-developer---early-career---15_r260021450"
+    assert canonical_key("https://demo.wd1.myworkdayjobs.com/x/job/y/Engineer_JR2015623") == "workday:demo:engineer_jr2015623"
+    assert canonical_key("https://demo.wd1.myworkdayjobs.com/x/job/y/Specialist-Software-Engineer_R-255470") == \
+        "workday:demo:specialist-software-engineer_r-255470"

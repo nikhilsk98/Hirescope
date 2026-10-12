@@ -323,10 +323,11 @@ companies:
   source: workday
   board: kla
   host: kla.wd1.myworkdayjobs.com
-  site: UR
+  site: Search
   tier: 1
   verified: '2026-10-12'
-  notes: 18 US software intern/new-grad listings in SimplifyJobs; 73 open jobs at verification
+  notes: 18 US software intern/new-grad listings in SimplifyJobs; 1083 open jobs at verification ("Search" site; the
+    "UR" university site re-posts the same requisitions with a -1 suffix, so only Search is checked)
 - name: Leidos
   source: workday
   board: leidos
@@ -1399,14 +1400,6 @@ companies:
   tier: 2
   verified: '2026-10-12'
   notes: 8 US software intern/new-grad listings in SimplifyJobs; 1824 open jobs at verification
-- name: KLA Corporation
-  source: workday
-  board: kla
-  host: kla.wd1.myworkdayjobs.com
-  site: search
-  tier: 2
-  verified: '2026-10-12'
-  notes: 5 US software intern/new-grad listings in SimplifyJobs; 1083 open jobs at verification
 - name: Klaviyo
   source: greenhouse
   board: klaviyocampus

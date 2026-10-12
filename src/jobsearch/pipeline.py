@@ -38,7 +38,7 @@ from .watchlist import WatchItem
 log = logging.getLogger(__name__)
 
 # Bump when extraction logic changes; stored jobs are then re-extracted from their saved title/location/JD.
-EXTRACT_VERSION = "2026-10-12.11"  # .11: J-1-only sponsorship statements
+EXTRACT_VERSION = "2026-10-12.12"  # .12: Workday "_R123-1" reposts share a canonical key (merged)
 EXTRACT_CONFIGS = ("title_rules.yaml", "levels.yaml", "locations.yaml", "skills_synonyms.yaml", "ats_keywords.yaml")
 TIER_INTERVAL_HOURS = {1: 0, 2: 20, 3: 70}       # tier 1 every run, tier 2 daily, tier 3 every 3 days
 TIER_MAX_PAGES = {1: 100, 2: 25, 3: 10}
@@ -207,6 +207,9 @@ def ensure_extraction_current(conn, cfg: Config, force: bool = False) -> int:
         return 0
     n = reextract_all(conn, cfg)
     if db.get_meta(conn, "extract_version") != EXTRACT_VERSION:
+        from .adapters.canonical import canonical_key
+        if m := db.merge_canonical_duplicates(conn, canonical_key):
+            log.info("merged %d duplicate postings (same employer ATS posting)", m)
         # extraction code changed: let the next fetch re-download (no 304s) so values only the source has
         # (raw employment types etc.) are re-read too
         conn.execute("DELETE FROM http_cache")

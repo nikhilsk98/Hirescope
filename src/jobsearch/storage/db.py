@@ -707,3 +707,31 @@ def recent_runs(conn, n: int = 14) -> list[dict]:
                                              "sources_manual", "sources_partial", "jobs_found", "new", "updated",
                                              "closed", "strong", "scored", "filtered")}})
     return out
+
+
+def merge_canonical_duplicates(conn, key_of) -> int:
+    """Recompute canonical keys (key_of(url) -> key) for open jobs and merge jobs that turn out to be the same
+    posting: their source listings move to one job (the one you acted on, else the oldest). Returns jobs merged."""
+    groups: dict[str, list] = {}
+    for r in conn.execute("SELECT id, apply_url, source_url, canonical_key, user_status_at FROM jobs WHERE job_status != 'closed'"):
+        k = key_of(r["apply_url"]) or key_of(r["source_url"]) or r["canonical_key"]
+        if k and k != r["canonical_key"]:
+            conn.execute("UPDATE jobs SET canonical_key=? WHERE id=?", (k, r["id"]))
+        if k:
+            groups.setdefault(k, []).append(r)
+    merged = 0
+    for k, rows in groups.items():
+        if len(rows) < 2:
+            continue
+        acted = {r[0] for r in conn.execute(
+            f"SELECT DISTINCT job_pk FROM applications WHERE job_pk IN ({','.join('?' * len(rows))})", [r["id"] for r in rows])}
+        keep = sorted(rows, key=lambda r: (r["id"] not in acted, r["user_status_at"] is None, r["id"]))[0]["id"]
+        for r in rows:
+            if r["id"] == keep:
+                continue
+            conn.execute("UPDATE job_sources SET job_pk=?, canonical_key=? WHERE job_pk=?", (keep, k, r["id"]))
+            conn.execute("UPDATE applications SET job_pk=? WHERE job_pk=?", (keep, r["id"]))
+            conn.execute("DELETE FROM jobs WHERE id=?", (r["id"],))
+            merged += 1
+    conn.commit()
+    return merged
