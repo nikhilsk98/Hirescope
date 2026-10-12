@@ -1,11 +1,36 @@
-# Local Job Search
+# HireScope — local job search
 
-A local, single-user job-search pipeline for macOS: discovery → dedupe → scoring → static HTML dashboard →
-per-job "job package" export. The core pipeline makes **zero LLM calls** and sends no personal data anywhere.
+A local, single-user job-search tool for macOS: discovery from employer job boards and feeds → dedupe → rules +
+scoring for two tracks (Spring 2027 co-op/intern and full-time from May 2027) → a static HTML dashboard with
+My Applications → per-job "job packages" for a future resume builder. The core pipeline makes **zero LLM calls**,
+never logs in, never scrapes LinkedIn, never applies or messages anyone, and sends no resume data anywhere.
 
-> Status: **Phase 3**. Two tracks (Spring 2027 co-op/intern + May 2027 full-time) with their own rules and dashboard
-> workspaces, 300 verified seed companies + Amazon, Netflix and SimplifyJobs, the My Companies watchlist, ATS keyword
-> capture, freshness priority, meaning-based pre-filter, skill-gap trends, Apply Today, More like this, deadlines.
+> Status: Phases 1–7 complete. 300 verified seed companies + Amazon, Netflix, SimplifyJobs, Hacker News Who's
+> Hiring, LinkedIn alert emails (optional) and an optional aggregator; your My Companies watchlist; two-track rules;
+> ATS keywords; feedback learning; My Applications; launchd schedule with quick checks, notifications, digest, backups.
+
+## Quick start
+
+1. `./scripts/setup.sh` — venv in `~/.venvs/hirescope`, dependencies, editable install.
+2. Copy and edit your inputs: `inputs/preferences.yaml`, `inputs/master_resume.md` (and optionally
+   `inputs/my_companies.csv`, `inputs/Connections.csv`, `.env` for LinkedIn alert emails).
+3. `./scripts/run.sh --all` — first full run (~25 min; later runs fetch only what changed).
+4. Open `dashboard/index.html`. Shortlist / skip with a reason / **Mark Applied**; **Export statuses** now and then.
+5. `./scripts/schedule.sh install` — full runs 08:00 + 18:00 and quick checks every 2.5 h.
+
+## How it works (data flow)
+
+| Stage | Reads | Writes |
+|---|---|---|
+| Inputs | `inputs/preferences.yaml`, `inputs/master_resume.md`, `inputs/my_companies.csv`, `config/*.yaml`, `.env` | — |
+| Import your side | newest `~/Downloads/jobsearch-statuses*.json` (dashboard export) | SQLite `jobs.user_*`, `applications`, `application_events`; `data/imports/` |
+| Plan | tier schedules, My Companies, `--quick` / `--source` / `--company` | which sources run now |
+| Fetch (parallel, polite) | employer ATS APIs, feeds, HN API, IMAP (optional) | `data/jd/*.txt`, HTTP validators (ETag) |
+| Extract | JD text | title/level/track/terms/location/YOE/degree/flags/deadline/keywords per job |
+| Dedupe + lifecycle | same source id → canonical ATS key → fuzzy company+title+location | new / updated / seen / closed (2 misses) |
+| Rules + score | preferences, resume, learned adjustments | filtered (with reasons) or scored: qualification + preference + bonuses − penalties |
+| Publish | SQLite | `dashboard/data.js` + `details/`, `dashboard/sync.js` (your statuses & applications) |
+| After the run | — | notifications, `data/logs/last_run_summary.txt`, daily backup, weekly digest, optional .xlsx |
 
 ## Setup
 
@@ -363,19 +388,47 @@ All requests use per-host rate limits, timeouts, retries with backoff, and the U
 The dashboard makes no network calls (enforced by its Content-Security-Policy). Links you click (apply,
 LinkedIn search) open in your browser as normal.
 
+## Adding a source adapter
+
+1. Create `src/jobsearch/adapters/<name>.py` with a class deriving `Adapter` (`adapters/base.py`):
+   `name`, `capabilities = Capabilities(full_description=…, posted_date=…, pagination=…, official=…, conditional=…,
+   multi_company=…, query_based=…)`, and `fetch(company, ctx) -> FetchResult` returning `RawJob`s (plain-text JD in
+   `description`; `None` means "unchanged, keep the stored JD"). Use `self.http` (`HttpClient`: rate limits, retries,
+   `get_conditional` for ETag/304, `allowed()` for robots.txt on HTML pages). Raise `SourceError` on failure — the run
+   isolates it. Optional: `fetch_one(url)` (Add job by URL), `check_open()` (verify capped listings),
+   `unavailable()` (skip with a note when not configured), `source_label()` (per-feed source names).
+2. Register it in `adapters/registry.py`; set `canonical_key` from the posting URL (`adapters/canonical.py`) so the same
+   posting merges across sources.
+3. Add companies with `source: <name>` to `config/companies.yaml` (or let My Companies detection find them).
+4. Test with DEMO fixtures and `tests/conftest.py → mock_client` (no network), and add any request it makes to
+   **Outbound requests** below.
+
 ## Tests
 
 ```sh
 ~/.venvs/hirescope/bin/python -m pytest -q
 ```
-All test data is mock data labeled DEMO (`tests/fixtures/`). Tests need no network and no embedding model.
+All test data is mock data labeled DEMO (`tests/fixtures/` and inline). Tests need no network and no embedding
+model. If `node` is installed, the dashboard's tracker logic (`dashboard/core.js`) is checked against the Python
+tracker on the same DEMO applications.
 
 ## Troubleshooting
 
-- `No module named 'jobsearch'`: use `scripts/run.sh`, or re-run `scripts/setup.sh` (editable install into `~/.venvs/hirescope`).
-- **Repo inside iCloud Drive** (Desktop & Documents sync): iCloud uploads and slows every file the pipeline
-  writes, and a live SQLite database can be corrupted by sync. `setup.sh` detects this and makes `data/` a
-  symlink to `data.nosync/`, which iCloud never syncs. Or set `JOBSEARCH_DATA_DIR=/some/local/path`.
-- A run seems stuck: `kill -USR1 <pid>` prints every thread's stack to the run's stderr / log.
-- A company shows as failed: check `data/logs/jobsearch.log`; verify the board token at
-  `https://boards-api.greenhouse.io/v1/boards/<board>/jobs`.
+| Symptom | What to do |
+|---|---|
+| `No module named 'jobsearch'` | use `scripts/run.sh`, or re-run `scripts/setup.sh` (editable install into `~/.venvs/hirescope`) |
+| Dashboard is empty / "No jobs yet" | run `./scripts/run.sh`; check that `dashboard/data.js` exists; reload |
+| Statuses or applications not in SQLite | click **Export statuses** (it lands in `~/Downloads`); the next run imports the newest `jobsearch-statuses*.json` — see Run Log → "Statuses import". Or `python -m jobsearch.run --statuses FILE` |
+| Lost browser data | nothing exported is lost: each run writes `dashboard/sync.js`, which the page merges on load. Older state: `python -m jobsearch.ops.backup list` / `restore DAY` |
+| A company shows as failed | Coverage tab + `data/logs/jobsearch.log`; for Greenhouse check `https://boards-api.greenhouse.io/v1/boards/<board>/jobs`; for My Companies add a `careers_url` |
+| "Manual check needed" | the company's careers page has no ATS or JobPosting data: open the link, use Add job by URL with `--jd-file` |
+| Source-health banner | a source returned 0 or far fewer jobs than usual: usually a changed board token or careers page; fix it in `config/companies.yaml` / `my_companies.csv` |
+| SimplifyJobs feed fails each autumn | the repos are renamed yearly (e.g. `Summer2028-Internships`): update the URL in `config/companies.yaml` |
+| LinkedIn alerts: "not set up" | add `IMAP_USER` and `IMAP_APP_PASSWORD` to `.env` (Gmail app password). "IMAP … authentication failed": regenerate the app password. 0 jobs parsed: alerts may be in another folder (`IMAP_FOLDER`) |
+| No macOS notifications | System Settings → Notifications → Script Editor (osascript) → allow; or `notifications.enabled` is false / `--no-notify` |
+| launchd runs don't happen | `./scripts/schedule.sh status`; read `data/logs/launchd-full.log`. "Operation not permitted" → Full Disk Access for `/bin/zsh` (the repo is in ~/Documents) |
+| "another run is in progress" | a run holds `data/run.lock`; it's replaced automatically when that process is gone or > 3 h old |
+| Exit code 75 | offline: nothing was fetched; the next scheduled run retries |
+| A run seems stuck | `kill -USR1 <pid>` prints every thread's stack to the run's stderr / log |
+| Scores look off after editing preferences / resume | `python -m jobsearch.run --rescore` (no fetching) |
+| Repo inside iCloud Drive | `setup.sh` makes `data/` a symlink to `data.nosync/` (never synced; a live SQLite DB must not sync), or set `JOBSEARCH_DATA_DIR` |
