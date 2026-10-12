@@ -11,5 +11,8 @@ inputs/*
 !inputs/*.example.*
 
 # Generated / runtime data
+data
 data/
 dashboard/data.js
+data.nosync/
+dashboard/details/

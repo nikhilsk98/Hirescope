@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -109,6 +109,86 @@ MIGRATIONS: list[str] = [
         first_parsed TEXT NOT NULL
     );
     """,
+    # 2: tracks, levels, cross-source canonical keys, caches, coverage
+    """
+    ALTER TABLE jobs ADD COLUMN track TEXT;
+    ALTER TABLE jobs ADD COLUMN track_evidence TEXT;
+    ALTER TABLE jobs ADD COLUMN track_confidence TEXT;
+    ALTER TABLE jobs ADD COLUMN track_override TEXT;
+    ALTER TABLE jobs ADD COLUMN level TEXT;
+    ALTER TABLE jobs ADD COLUMN level_evidence TEXT;
+    ALTER TABLE jobs ADD COLUMN terms TEXT;
+    ALTER TABLE jobs ADD COLUMN canonical_key TEXT;
+    ALTER TABLE jobs ADD COLUMN location_us INTEGER;
+    ALTER TABLE jobs ADD COLUMN remote_us INTEGER;
+    ALTER TABLE jobs ADD COLUMN source_official INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE jobs ADD COLUMN link_status TEXT;
+    ALTER TABLE jobs ADD COLUMN link_checked_at TEXT;
+    CREATE INDEX jobs_canonical ON jobs(canonical_key);
+    ALTER TABLE job_sources ADD COLUMN canonical_key TEXT;
+    ALTER TABLE job_sources ADD COLUMN detail_fetched_at TEXT;
+    CREATE INDEX job_sources_canonical ON job_sources(canonical_key);
+    ALTER TABLE source_status ADD COLUMN last_ok TEXT;
+    ALTER TABLE source_status ADD COLUMN origin TEXT;
+    ALTER TABLE source_status ADD COLUMN tier INTEGER;
+    ALTER TABLE source_status ADD COLUMN url TEXT;
+    ALTER TABLE source_status ADD COLUMN partial TEXT;
+    ALTER TABLE source_status ADD COLUMN detected_via TEXT;
+    CREATE TABLE http_cache (
+        url TEXT PRIMARY KEY,
+        etag TEXT,
+        last_modified TEXT,
+        fetched_at TEXT NOT NULL
+    );
+    CREATE TABLE company_sources (
+        company_key TEXT PRIMARY KEY,
+        company TEXT NOT NULL,
+        source TEXT NOT NULL,
+        board TEXT,
+        host TEXT,
+        site TEXT,
+        careers_url TEXT,
+        detected_via TEXT NOT NULL,
+        detected_at TEXT NOT NULL,
+        fail_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE link_checks (
+        url TEXT PRIMARY KEY,
+        checked_at TEXT NOT NULL,
+        http_status INTEGER,
+        ok INTEGER,
+        final_url TEXT,
+        note TEXT
+    );
+    CREATE TABLE page_cache (
+        url TEXT PRIMARY KEY,
+        lastmod TEXT,
+        fetched_at TEXT NOT NULL,
+        payload TEXT
+    );
+    """,
+    # 3: job_sources lookups by job (fuzzy-dedupe NOT EXISTS, closed detection) were full scans
+    """
+    CREATE INDEX job_sources_job ON job_sources(job_pk, source);
+    """,
+    # 4: key/value metadata (extraction version + config fingerprint)
+    """
+    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+    """,
+    # 5: Phase 3 - two-track dates, eligibility, deadlines, ATS keywords, similar jobs
+    """
+    ALTER TABLE jobs ADD COLUMN grad_windows TEXT;
+    ALTER TABLE jobs ADD COLUMN start_windows TEXT;
+    ALTER TABLE jobs ADD COLUMN summer_only INTEGER;
+    ALTER TABLE jobs ADD COLUMN eligibility_note TEXT;
+    ALTER TABLE jobs ADD COLUMN deadline TEXT;
+    ALTER TABLE jobs ADD COLUMN deadline_evidence TEXT;
+    ALTER TABLE jobs ADD COLUMN keywords TEXT;
+    ALTER TABLE jobs ADD COLUMN keywords_key TEXT;
+    ALTER TABLE jobs ADD COLUMN ats_coverage REAL;
+    ALTER TABLE jobs ADD COLUMN signals TEXT;
+    ALTER TABLE jobs ADD COLUMN similar TEXT;
+    """,
 ]
 
 
@@ -123,7 +203,7 @@ def company_key(name: str) -> str:
 def connect(path: Path | str) -> sqlite3.Connection:
     if str(path) != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     if str(path) != ":memory:":
@@ -170,15 +250,38 @@ class JobRecord:
     grad_years: list[int]
     flags: dict
     extra: dict
+    track: str | None = None
+    track_evidence: str | None = None
+    track_confidence: str | None = None
+    level: str | None = None
+    level_evidence: str | None = None
+    terms: list[str] = field(default_factory=list)
+    canonical_key: str | None = None
+    location_us: bool | None = None
+    remote_us: bool | None = None
+    source_official: bool = True
+    grad_windows: list[dict] = field(default_factory=list)
+    start_windows: list[dict] = field(default_factory=list)
+    summer_only: bool = False
+    eligibility_note: str | None = None
+    deadline: str | None = None
+    deadline_evidence: str | None = None
 
 
 _JSON_FIELDS = {"min_reqs", "pref_reqs", "skills", "grad_years", "flags", "extra",
-                "breakdown", "gaps", "filter_reasons"}
+                "breakdown", "gaps", "filter_reasons", "terms", "grad_windows", "start_windows", "keywords",
+                "signals", "similar"}
 _EXTRACTED = [f for f in JobRecord.__dataclass_fields__ if f not in ("company", "job_id", "source")]
+# when an official source takes over from an aggregator, these identify the posting too
+_IDENTITY = ["job_id", "source"]
 
 
 def _enc(field: str, value):
-    return json.dumps(value) if field in _JSON_FIELDS and value is not None else value
+    if field in _JSON_FIELDS and value is not None:
+        return json.dumps(value)
+    if isinstance(value, bool):
+        return int(value)
+    return value
 
 
 def decode_row(row: sqlite3.Row) -> dict:
@@ -190,7 +293,7 @@ def decode_row(row: sqlite3.Row) -> dict:
 
 
 def _location_key(loc: str | None) -> str:
-    return " ".join((loc or "").casefold().replace(",", " ").split())
+    return " ".join((loc or "").casefold().replace(",", " ").replace("·", " ").split())
 
 
 def find_fuzzy(conn, rec: JobRecord) -> int | None:
@@ -210,15 +313,38 @@ def find_fuzzy(conn, rec: JobRecord) -> int | None:
     return None
 
 
+def find_by_canonical(conn, rec: JobRecord) -> int | None:
+    """Same posting from another source, identified by the employer ATS + job id parsed from its URL."""
+    if not rec.canonical_key:
+        return None
+    row = conn.execute(
+        "SELECT job_pk FROM job_sources WHERE canonical_key=? ORDER BY rowid LIMIT 1", (rec.canonical_key,)
+    ).fetchone() or conn.execute("SELECT id AS job_pk FROM jobs WHERE canonical_key=? LIMIT 1",
+                                 (rec.canonical_key,)).fetchone()
+    return row["job_pk"] if row else None
+
+
+def _add_source(conn, pk: int, rec: JobRecord, ck: str, now: str) -> None:
+    conn.execute(
+        "INSERT INTO job_sources (job_pk, source, company_key, source_job_id, first_seen, last_seen, canonical_key, "
+        "detail_fetched_at) VALUES (?,?,?,?,?,?,?,?)",
+        (pk, rec.source, ck, rec.job_id, now, now, rec.canonical_key, now if rec.jd_path else None),
+    )
+
+
 def upsert_job(conn: sqlite3.Connection, rec: JobRecord, now: str | None = None) -> tuple[int, str]:
-    """Insert or update one job. Returns (job pk, 'new' | 'updated' | 'seen')."""
+    """Insert or update one job. Returns (job pk, 'new' | 'updated' | 'seen').
+
+    Match order: same source + company + job id -> same canonical ATS key from any source -> fuzzy
+    (company + normalized title + location). An official ATS source replaces an aggregator's data.
+    """
     now = now or utcnow()
     ck = company_key(rec.company)
     row = conn.execute(
         "SELECT job_pk FROM job_sources WHERE source=? AND company_key=? AND source_job_id=?",
         (rec.source, ck, rec.job_id),
     ).fetchone()
-    pk = row["job_pk"] if row else find_fuzzy(conn, rec)
+    pk = row["job_pk"] if row else (find_by_canonical(conn, rec) or find_fuzzy(conn, rec))
 
     if pk is None:
         cols = ["company", "company_key", "job_id", "source", "first_seen", "last_checked",
@@ -227,32 +353,29 @@ def upsert_job(conn: sqlite3.Connection, rec: JobRecord, now: str | None = None)
                 *(_enc(f, getattr(rec, f)) for f in _EXTRACTED)]
         cur = conn.execute(f"INSERT INTO jobs ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", vals)
         pk = cur.lastrowid
-        conn.execute(
-            "INSERT INTO job_sources (job_pk, source, company_key, source_job_id, first_seen, last_seen) VALUES (?,?,?,?,?,?)",
-            (pk, rec.source, ck, rec.job_id, now, now),
-        )
+        _add_source(conn, pk, rec, ck, now)
         return pk, "new"
 
     existing = conn.execute("SELECT * FROM jobs WHERE id=?", (pk,)).fetchone()
-    if row is None:  # fuzzy cross-source match: attach this source, keep the primary record
+    if row is None:
+        _add_source(conn, pk, rec, ck, now)
+    else:
         conn.execute(
-            "INSERT INTO job_sources (job_pk, source, company_key, source_job_id, first_seen, last_seen) VALUES (?,?,?,?,?,?)",
-            (pk, rec.source, ck, rec.job_id, now, now),
+            "UPDATE job_sources SET last_seen=?, miss_count=0, canonical_key=COALESCE(?, canonical_key)"
+            + (", detail_fetched_at=?" if rec.jd_path else "")
+            + " WHERE source=? AND company_key=? AND source_job_id=?",
+            (now, rec.canonical_key, *((now,) if rec.jd_path else ()), rec.source, ck, rec.job_id),
         )
-        conn.execute("UPDATE jobs SET last_checked=? WHERE id=?", (now, pk))
-        return pk, "seen"
 
-    conn.execute(
-        "UPDATE job_sources SET last_seen=?, miss_count=0 WHERE source=? AND company_key=? AND source_job_id=?",
-        (now, rec.source, ck, rec.job_id),
-    )
-    changed = existing["jd_hash"] != rec.jd_hash
+    takeover = rec.source_official and not existing["source_official"] and existing["source"] != rec.source
+    primary = existing["source"] == rec.source and existing["job_id"] == rec.job_id
+    sets: dict = {"last_checked": now}
+    if primary or takeover:
+        sets.update({f: _enc(f, getattr(rec, f)) for f in _EXTRACTED})
+        if takeover:
+            sets.update(job_id=rec.job_id, source=rec.source, company=rec.company)
     reopened = existing["job_status"] == "closed"
-    if existing["source"] == rec.source:
-        sets = {f: _enc(f, getattr(rec, f)) for f in _EXTRACTED}
-    else:  # a secondary source never overwrites the primary's data
-        sets = {}
-    sets["last_checked"] = now
+    changed = (primary or takeover) and existing["jd_hash"] != rec.jd_hash and not takeover
     if changed or reopened:
         status = "updated"
         sets.update(job_status=status, status_changed_at=now)
@@ -266,21 +389,73 @@ def upsert_job(conn: sqlite3.Connection, rec: JobRecord, now: str | None = None)
     return pk, status
 
 
-def mark_missing(conn: sqlite3.Connection, source: str, company: str, seen_ids: set[str], now: str | None = None) -> int:
-    """After a *successful* fetch: bump misses for unseen listings and close jobs missing everywhere.
+def touch_job(conn, source: str, company: str, job_id: str, now: str | None = None) -> tuple[int, str] | None:
+    """Mark an already-stored listing as seen without re-extracting it (detail not re-fetched).
 
-    Returns the number of jobs newly closed.
+    Returns (pk, status) or None if the listing is unknown.
     """
     now = now or utcnow()
     ck = company_key(company)
-    rows = conn.execute(
-        "SELECT job_pk, source_job_id FROM job_sources WHERE source=? AND company_key=?", (source, ck)
-    ).fetchall()
+    row = conn.execute("SELECT job_pk FROM job_sources WHERE source=? AND company_key=? AND source_job_id=?",
+                       (source, ck, job_id)).fetchone()
+    if not row:
+        return None
+    pk = row["job_pk"]
+    conn.execute("UPDATE job_sources SET last_seen=?, miss_count=0 WHERE source=? AND company_key=? AND source_job_id=?",
+                 (now, source, ck, job_id))
+    st = conn.execute("SELECT job_status, repost_count FROM jobs WHERE id=?", (pk,)).fetchone()
+    if st["job_status"] == "closed":
+        conn.execute("UPDATE jobs SET job_status='updated', status_changed_at=?, repost_count=?, last_checked=? "
+                     "WHERE id=?", (now, st["repost_count"] + 1, now, pk))
+        return pk, "updated"
+    conn.execute("UPDATE jobs SET last_checked=?, job_status=CASE WHEN job_status='closed' THEN job_status "
+                 "ELSE 'seen' END WHERE id=?", (now, pk))
+    return pk, "seen"
+
+
+def touch_all(conn, source: str, company: str | None, now: str | None = None) -> int:
+    """A conditional GET returned 304: every listing from (source, company) is still there, unchanged.
+    company=None covers a whole multi-company feed."""
+    now = now or utcnow()
+    if company is None:
+        rows = conn.execute("SELECT company_key, source_job_id FROM job_sources WHERE source=?", (source,)).fetchall()
+    else:
+        rows = conn.execute("SELECT company_key, source_job_id FROM job_sources WHERE source=? AND company_key=?",
+                            (source, company_key(company))).fetchall()
+    for ck, jid in rows:
+        touch_job(conn, source, ck, jid, now)
+    return len(rows)
+
+
+def known_listings(conn, source: str, company: str | None = None) -> dict[str, str | None]:
+    """source job id -> detail_fetched_at, for adapters that can skip re-fetching details."""
+    if company is None:
+        q, args = "SELECT source_job_id, detail_fetched_at FROM job_sources WHERE source=?", (source,)
+    else:
+        q = "SELECT source_job_id, detail_fetched_at FROM job_sources WHERE source=? AND company_key=?"
+        args = (source, company_key(company))
+    return {r[0]: r[1] for r in conn.execute(q, args)}
+
+
+def mark_missing(conn: sqlite3.Connection, source: str, company: str | None, seen_ids: set[str],
+                 now: str | None = None) -> int:
+    """After a *successful* fetch: bump misses for unseen listings and close jobs missing everywhere.
+
+    company=None covers every company for a multi-company feed (e.g. SimplifyJobs).
+    Returns the number of jobs newly closed.
+    """
+    now = now or utcnow()
+    if company is None:
+        rows = conn.execute("SELECT job_pk, company_key, source_job_id FROM job_sources WHERE source=?",
+                            (source,)).fetchall()
+    else:
+        rows = conn.execute("SELECT job_pk, company_key, source_job_id FROM job_sources WHERE source=? AND "
+                            "company_key=?", (source, company_key(company))).fetchall()
     missing = [r for r in rows if r["source_job_id"] not in seen_ids]
     for r in missing:
         conn.execute(
             "UPDATE job_sources SET miss_count = miss_count + 1 WHERE source=? AND company_key=? AND source_job_id=?",
-            (source, ck, r["source_job_id"]),
+            (source, r["company_key"], r["source_job_id"]),
         )
     closed = 0
     for pk in {r["job_pk"] for r in missing}:
@@ -295,6 +470,37 @@ def mark_missing(conn: sqlite3.Connection, source: str, company: str, seen_ids: 
     return closed
 
 
+def mark_missing_ids(conn, source: str, company: str | None, ids: set[str], now: str | None = None) -> int:
+    """Bump misses only for these listings (verified gone), closing jobs missing everywhere. Returns closed."""
+    now = now or utcnow()
+    closed = 0
+    for jid in ids:
+        q = "SELECT job_pk, company_key FROM job_sources WHERE source=? AND source_job_id=?"
+        args: tuple = (source, jid)
+        if company is not None:
+            q += " AND company_key=?"
+            args += (company_key(company),)
+        for r in conn.execute(q, args).fetchall():
+            conn.execute("UPDATE job_sources SET miss_count = miss_count + 1 WHERE source=? AND company_key=? "
+                         "AND source_job_id=?", (source, r["company_key"], jid))
+            if not conn.execute("SELECT 1 FROM job_sources WHERE job_pk=? AND miss_count < ?",
+                                (r["job_pk"], CLOSE_AFTER_MISSES)).fetchone():
+                closed += conn.execute("UPDATE jobs SET job_status='closed', status_changed_at=? WHERE id=? AND "
+                                       "job_status!='closed'", (now, r["job_pk"])).rowcount
+    return closed
+
+
+def relevant_listings(conn, source: str, company: str | None) -> dict[str, str | None]:
+    """Visible (not filtered) open listings for a source/company: job id -> apply url."""
+    q = ("SELECT s.source_job_id, j.apply_url FROM job_sources s JOIN jobs j ON j.id = s.job_pk WHERE s.source=? "
+         "AND j.filtered = 0 AND j.job_status != 'closed'")
+    args: tuple = (source,)
+    if company is not None:
+        q += " AND s.company_key=?"
+        args += (company_key(company),)
+    return {r[0]: r[1] for r in conn.execute(q, args)}
+
+
 def save_scores(conn: sqlite3.Connection, pk: int, **fields) -> None:
     conn.execute(
         f"UPDATE jobs SET {','.join(f'{k}=?' for k in fields)} WHERE id=?",
@@ -303,13 +509,114 @@ def save_scores(conn: sqlite3.Connection, pk: int, **fields) -> None:
 
 
 def set_source_status(conn, company: str, source: str, status: str, error: str | None, job_count: int | None,
-                      now: str | None = None) -> None:
+                      now: str | None = None, **extra) -> None:
+    """status: ok | failed | manual | skipped. extra: origin, tier, url, partial, detected_via."""
+    now = now or utcnow()
+    cols = {"company_key": company_key(company), "company": company, "source": source, "last_checked": now,
+            "status": status, "error": error, "job_count": job_count, **extra}
+    if status == "ok":
+        cols["last_ok"] = now
+    names = list(cols)
+    updates = ",".join(f"{c}=excluded.{c}" for c in names if c not in ("company_key", "source"))
+    conn.execute(f"INSERT INTO source_status ({','.join(names)}) VALUES ({','.join('?' * len(names))}) "
+                 f"ON CONFLICT(company_key, source) DO UPDATE SET {updates}", list(cols.values()))
+
+
+def source_statuses(conn) -> list[dict]:
+    return [dict(r) for r in conn.execute("SELECT * FROM source_status ORDER BY company")]
+
+
+def last_ok(conn, company: str, source: str) -> str | None:
+    row = conn.execute("SELECT last_ok FROM source_status WHERE company_key=? AND source=?",
+                       (company_key(company), source)).fetchone()
+    return row[0] if row else None
+
+
+# --- HTTP conditional-request cache ---------------------------------------------------------------
+def get_http_cache(conn, url: str) -> dict | None:
+    row = conn.execute("SELECT * FROM http_cache WHERE url=?", (url,)).fetchone()
+    return dict(row) if row else None
+
+
+def set_http_cache(conn, url: str, etag: str | None, last_modified: str | None) -> None:
+    conn.execute("INSERT INTO http_cache (url, etag, last_modified, fetched_at) VALUES (?,?,?,?) "
+                 "ON CONFLICT(url) DO UPDATE SET etag=excluded.etag, last_modified=excluded.last_modified, "
+                 "fetched_at=excluded.fetched_at", (url, etag, last_modified, utcnow()))
+
+
+def clear_http_cache(conn, url: str) -> None:
+    conn.execute("DELETE FROM http_cache WHERE url=?", (url,))
+
+
+# --- ATS detection cache (My Companies) ------------------------------------------------------------
+def get_company_source(conn, company: str) -> dict | None:
+    row = conn.execute("SELECT * FROM company_sources WHERE company_key=?", (company_key(company),)).fetchone()
+    return dict(row) if row else None
+
+
+def set_company_source(conn, company: str, source: str, detected_via: str, board: str | None = None,
+                       host: str | None = None, site: str | None = None, careers_url: str | None = None) -> None:
     conn.execute(
-        "INSERT INTO source_status (company_key, company, source, last_checked, status, error, job_count) "
-        "VALUES (?,?,?,?,?,?,?) ON CONFLICT(company_key, source) DO UPDATE SET company=excluded.company, "
-        "last_checked=excluded.last_checked, status=excluded.status, error=excluded.error, job_count=excluded.job_count",
-        (company_key(company), company, source, now or utcnow(), status, error, job_count),
-    )
+        "INSERT INTO company_sources (company_key, company, source, board, host, site, careers_url, detected_via, "
+        "detected_at, fail_count) VALUES (?,?,?,?,?,?,?,?,?,0) ON CONFLICT(company_key) DO UPDATE SET "
+        "company=excluded.company, source=excluded.source, board=excluded.board, host=excluded.host, "
+        "site=excluded.site, careers_url=excluded.careers_url, detected_via=excluded.detected_via, "
+        "detected_at=excluded.detected_at, fail_count=0",
+        (company_key(company), company, source, board, host, site, careers_url, detected_via, utcnow()))
+
+
+def bump_company_source_failure(conn, company: str) -> int:
+    conn.execute("UPDATE company_sources SET fail_count = fail_count + 1 WHERE company_key=?", (company_key(company),))
+    row = conn.execute("SELECT fail_count FROM company_sources WHERE company_key=?", (company_key(company),)).fetchone()
+    return row[0] if row else 0
+
+
+def drop_company_source(conn, company: str) -> None:
+    conn.execute("DELETE FROM company_sources WHERE company_key=?", (company_key(company),))
+
+
+# --- page cache (sitemap/JSON-LD pages) ---------------------------------------------------------------
+def get_page(conn, url: str) -> dict | None:
+    row = conn.execute("SELECT * FROM page_cache WHERE url=?", (url,)).fetchone()
+    return dict(row) if row else None
+
+
+def set_page(conn, url: str, lastmod: str | None, payload: str | None) -> None:
+    conn.execute("INSERT INTO page_cache (url, lastmod, fetched_at, payload) VALUES (?,?,?,?) ON CONFLICT(url) "
+                 "DO UPDATE SET lastmod=excluded.lastmod, fetched_at=excluded.fetched_at, payload=excluded.payload",
+                 (url, lastmod, utcnow(), payload))
+
+
+# --- dead-link checks -------------------------------------------------------------------------------
+def get_link_check(conn, url: str) -> dict | None:
+    row = conn.execute("SELECT * FROM link_checks WHERE url=?", (url,)).fetchone()
+    return dict(row) if row else None
+
+
+def set_link_check(conn, url: str, http_status: int | None, ok: bool | None, final_url: str | None,
+                   note: str | None) -> None:
+    conn.execute("INSERT INTO link_checks (url, checked_at, http_status, ok, final_url, note) VALUES (?,?,?,?,?,?) "
+                 "ON CONFLICT(url) DO UPDATE SET checked_at=excluded.checked_at, http_status=excluded.http_status, "
+                 "ok=excluded.ok, final_url=excluded.final_url, note=excluded.note",
+                 (url, utcnow(), http_status, None if ok is None else int(ok), final_url, note))
+
+
+def get_meta(conn, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def set_meta(conn, key: str, value: str) -> None:
+    conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                 (key, value))
+
+
+def update_extracted(conn, pk: int, rec: "JobRecord") -> None:
+    """Overwrite derived fields (re-extraction); identity, status and history are untouched."""
+    fields = [f for f in _EXTRACTED if f not in ("jd_path", "jd_hash", "source_url", "apply_url", "posted_date",
+                                                 "source_official", "canonical_key")]
+    conn.execute(f"UPDATE jobs SET {','.join(f'{f}=?' for f in fields)} WHERE id=?",
+                 [*(_enc(f, getattr(rec, f)) for f in fields), pk])
 
 
 def record_resume_version(conn, hash_: str, path: str) -> bool:
@@ -327,6 +634,17 @@ def start_run(conn, dry_run: bool) -> int:
 def finish_run(conn, run_id: int, summary: dict) -> None:
     with conn:
         conn.execute("UPDATE runs SET finished_at=?, summary=? WHERE id=?", (utcnow(), json.dumps(summary), run_id))
+
+
+def recent_job_counts(conn, company: str, source: str, runs: int = 5) -> list[int]:
+    """Job counts for (company, source) from recent run summaries (for source-health checks)."""
+    out = []
+    for (summary,) in conn.execute("SELECT summary FROM runs WHERE summary IS NOT NULL AND dry_run=0 "
+                                   "ORDER BY id DESC LIMIT ?", (runs,)):
+        for o in (json.loads(summary).get("per_source") or []):
+            if o.get("company") == company and o.get("source") == source and o.get("ok"):
+                out.append(o.get("jobs", 0))
+    return out
 
 
 def open_jobs(conn) -> list[dict]:

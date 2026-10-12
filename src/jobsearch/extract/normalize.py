@@ -3,12 +3,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 
 from ..config import TitleRules
-
-SENIORITY_WORDS = ["intern", "junior", "senior", "staff", "principal", "lead", "manager",
-                   "director", "head", "architect", "vp", "distinguished", "fellow"]
-
 
 def _words(text: str) -> str:
     text = text.lower().replace("&", " and ")
@@ -17,29 +14,36 @@ def _words(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+@lru_cache(maxsize=8)
+def _abbr_pattern(items: tuple[tuple[str, str], ...]) -> tuple[re.Pattern, dict[str, str]] | None:
+    if not items:
+        return None
+    mapping = {a.lower(): f.lower() for a, f in items}
+    body = "|".join(re.escape(a) for a in sorted(mapping, key=len, reverse=True))
+    return re.compile(rf"(?<![a-z0-9])(?:{body})(?![a-z0-9])"), mapping
+
+
 def normalize_title(title: str, rules: TitleRules) -> str:
     """Lowercase, strip punctuation, expand abbreviations ("Sr. SWE" -> "senior software engineer")."""
+    return _normalize_title(title, tuple(rules.abbreviations.items()))
+
+
+@lru_cache(maxsize=50000)
+def _normalize_title(title: str, abbreviations: tuple[tuple[str, str], ...]) -> str:
     t = _words(title.replace(".", " "))
-    for abbr, full in sorted(rules.abbreviations.items(), key=lambda kv: -len(kv[0])):
-        t = re.sub(rf"(?<![a-z0-9]){re.escape(abbr.lower())}(?![a-z0-9])", full.lower(), t)
+    if pm := _abbr_pattern(abbreviations):
+        pat, mapping = pm
+        t = pat.sub(lambda m: mapping[m.group(0)], t)
     return re.sub(r"\s+", " ", t).strip()
 
 
+@lru_cache(maxsize=4096)
+def _word_re(word: str) -> re.Pattern:
+    return re.compile(rf"(?<![a-z0-9]){re.escape(word.lower())}(?![a-z0-9])")
+
+
 def has_word(text: str, word: str) -> bool:
-    return re.search(rf"(?<![a-z0-9]){re.escape(word.lower())}(?![a-z0-9])", text) is not None
-
-
-def seniority(norm_title: str, rules: TitleRules) -> str:
-    """Best-effort seniority from the normalized title; 'unknown' when nothing indicates it."""
-    for w in SENIORITY_WORDS:
-        if has_word(norm_title, w):
-            return w
-    for n in rules.excluded_level_numerals:
-        if has_word(norm_title, n):
-            return f"level {n}"
-    if has_word(norm_title, "new graduate") or has_word(norm_title, "entry level"):
-        return "entry"
-    return "unknown"
+    return _word_re(word).search(text) is not None
 
 
 def employment_type_from_title(norm_title: str, rules: TitleRules) -> str | None:

@@ -1,0 +1,174 @@
+# Location aliases and country detection. Matching is case-insensitive.
+# Edit freely; no code changes needed.
+
+# Variant -> canonical display name (applied to each location part).
+aliases:
+  nyc: New York, NY
+  new york city: New York, NY
+  new york city, ny: New York, NY
+  manhattan: New York, NY
+  sf: San Francisco, CA
+  san francisco bay area: SF Bay Area, CA
+  sf bay area: SF Bay Area, CA
+  bay area: SF Bay Area, CA
+  silicon valley: SF Bay Area, CA
+  la: Los Angeles, CA
+  dc: Washington, DC
+  washington d.c.: Washington, DC
+  washington, d.c.: Washington, DC
+  dmv: Washington, DC
+  boston metro: Boston, MA
+  greater boston: Boston, MA
+  seattle metro: Seattle, WA
+  greater seattle area: Seattle, WA
+  research triangle: Raleigh, NC
+  south sf: South San Francisco, CA
+  ssf: South San Francisco, CA
+
+# Metro areas usable in preferences.yaml -> preferred_locations. A job matches a metro when any of its US
+# locations contains one of these place names (case-insensitive, whole words).
+metros:
+  Boston: [boston, greater boston, cambridge, somerville, waltham, burlington, lexington, bedford, woburn, quincy,
+    newton, needham, needham heights, watertown, medford, brighton, charlestown, chelsea, everett, malden, natick,
+    framingham, marlborough, westborough, andover, wilmington, billerica, chelmsford, lowell, westford, canton,
+    dedham, braintree, norwood, foxborough, wellesley, brookline, arlington ma, boston metro]
+  Atlanta: [atlanta, alpharetta, marietta, sandy springs, duluth ga, roswell, kennesaw, decatur ga, norcross,
+    peachtree corners, dunwoody, smyrna]
+  Seattle: [seattle, bellevue, redmond, kirkland, bothell, renton, issaquah, tacoma, everett wa, lynnwood, tukwila]
+  SF Bay Area: [san francisco, sf bay area, bay area, south san francisco, oakland, berkeley, emeryville, san mateo,
+    burlingame, foster city, redwood city, menlo park, palo alto, mountain view, sunnyvale, santa clara, cupertino,
+    san jose, milpitas, fremont, los gatos, campbell, san carlos, belmont, brisbane, daly city, pleasanton,
+    san ramon, walnut creek, hayward, newark ca, livermore]
+
+# Phrases that mean "remote, open to the United States".
+remote_us:
+  - remote - us
+  - remote – us
+  - remote-us
+  - remote us
+  - us remote
+  - us-remote
+  - remote (us)
+  - remote (usa)
+  - remote, us
+  - remote, usa
+  - remote, united states
+  - remote - united states
+  - remote in the us
+  - remote within the us
+  - remote within the united states
+  - united states (remote)
+  - united states - remote
+  - us (remote)
+  - usa (remote)
+  - anywhere in us
+  - anywhere in the us
+  - anywhere in the united states
+  - north america (remote)
+  - any state
+  - all us states
+  - remote (any state
+  - us-based remote
+
+# Strings that alone mean the United States.
+us_names: [united states, united states of america, usa, u.s.a., u.s., us, america]
+
+us_states:
+  AL: Alabama
+  AK: Alaska
+  AZ: Arizona
+  AR: Arkansas
+  CA: California
+  CO: Colorado
+  CT: Connecticut
+  DE: Delaware
+  DC: District of Columbia
+  FL: Florida
+  GA: Georgia
+  HI: Hawaii
+  ID: Idaho
+  IL: Illinois
+  IN: Indiana
+  IA: Iowa
+  KS: Kansas
+  KY: Kentucky
+  LA: Louisiana
+  ME: Maine
+  MD: Maryland
+  MA: Massachusetts
+  MI: Michigan
+  MN: Minnesota
+  MS: Mississippi
+  MO: Missouri
+  MT: Montana
+  NE: Nebraska
+  NV: Nevada
+  NH: New Hampshire
+  NJ: New Jersey
+  NM: New Mexico
+  NY: New York
+  NC: North Carolina
+  ND: North Dakota
+  OH: Ohio
+  OK: Oklahoma
+  OR: Oregon
+  PA: Pennsylvania
+  RI: Rhode Island
+  SC: South Carolina
+  SD: South Dakota
+  TN: Tennessee
+  TX: Texas
+  UT: Utah
+  VT: Vermont
+  VA: Virginia
+  WA: Washington
+  WV: West Virginia
+  WI: Wisconsin
+  WY: Wyoming
+  PR: Puerto Rico
+
+# Well-known US cities that often appear without a state.
+us_cities: [new york, san francisco, seattle, boston, austin, chicago, los angeles, san jose, mountain view,
+  palo alto, menlo park, sunnyvale, santa clara, cupertino, redmond, bellevue, kirkland, cambridge, denver,
+  boulder, atlanta, dallas, houston, miami, phoenix, portland, pittsburgh, philadelphia, raleigh, durham,
+  salt lake city, san diego, irvine, oakland, berkeley, brooklyn, jersey city, arlington, mclean, reston,
+  herndon, washington dc, nashville, minneapolis, detroit, columbus, charlotte, st. louis, baltimore,
+  sacramento, san mateo, redwood city, foster city, south san francisco, burlingame, fremont, milpitas,
+  somerville, waltham, lexington, burlington, new haven, providence, ann arbor, madison, madison wi, plano,
+  irving, frisco, scottsdale, tempe, chandler, lehi, provo, boise, orlando, tampa, jacksonville, richmond,
+  huntsville, albuquerque, las vegas, honolulu, anchorage, hillsboro, beaverton, vancouver wa, everett, tacoma,
+  nyc, tarrytown, university park, fort meade, annapolis junction, columbia md, hanover md, chantilly, falls church,
+  alexandria, colorado springs, aurora, el segundo, hawthorne, long beach, costa mesa, santa monica, culver city,
+  pasadena, burbank, torrance, carlsbad, westlake village, thousand oaks, los gatos, campbell, san ramon, pleasanton,
+  livermore, emeryville, cupertino, waukesha, milwaukee, kansas city, omaha, des moines, indianapolis, cincinnati,
+  cleveland, louisville, memphis, new orleans, oklahoma city, tulsa, san antonio, fort worth, el paso, spokane,
+  hartford, stamford, princeton, hoboken, newark, wilmington, rochester, buffalo, albany, syracuse, ithaca]
+
+# Countries and cities that mean "not the US". (Canadian provinces are listed so ", ON" isn't a US state.)
+non_us: [canada, ontario, quebec, british columbia, alberta, toronto, montreal, vancouver, ottawa, waterloo,
+  calgary, united kingdom, uk, england, scotland, wales, london, manchester, edinburgh, cambridge uk, ireland,
+  dublin, india, bengaluru, bangalore, hyderabad, pune, mumbai, chennai, gurgaon, gurugram, noida, new delhi,
+  delhi, germany, berlin, munich, frankfurt, hamburg, france, paris, netherlands, amsterdam, spain, madrid,
+  barcelona, portugal, lisbon, italy, milan, poland, warsaw, krakow, romania, bucharest, serbia, belgrade,
+  switzerland, zurich, geneva, sweden, stockholm, denmark, copenhagen, aarhus, norway, oslo, finland, helsinki,
+  israel, tel aviv, haifa, yokneam, singapore, japan, tokyo, china, beijing, shanghai, shenzhen, hong kong,
+  taiwan, taipei, korea, seoul, australia, sydney, melbourne, new zealand, auckland, brazil, sao paulo,
+  são paulo, mexico, mexico city, guadalajara, argentina, buenos aires, colombia, bogota, chile, philippines,
+  manila, vietnam, indonesia, malaysia, thailand, uae, dubai, saudi arabia, south africa, nigeria, egypt,
+  turkey, istanbul, armenia, yerevan, ukraine, kyiv, czech republic, prague, austria, vienna, belgium,
+  brussels, greece, athens, hungary, budapest, emea, apac, latam, europe, asia, bulgaria, sofia, lviv, kharkiv,
+  odesa, wroclaw, gdansk, poznan, lodz, cluj, cluj-napoca, iasi, timisoara, tallinn, estonia, riga, latvia, vilnius,
+  lithuania, bratislava, slovakia, ljubljana, slovenia, zagreb, croatia, porto, valencia, seville, malaga, lyon,
+  toulouse, nantes, grenoble, sophia antipolis, stuttgart, cologne, koln, dusseldorf, leipzig, dresden, karlsruhe,
+  nuremberg, eindhoven, rotterdam, utrecht, the hague, delft, antwerp, ghent, luxembourg, basel, lausanne, malmo,
+  gothenburg, aalborg, espoo, tampere, oulu, reykjavik, iceland, cork, galway, limerick, belfast, glasgow, bristol,
+  leeds, oxford, reading, nottingham, sheffield, newcastle, mississauga, markham, kitchener, burnaby, edmonton,
+  winnipeg, halifax, quebec city, longueuil, laval, kolkata, ahmedabad, coimbatore, kochi, trivandrum,
+  thiruvananthapuram, jaipur, indore, mysore, mysuru, vadodara, chandigarh, pakistan, lahore, karachi, islamabad,
+  bangladesh, dhaka, sri lanka, colombo, nepal, kathmandu, hanoi, ho chi minh, vnm, bangkok, jakarta,
+  kuala lumpur, penang, cebu, osaka, kyoto, fukuoka, busan, hangzhou, chengdu, guangzhou, nanjing, wuhan, suzhou,
+  xian, dalian, perth, brisbane, adelaide, canberra, wellington, christchurch, uruguay, montevideo, peru, lima,
+  santiago, medellin, ecuador, quito, monterrey, queretaro, tijuana, costa rica, san jose costa rica, panama,
+  cape town, johannesburg, kenya, nairobi, lagos, cairo, morocco, casablanca, tunisia, tunis, jordan, amman,
+  riyadh, qatar, doha, abu dhabi, luxembourg city, ukr, pol, deu, gbr, ind, can, fra, esp, ita, nld, irl, isr,
+  sgp, jpn, aus, bra, mex, chn, kor, twn, rou, bgr, cze, hun, prt, che, swe, dnk, nor, fin, aut, bel]

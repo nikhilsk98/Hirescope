@@ -1,7 +1,12 @@
 """Hard filters. A 'hard' rule hides the job (viewable in the Filtered tab with its reason);
-a 'soft' rule only records an issue that the scorer turns into a penalty. Missing data never fails a rule."""
+a 'soft' rule only records an issue that the scorer turns into a penalty. Missing data never fails a rule.
+
+Two tracks (Co-op/Intern, Full-time) share these rules; level/YOE windows follow preferences.levels/yoe:
+staff+/manager excluded, senior kept as Stretch when it asks <= yoe.match_max years, 7+ years filtered.
+"""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -9,48 +14,59 @@ from rapidfuzz import fuzz
 
 from ..config import Preferences, TitleRules
 from ..extract.normalize import has_word, normalize_title
+from ..extract.dates import Window
+from ..extract.track import COOP, FULL_TIME, UNCLEAR
+
+# phrases that contain level-like words but are not levels
+NON_LEVEL_PHRASES = ("member of technical staff",)
+GRAD_SLACK_MONTHS = 2
+_NEW_GRAD = re.compile(r"\b(new grad(uate)?s?|university grad(uate)?|college grad(uate)?|early career|entry[- ]level|"
+                       r"class of 20\d\d|graduate (software|engineer|developer|program|programme)|rotational|"
+                       r"recent grad(uate)?s?)\b", re.I)
 
 
 @dataclass
 class TitleMatch:
-    kind: str              # "target" | "related" | "none"
+    kind: str              # "core" | "related" | "coop" | "none"
     matched: str | None
     ratio: float
 
 
-def match_title(norm_title: str, prefs: Preferences, rules: TitleRules) -> TitleMatch:
-    best = TitleMatch("none", None, 0.0)
-    for kind, titles in (("target", prefs.target_titles), ("related", prefs.related_titles)):
-        for t in titles:
-            nt = normalize_title(t, rules)
-            # the wanted title as a contiguous phrase -> match ("software engineer, backend" ⊇ "software engineer").
-            # Not a bag of words: "data center electrical engineer" must not match "data engineer".
-            if has_word(norm_title, nt):
-                r = 100.0
-            else:
-                r = fuzz.token_sort_ratio(nt, norm_title)  # set_ratio would let "Engineer" match anything
-            if r >= rules.fuzzy_threshold and (best.kind == "none" or r > best.ratio):
-                best = TitleMatch(kind, t, r)
-        if best.kind == "target":
-            break
-    return best
+def _phrase_or_fuzzy(norm_title: str, phrases: list[str], rules: TitleRules) -> tuple[str | None, float]:
+    best, best_r = None, 0.0
+    for t in phrases:
+        nt = normalize_title(t, rules)  # cached
+        # the wanted title as a contiguous phrase -> match ("software engineer, backend" contains "software engineer").
+        # Not a bag of words: "data center electrical engineer" must not match "data engineer".
+        r = 100.0 if has_word(norm_title, nt) else fuzz.token_sort_ratio(nt, norm_title)
+        if r >= rules.fuzzy_threshold and r > best_r:
+            best, best_r = t, r
+            if r == 100.0:
+                break
+    return best, best_r
 
 
-def location_ok(location: str | None, mode: str, prefs: Preferences) -> bool | None:
-    """True/False, or None when the job's location is unknown."""
-    if not location and mode == "unknown":
-        return None
-    loc = (location or "").casefold()
-    if mode not in prefs.work_modes and mode != "unknown":
-        return False
-    if any(p.casefold() in loc for p in prefs.locations):
-        return True
-    if mode == "remote" and "remote" in prefs.work_modes:
-        countries = [c.casefold() for c in prefs.remote_countries]
-        # "Remote" with no country, or a remote listing naming an accepted country
-        bare = loc.replace("remote", "").strip(" -–,()|")
-        return not bare or any(c in loc for c in countries)
-    return False if prefs.locations else None
+def match_title(norm_title: str, track: str, prefs: Preferences, rules: TitleRules) -> TitleMatch:
+    core = [*prefs.target_titles, *rules.core_titles]
+    related = [*prefs.related_titles, *rules.related_titles]
+    if track in (COOP, UNCLEAR):
+        # "Software Engineering Co-op", "SDE Intern", "Co-op - Backend Development"
+        for w in rules.coop_role_words:
+            if has_word(norm_title, normalize_title(w, rules)):
+                if track == COOP or any(has_word(norm_title, x) for x in ("co op", "intern", "internship")):
+                    return TitleMatch("coop", w, 100.0)
+    for kind, phrases in (("core", core), ("related", related)):
+        m, r = _phrase_or_fuzzy(norm_title, phrases, rules)
+        if m:
+            return TitleMatch(kind, m, r)
+    return TitleMatch("none", None, 0.0)
+
+
+def excluded_words(norm_title: str, prefs: Preferences, rules: TitleRules) -> list[str]:
+    t = norm_title
+    for p in NON_LEVEL_PHRASES:
+        t = t.replace(p, " ")
+    return [w for w in prefs.excluded_title_words if has_word(t, normalize_title(w, rules))]
 
 
 @dataclass
@@ -58,13 +74,21 @@ class RuleResult:
     hidden: bool = False
     reasons: list[str] = field(default_factory=list)       # hard-rule failures (why hidden)
     soft_issues: list[str] = field(default_factory=list)   # soft-rule failures (score penalties)
+    stretch_reasons: list[str] = field(default_factory=list)  # kept, but the label is capped at Stretch
     title: TitleMatch | None = None
     location_ok: bool | None = None
+    track: str = FULL_TIME
+    boosts: list[tuple[str, str]] = field(default_factory=list)   # (kind, reason): new_grad | term | grad_match
+    signals: dict = field(default_factory=dict)                     # new_grad, check_eligibility, start, grad
+
+
+def effective_track(job: dict) -> str:
+    return job.get("track_override") or job.get("track") or FULL_TIME
 
 
 def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime | None = None) -> RuleResult:
     now = now or datetime.now(timezone.utc)
-    res = RuleResult()
+    res = RuleResult(track=effective_track(job))
 
     def fail(rule: str, reason: str):
         mode = getattr(prefs.rules, rule)
@@ -74,32 +98,62 @@ def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime 
     if prefs.company_tiers.is_excluded(job["company"]):
         res.reasons.append(f"Company '{job['company']}' is in excluded companies")
 
-    bad = [w for w in prefs.excluded_title_words if has_word(norm, normalize_title(w, rules))]
-    bad += [f"level {n.upper()}" for n in rules.excluded_level_numerals if has_word(norm, n)]
-    if bad:
+    tracks = prefs.tracks
+    if res.track == COOP and not tracks.coop_intern.enabled:
+        res.reasons.append("Co-op/Intern track is disabled in preferences")
+    if res.track == FULL_TIME and not tracks.full_time.enabled:
+        res.reasons.append("Full-time track is disabled in preferences")
+
+    if bad := excluded_words(norm, prefs, rules):
         fail("seniority", f"Title contains excluded word(s): {', '.join(bad)}")
 
-    res.title = match_title(norm, prefs, rules)
-    if res.title.kind == "none":
-        fail("title", "Title does not match target or related titles")
-
-    res.location_ok = location_ok(job.get("location"), job.get("work_mode") or "unknown", prefs)
-    if res.location_ok is False:
-        fail("location", f"Location '{job.get('location')}' ({job.get('work_mode')}) not in preferred locations/modes")
-
+    level = job.get("level") or "unknown"
     yoe = job.get("yoe_required")
-    if prefs.max_yoe is not None and yoe is not None and yoe > prefs.max_yoe:
-        fail("yoe", f"Requires {yoe:g}+ years (your max: {prefs.max_yoe:g})")
+    y = prefs.yoe
+    if level in prefs.levels.exclude and not bad:
+        fail("seniority", f"Level {level} is excluded ({job.get('level_evidence') or 'from title'})")
+    elif level in prefs.levels.stretch:
+        if yoe is not None and yoe > y.match_max:
+            fail("seniority", f"Senior role requiring {yoe:g}+ years (senior is kept only when ≤ {y.match_max:g})")
+        else:
+            res.stretch_reasons.append("Senior title" + ("" if yoe is not None else " (years not stated)"))
+
+    res.title = match_title(norm, res.track, prefs, rules)
+    if res.title.kind == "none" and (sem := job.get("_semantic_title")):
+        res.title = TitleMatch("semantic", sem["profile"], sem["similarity"] * 100)
+        res.signals["meaning_match"] = sem
+    if res.title.kind == "none":
+        fail("title", "Title does not match core, related, or co-op/intern software titles")
+
+    us, remote_us = job.get("location_us"), job.get("remote_us")
+    mode = job.get("work_mode") or "unknown"
+    if prefs.country.upper() in ("US", "USA"):
+        res.location_ok = None if us is None else bool(us)
+        if us is not None and not us:
+            fail("location", f"Not in the US: {job.get('location') or 'unknown location'}")
+    if mode != "unknown" and mode not in prefs.work_modes and not (mode == "remote" and remote_us):
+        fail("location", f"Work mode '{mode}' not in {prefs.work_modes}")
+
+    if yoe is not None:
+        if yoe >= y.filter_min:
+            fail("yoe", f"Requires {yoe:g}+ years (filtered at {y.filter_min:g}+)")
+        elif yoe > y.match_max:
+            res.stretch_reasons.append(f"Requires {yoe:g}+ years (match window 0–{y.match_max:g})")
 
     et = job.get("employment_type")
-    if et and prefs.employment_types and et not in prefs.employment_types:
-        fail("employment_type", f"Employment type '{et}' not in {prefs.employment_types}")
+    if et in ("contract", "part_time", "temporary"):
+        fail("employment_type", f"Employment type is {et}")
 
     posted = job.get("posted_date")
-    if prefs.max_posting_age_days and posted:
+    if posted:
         age = (now - datetime.fromisoformat(posted)).days
-        if age > prefs.max_posting_age_days:
+        if age > prefs.ghost.stale_days:
+            fail("stale_posting", f"Posted {age} days ago — likely stale (filtered after {prefs.ghost.stale_days} days)")
+        elif prefs.max_posting_age_days and age > prefs.max_posting_age_days:
             fail("posting_age", f"Posted {age} days ago (max {prefs.max_posting_age_days})")
+
+    _two_track(job, prefs, res, fail)
+    _work_authorization(job, prefs, res, fail)
 
     s = prefs.salary
     if s.mode == "hard" and s.min and job.get("salary_max") and job.get("salary_currency") in (None, s.currency) \
@@ -108,3 +162,113 @@ def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime 
 
     res.hidden = bool(res.reasons)
     return res
+
+
+def _fmt_window(w: dict) -> str:
+    a, b = w["start"], w["end"]
+    if a <= "2000-12":
+        return f"by {b}"
+    if b >= "2099-01":
+        return f"{a} or later"
+    return a if a == b else f"{a} – {b}"
+
+
+def _two_track(job: dict, prefs: Preferences, res: RuleResult, fail) -> None:
+    """Spring 2027 co-op/intern and May 2027 full-time rules: summer-only filter, start windows, graduation
+    windows, New Grad and eligibility signals. Unstated dates are uncertain, never a rejection."""
+    t = prefs.tracks
+    title = job.get("title") or job.get("normalized_title") or ""
+    terms = job.get("terms") or []
+    evid = " ".join([title, *terms, *(w.get("evidence") or "" for w in (job.get("start_windows") or [])),
+                     *(w.get("evidence") or "" for w in (job.get("grad_windows") or []))]).lower()
+
+    # graduation window (both tracks)
+    my_grad = (prefs.graduation_date or "")[:7] or None
+    gws = job.get("grad_windows") or []
+    if gws and my_grad:
+        hits = [w for w in gws if Window(w["start"], w["end"], "").contains(my_grad, GRAD_SLACK_MONTHS)]
+        if hits:
+            res.signals["grad"] = {"status": "match", "evidence": hits[0].get("evidence")}
+            res.boosts.append(("grad_match", f"Graduation window {_fmt_window(hits[0])} includes yours ({my_grad})"))
+        else:
+            w = gws[0]
+            res.signals["grad"] = {"status": "mismatch", "evidence": w.get("evidence")}
+            fail("grad_window", f"Requires graduation {_fmt_window(w)}; yours is {my_grad} — “{w.get('evidence')}”")
+    else:
+        res.signals["grad"] = {"status": "not stated"}
+
+    sws = job.get("start_windows") or []
+    if res.track == COOP:
+        if t.coop_intern.filter_summer_only and job.get("summer_only"):
+            fail("summer_only", "Summer-only internship (your full-time track starts "
+                                f"{t.full_time.start_from}; summer-only is filtered in preferences)")
+        lo, hi = t.coop_intern.start_window
+        if sws:
+            ok = [w for w in sws if lo <= w["start"][:7] <= hi]
+            if ok:
+                res.signals["start"] = {"status": "in window", "evidence": ok[0].get("evidence")}
+            else:
+                res.signals["start"] = {"status": "outside window", "evidence": sws[0].get("evidence")}
+                fail("start_window", f"Starts {_fmt_window(sws[0])}, outside your co-op window {lo} – {hi}")
+        else:
+            res.signals["start"] = {"status": "not stated"}
+        if any(term.lower() in evid for term in t.coop_intern.boost_terms):
+            res.boosts.append(("term", "States a Spring 2027 / January 2027 term"))
+    elif res.track == FULL_TIME:
+        start_from = t.full_time.start_from
+        if sws:
+            if all(w["end"][:7] < start_from for w in sws):
+                res.signals["start"] = {"status": "too early", "evidence": sws[0].get("evidence")}
+                fail("start_window", f"Starts {_fmt_window(sws[0])}, before your {start_from} start")
+            else:
+                res.signals["start"] = {"status": "ok", "evidence": sws[0].get("evidence")}
+        else:
+            res.signals["start"] = {"status": "not stated"}
+        if any(term.lower() in evid for term in t.full_time.boost_terms):
+            res.boosts.append(("term", "States Class of 2027 / 2027 start"))
+        if _NEW_GRAD.search(title) or job.get("source") == "simplify_newgrad":
+            res.signals["new_grad"] = True
+            res.boosts.append(("new_grad", "New Grad / early-career role (top priority)"))
+    if job.get("eligibility_note"):
+        res.signals["check_eligibility"] = job["eligibility_note"]
+
+
+def _work_authorization(job: dict, prefs: Preferences, res: RuleResult, fail) -> None:
+    """Only what the JD explicitly states (flags default to 'Not stated'; silence never filters anything).
+
+    Full-time: no sponsorship (if you need it), US citizens / US persons only (if you aren't one), or security
+    clearance required -> filtered with the quote. Co-op/Intern: citizens / US persons only or clearance required
+    -> filtered; "no sponsorship" alone is kept with a "Check eligibility (CPT/OPT)" flag, since co-ops and
+    internships are often allowed on CPT.
+    """
+    auth = prefs.work_authorization
+    flags = job.get("flags") or {}
+    spons = flags.get("sponsorship") or {}
+    cit = flags.get("citizenship") or {}
+    clr = flags.get("clearance") or {}
+    q = lambda f: f" — “{f.get('evidence')}”" if f.get("evidence") else ""  # noqa: E731
+    if auth.us_citizen is False and cit.get("value", "").startswith(("US citizenship required", "US person required")):
+        fail("work_authorization", f"{cit['value']}{q(cit)}")
+    if auth.us_citizen is False and clr.get("value") == "Clearance required":
+        fail("work_authorization", f"Security clearance required{q(clr)}")
+    if auth.needs_sponsorship and spons.get("value") == "No sponsorship":
+        if res.track == COOP:
+            res.signals["check_cpt_opt"] = spons.get("evidence") or "States no visa sponsorship"
+        else:
+            fail("work_authorization", f"States no visa sponsorship{q(spons)}")
+
+
+def quick_relevant(title: str, location: str | None, prefs: Preferences, rules: TitleRules) -> bool:
+    """Cheap pre-check before fetching a job's details: plausible title for either track, not an
+    excluded level, and not clearly outside the US. Errs on the side of fetching."""
+    from ..extract.locations import normalize_location
+    from ..extract.track import classify_track
+    norm = normalize_title(title, rules)
+    track = classify_track(title).track
+    if match_title(norm, track, prefs, rules).kind == "none":
+        return False
+    if excluded_words(norm, prefs, rules):
+        return False
+    if prefs.country.upper() in ("US", "USA") and location and normalize_location(location).us is False:
+        return False
+    return True

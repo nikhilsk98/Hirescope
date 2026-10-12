@@ -64,3 +64,11 @@ def html_to_text(raw: str) -> str:
     lines = [ln for ln in lines if ln != "-"]
     text = "\n".join(lines)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+_BULLET = re.compile(r"^[ \t]*(?:[•·◦▪▫‣⁃●○■□➢➤►–—]|\*|\d{1,2}[.)])[ \t]+", re.M)
+
+
+def normalize_bullets(text: str) -> str:
+    """Turn '• item', '* item', '1. item', '– item' lines into '- item' so requirement parsing sees bullets."""
+    return _BULLET.sub("- ", text or "")

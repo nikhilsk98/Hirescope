@@ -3,13 +3,14 @@
 A local, single-user job-search pipeline for macOS: discovery → dedupe → scoring → static HTML dashboard →
 per-job "job package" export. The core pipeline makes **zero LLM calls** and sends no personal data anywhere.
 
-> Status: **Phase 1 (vertical slice)**. Greenhouse adapter, SQLite, hard filters, skill + semantic scoring,
-> dashboard with day tabs, job-package export. Later phases add more sources, the watchlist, feedback, scheduling.
+> Status: **Phase 3**. Two tracks (Spring 2027 co-op/intern + May 2027 full-time) with their own rules and dashboard
+> workspaces, 300 verified seed companies + Amazon, Netflix and SimplifyJobs, the My Companies watchlist, ATS keyword
+> capture, freshness priority, meaning-based pre-filter, skill-gap trends, Apply Today, More like this, deadlines.
 
 ## Setup
 
 ```sh
-./scripts/setup.sh                       # venv (.venv), dependencies, PYTHONPATH hook
+./scripts/setup.sh                       # venv at ~/.venvs/hirescope, dependencies, editable install
 cp inputs/preferences.example.yaml inputs/preferences.yaml      # then edit
 cp inputs/master_resume.example.md inputs/master_resume.md      # then replace with YOUR resume
 ```
@@ -18,17 +19,19 @@ cp inputs/master_resume.example.md inputs/master_resume.md      # then replace w
 Keep its `## Experience / ## Projects / ## Coursework / ## Education / ## Skills` headings, `### ` entry headings
 and `- ` bullets.
 
-> **Why no `pip install -e .`?** On this Mac, new `.pth` files in the venv get the `hidden` file flag, and
-> Python 3.12 skips hidden `.pth` files, so the editable install silently stops working. `setup.sh` instead adds
-> `src/` to `PYTHONPATH` in `.venv/bin/activate`, and `scripts/run.sh` sets it itself.
+> **Why is the venv outside the repo?** This repo lives in `~/Documents`, which iCloud Drive syncs. Inside a
+> synced folder, macOS flags new `.pth` files as hidden and Python 3.12 skips hidden `.pth` files, so an editable
+> install silently stops working (and every installed file gets uploaded). The venv defaults to
+> `~/.venvs/hirescope`; set `JOBSEARCH_VENV` to put it elsewhere.
 
 ## Usage
 
 ```sh
 ./scripts/run.sh                         # full run, writes dashboard/data.js
-source .venv/bin/activate && python -m jobsearch.run --verbose     # same thing
+source ~/.venvs/hirescope/bin/activate && python -m jobsearch.run --verbose     # same thing
 python -m jobsearch.run --company "Figma" --verbose               # one company
 python -m jobsearch.run --source greenhouse --dry-run             # fetch + score, write nothing
+python -m jobsearch.run --all                                     # ignore tier schedules this run
 python -m jobsearch.run --resume path.md --prefs path.yaml        # alternate inputs
 ```
 
@@ -36,13 +39,118 @@ Then double-click `dashboard/index.html` (opens via `file://`, no server). The e
 source succeeded, `1` when any failed (the run still completes and the dashboard flags the missing coverage),
 and `2` for missing or invalid inputs.
 
+### Two tracks
+Every job gets a `track`: **Co-op/Intern**, **Full-time**, or **Unclear**, decided by (in order) the title,
+the employment type the source states, an internships-only feed, then JD wording. The evidence is stored
+and shown. The dashboard's track switch (Co-op/Intern · Full-time · Both) is on every view; Unclear jobs
+appear in both with a "?" badge. Internship terms ("Spring 2027", "Jan 2027 start") are extracted too.
+
+Level rules (`config/levels.yaml`, `preferences.yaml → levels / yoe`): entry and mid both match;
+senior is a **Stretch** when it asks ≤ 5 years, otherwise filtered; 7+ years is filtered; staff, principal,
+distinguished, director, manager, architect, head of are excluded. Company level names map to one scale
+(Amazon SDE I/II/III, Google L3–L5 and SWE III, Microsoft 59–64, Meta E3–E5, Apple ICT2–4). Locations are
+normalized with `config/locations.yaml` (NYC → New York, NY; "US Remote" → Remote (US)); non-US jobs are
+filtered and unknown locations are left uncertain.
+
+### Sources
+
+| Source | How | Notes |
+|---|---|---|
+| Greenhouse, Lever, Ashby | official public job-board APIs | full JD in one call; ETag/304 skips unchanged boards |
+| Workday | the `cxs` JSON every `*.myworkdayjobs.com` page uses | US location facet + role keyword searches; JD fetched only for relevant jobs, cached 7 days |
+| SmartRecruiters | public Posting API (`country=us`) | JD fetched only for relevant jobs |
+| Amazon | `amazon.jobs/en/search.json` (best effort) | software-development category + intern/co-op/new-grad searches |
+| Netflix | careers sitemap + schema.org `JobPosting` JSON-LD | its JSON search API is not public; pages cached by `lastmod` |
+| SimplifyJobs | `listings.json` from `SimplifyJobs/Summer2027-Internships` (incl. off-season) and `SimplifyJobs/New-Grad-Positions` | aggregator; JD pulled from the linked employer ATS for new relevant listings (capped per run). Repo names change yearly — update the URLs in `config/companies.yaml` |
+| Custom careers pages | `JobPosting` JSON-LD on the page and its job links | robots.txt respected; never logs in |
+| Add job by URL | any of the above, or a pasted JD | for school co-op boards etc. |
+
 ### Adding a company
-Edit `config/companies.yaml` only:
+`config/companies.yaml` holds ~300 companies generated by `scripts/build_seed_companies.py` from SimplifyJobs
+employer links plus a curated list, **each verified live** (candidates that failed are in
+`config/companies_unverified.yaml` with the reason). Add one entry to add a company:
 ```yaml
 - {name: Stripe, source: greenhouse, board: stripe, tier: 2}
+- {name: NVIDIA, source: workday, host: nvidia.wd5.myworkdayjobs.com, board: nvidia, site: NVIDIAExternalCareerSite, tier: 1}
 ```
-`board` is the token in `https://boards-api.greenhouse.io/v1/boards/<board>/jobs`. Tiers in
-`preferences.yaml → company_tiers` override the `tier` here.
+Tiers: **1** every run (deeper pagination), **2** once a day, **3** every 3 days; `preferences.yaml →
+company_tiers` overrides. Last-checked times are tracked per company. `--all` ignores the schedule.
+
+### My Companies watchlist
+`inputs/my_companies.csv` (gitignored; see `inputs/my_companies.example.csv`):
+```csv
+company,careers_url,notes
+Stripe,,
+NVIDIA,https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite,
+```
+Every row is checked **every run** with full pagination. The job system is auto-detected in this order:
+cached detection → `careers_url` is an ATS URL → seed list → SimplifyJobs-derived directory → ATS links on the
+careers page → company-name probes (Greenhouse, Lever, Ashby, SmartRecruiters) → JSON-LD on the careers page →
+**Manual check needed** (shown with a direct link, never dropped). A cached detection that fails is re-detected.
+Test one company: `python -m jobsearch.run --company "Stripe" --verbose`.
+
+### Add job by URL
+```sh
+./scripts/add_url.sh "https://jobs.lever.co/acme/…"                     # ATS API or JSON-LD
+./scripts/add_url.sh "https://school.example/coop/123" --company Acme --title "Software Co-op" \
+    --jd-file jd.txt --track coop_intern                                 # manual: paste the JD yourself
+```
+The dashboard's "Add job by URL" box copies this command for you. Added jobs are scored and tracked like any
+other; if an ATS adapter later finds the same posting, the records merge.
+
+### Coverage
+The header shows "X of Y companies/sources checked successfully this run". The **Coverage** tab lists every
+company with status (OK / Failed / Manual check / Not due), source, how it was detected, last checked time,
+and open roles. Partial listings (page caps) are labeled and never close jobs. Apply links of visible jobs
+are checked (rate-limited, cached 24h); broken ones get a badge instead of being hidden.
+
+## Dashboard
+
+`dashboard/index.html` (double-click; `file://`, no server, no network calls).
+- **Co-op / Internships** and **Full-time** tabs at the top are separate workspaces (own view, filters, sort,
+  search, Apply Today, stats); `#coop` / `#fulltime` are bookmarkable. Unclear jobs show in both with a "?" badge
+  and **Move to Co-op / Move to Full-time** (saved in the browser and included in Export statuses).
+- Sidebar views: Last 24h (default when it has jobs), Apply Today, All Jobs, My Companies, Shortlisted, Closing Soon,
+  Skill Gaps, Missed Matches (weekly false-negative review), Filtered Out (with reasons), Coverage.
+- Cards (score ring, label, badges, ATS meter) or a sortable table; Comfortable / Compact density.
+- Filter chips (company, tier, label, level, work mode, location, status, flags, posted within, min score);
+  sort by Newest posted, Best JD match, Overall, ATS coverage, Deadline, Company (secondary: newest posted).
+- Detail panel: Overview, Requirements (✓ / ✗ / ? per line), Keywords, Score breakdown, Full JD (keywords
+  highlighted, Jump to requirements), Similar jobs; actions Generate Resume, Open Application, Shortlist, Skip with
+  reason, status, LinkedIn search, Levels.fyi / Glassdoor / eng-blog links.
+- Keys: `j`/`k`, `Enter`, `s` shortlist, `x` skip, `o` open, `g` package, `/` search, `1`/`2` tabs, `?` help.
+- Statuses save instantly in the browser; **Export statuses** downloads `jobsearch-statuses.json` (import into the
+  pipeline is Phase 4).
+- Data: `dashboard/data.js` holds compact summaries; per-job details load on demand from `dashboard/details/`.
+
+## Two-track rules
+
+| | Co-op / Intern | Full-time |
+|---|---|---|
+| Titles | intern/co-op titles with a software word (`coop_role_words`) | core + related titles (`title_rules.yaml`), plus meaning-based rescues |
+| Start | stated start must fall in Dec 2026 – Mar 2027 (`tracks.coop_intern.start_window`), else a soft penalty; unknown = uncertain | stated start before May 2027 is a soft penalty |
+| Filtered | summer-only internships (`filter_summer_only`) | — |
+| Boosts | Spring 2027 / Jan 2027 terms; extra freshness urgency (×1.5) | New Grad / University Grad / Class of 2027 (badge + boost), 2027-start terms |
+| Both | graduation windows ("graduating between…", "Class of 2026") must include your date (±2 months) or the job is filtered with the quote; "no more than 1 year of experience" lines are kept with a **Check eligibility** flag; levels: entry and mid match, senior ≤ 5 years is Stretch, 7+ years / staff+ / managers filtered |
+
+**Freshness** is an additive bonus (`freshness:` in preferences): biggest in the first 24h, smaller to 72h, then
+decaying; capped so a fresh Weak job can never outrank a clearly stronger one by more than the cap. Missing posting
+dates use the discovery time only for jobs that appeared after the source's first scan, labeled "Discovered …
+(posting date unknown)"; otherwise there is no bonus. **Ghost-job signals** (old postings, reposts, talent-pool
+wording) give a penalty and a badge.
+
+**Meaning-based pre-filter**: jobs hidden only by the title rule whose titles look technical are compared (local
+embeddings) with a target-role profile and contrast profiles (hardware, mechanical, chip design, sales, …); close
+matches are kept with a "Meaning match" badge. Tune `prefilter.threshold` / `margin`.
+
+**ATS keywords**: extracted with the JD's exact wording (`config/ats_keywords.yaml` + `skills_synonyms.yaml`, both
+directions), tagged required / preferred / mentioned, weighted by section and frequency, compared with your resume as
+matched / synonym / missing with the resume line as evidence. Coverage measures keyword overlap, not your chance of
+passing an ATS; missing keywords are gaps, never suggestions to add something you don't have.
+
+**Optional sponsorship history** (`sponsorship_history.enabled`, off by default): put a USCIS H-1B Employer Data
+Hub CSV you downloaded at `inputs/h1b_employer_data.csv`; matched companies show past approvals as company history,
+never as job-level eligibility.
 
 ## How scoring works
 
@@ -68,14 +176,14 @@ top 8 JD lines' best resume match. This is a heuristic.
 Flags (sponsorship, citizenship, clearance) are set only when the JD states them explicitly, and the dashboard
 quotes the sentence. Otherwise they read "Not stated".
 
-## Job package format (v1, stable contract for the future resume builder)
+## Job package format (v2, stable contract for the future resume builder)
 
 The **Generate Resume** button downloads `Company_Role_JobID.md`, copies it to the clipboard, and sets the job's
 status to "package exported". Format:
 
 ```markdown
 ---
-package_format: 1
+package_format: 2
 company: ...
 title: ...
 job_id: '...'
@@ -92,6 +200,7 @@ label: Strong
 ## Minimum requirements
 ## Preferred requirements
 ## Skills required
+## ATS keywords
 ## My matching evidence
 ## Gaps
 ## Flags
@@ -99,7 +208,9 @@ label: Strong
 
 The front-matter keys and section names/order are fixed (`output/packages.py`: `FRONT_MATTER_KEYS`,
 `SECTIONS`). JD lines that look like Markdown headings are escaped (`\## ...`) so they can't be mistaken for
-sections. `parse_package()` is the reference parser.
+sections. `parse_package()` is the reference parser. v2 added **ATS keywords**: a `Coverage: N% (required a/b)` line,
+then one line per keyword: `JD exact term | required|preferred|mentioned | matched|synonym|missing | weight w
+[| resume says X] [| evidence (section): resume line]`.
 
 ## Data & storage
 
@@ -118,8 +229,21 @@ that don't list it; a failed fetch never closes anything. A closed job that reap
 
 | Request | When | Data sent |
 |---|---|---|
-| `GET boards-api.greenhouse.io/v1/boards/<board>/jobs?content=true` | each run, per Greenhouse company | none (public API; User-Agent identifies the tool) |
+| `GET boards-api.greenhouse.io/v1/boards/<board>/jobs?content=true` (conditional) | per Greenhouse company, on its tier schedule | none |
+| `GET api.lever.co/v0/postings/<company>?mode=json` (conditional) | per Lever company | none |
+| `GET api.ashbyhq.com/posting-api/job-board/<board>` (conditional) | per Ashby company | none |
+| `POST <tenant>.wdN.myworkdayjobs.com/wday/cxs/<tenant>/<site>/jobs` + `GET …/job/<path>` | per Workday company (detail only for relevant new jobs) | search keywords ("software", "intern"…) and the site's US facet id |
+| `GET api.smartrecruiters.com/v1/companies/<id>/postings[/<id>]` | per SmartRecruiters company | none |
+| `GET www.amazon.jobs/en/search.json?...` | Amazon | search keywords |
+| `GET explore.jobs.netflix.net/careers/sitemap…` + job pages | Netflix (pages only when new/changed) | none |
+| `GET raw.githubusercontent.com/SimplifyJobs/…/listings.json` (conditional) | SimplifyJobs feeds | none |
+| `GET <careers page>` and `/robots.txt` | My Companies custom pages, Add job by URL | none |
+| board-name probes (Greenhouse/Lever/Ashby/SmartRecruiters) | My Companies detection, only when not cached | the company name as a slug |
+| `GET <apply URL>` | dead-link check, visible jobs, at most once per 24h each | none |
 | Hugging Face model download (`sentence-transformers/all-MiniLM-L6-v2`) | first run only; later runs load from the local cache | none |
+
+All requests use per-host rate limits, timeouts, retries with backoff, and the User-Agent
+`jobsearch-local/0.2`. No request carries resume content or personal data.
 
 The dashboard makes no network calls (enforced by its Content-Security-Policy). Links you click (apply,
 LinkedIn search) open in your browser as normal.
@@ -127,12 +251,16 @@ LinkedIn search) open in your browser as normal.
 ## Tests
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m pytest -q
+~/.venvs/hirescope/bin/python -m pytest -q
 ```
 All test data is mock data labeled DEMO (`tests/fixtures/`). Tests need no network and no embedding model.
 
 ## Troubleshooting
 
-- `No module named 'jobsearch'`: use `scripts/run.sh`, or `source .venv/bin/activate` (which sets `PYTHONPATH`).
+- `No module named 'jobsearch'`: use `scripts/run.sh`, or re-run `scripts/setup.sh` (editable install into `~/.venvs/hirescope`).
+- **Repo inside iCloud Drive** (Desktop & Documents sync): iCloud uploads and slows every file the pipeline
+  writes, and a live SQLite database can be corrupted by sync. `setup.sh` detects this and makes `data/` a
+  symlink to `data.nosync/`, which iCloud never syncs. Or set `JOBSEARCH_DATA_DIR=/some/local/path`.
+- A run seems stuck: `kill -USR1 <pid>` prints every thread's stack to the run's stderr / log.
 - A company shows as failed: check `data/logs/jobsearch.log`; verify the board token at
   `https://boards-api.greenhouse.io/v1/boards/<board>/jobs`.

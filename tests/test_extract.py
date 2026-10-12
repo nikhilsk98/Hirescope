@@ -2,8 +2,7 @@
 import pytest
 
 from jobsearch.extract.flags import extract_flags
-from jobsearch.extract.normalize import (clean_location, employment_type_from_title, normalize_title, parse_salary,
-                                         seniority, work_mode)
+from jobsearch.extract.normalize import employment_type_from_title, normalize_title, parse_salary, work_mode
 from jobsearch.extract.requirements import parse_degree, parse_grad_years, parse_yoe, split_requirements
 from jobsearch.extract.skills import extract_skills
 from jobsearch.extract.text import html_to_text
@@ -117,14 +116,11 @@ def test_skills_synonyms_and_short_alias_rules(cfg):
 def test_normalize_title_and_seniority(cfg):
     n = normalize_title("Sr. SWE, ML Platform", cfg.title_rules)
     assert n == "senior software engineer machine learning platform"
-    assert seniority(n, cfg.title_rules) == "senior"
-    assert seniority(normalize_title("Software Engineer III", cfg.title_rules), cfg.title_rules) == "level iii"
     assert employment_type_from_title(normalize_title("SWE Intern", cfg.title_rules), cfg.title_rules) == "internship"
     assert employment_type_from_title(normalize_title("Software Engineer, New Grad", cfg.title_rules), cfg.title_rules) == "new_grad"
 
 
 def test_location_and_work_mode():
-    assert clean_location("SF, CA | NYC; SF, CA • Seattle") == "SF, CA · NYC · Seattle"
     assert work_mode("Remote - US") == "remote"
     assert work_mode("Boston, MA", "This is a hybrid role") == "hybrid"
     assert work_mode("Boston, MA", "We run a hybrid cloud") == "onsite"
@@ -138,3 +134,30 @@ def test_resume_parsing(resume):
     assert "CI/CD" in resume.skills  # evidenced by "GitHub Actions" in a bullet, not listed
     assert resume.skill_evidence["Kubernetes"].startswith("Containerized")
     assert len(resume.version_hash) == 16
+
+
+def test_unicode_bullets_are_requirements():
+    from jobsearch.extract.text import normalize_bullets
+    text = normalize_bullets("Basic Qualifications\n• 3+ years of software engineering experience\n• Python\n"
+                             "Preferred Qualifications\n* Kafka\n1. AWS")
+    r = split_requirements(text)
+    assert r.minimum == ["3+ years of software engineering experience", "Python"] and r.preferred == ["Kafka", "AWS"]
+
+
+@pytest.mark.parametrize("min_head,pref_head", [
+    ("What We Value", "Technologies We Use"),
+    ("What we need to see", "Ways to stand out from the crowd"),
+    ("You might thrive in this role if you", "What will give you a competitive edge (preferred qualifications)"),
+])
+def test_more_requirement_headings(min_head, pref_head):
+    text = f"Core Responsibilities\n- Build things\n{min_head}\n- Python\n{pref_head}\n- Kafka\nWhat we offer\n- Lunch"
+    r = split_requirements(text)
+    assert r.minimum == ["Python"] and r.preferred == ["Kafka"]
+
+
+def test_markdown_jd_headings():
+    from jobsearch.extract.text import normalize_bullets
+    text = normalize_bullets("# In this role, you will:\n* Build\n# To succeed in this role, you will need:\n* Python\n"
+                             "##\n# Nice to have:\n* Kafka")
+    r = split_requirements(text)
+    assert r.minimum == ["Python"] and r.preferred == ["Kafka"]

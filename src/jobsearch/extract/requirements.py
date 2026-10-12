@@ -8,19 +8,31 @@ _MIN_HEAD = re.compile(
     r"^(minimum|basic|required|requirements|qualifications|what you('|’)ll need|what we('|’)re looking for|"
     r"you (might|may|should) be a (good )?fit|you have|about you|who you are|what you bring|must have|"
     r"you('|’)ll thrive|you will thrive|skills and experience|your background|we('|’)re looking for|"
-    r"we('|’)d love to hear from you|what we look for|what you('|’)ll bring|you should have|who we('|’)re looking for)",
+    r"we('|’)d love to hear from you|what we look for|what you('|’)ll bring|you should have|who we('|’)re looking for|"
+    r"what we require|what we value|what we need to see|you might thrive|what you have|what you need|what you should have|"
+    r"your skills|to thrive in this role|education and experience|knowledge and skills|knowledge, skills|"
+    r"essential qualifications|experience$|what we are looking for|what makes you a good fit|we('|’)re excited about you|"
+    r"who you (might )?be|skills you('|’)ll need|essential (skills|requirements)|key qualifications|job requirements|"
+    r"what you('|’)ll need to succeed|skills and qualifications|the ideal candidate|qualifications and experience|"
+    r"to succeed in this role|to be successful|you('|’)ll need|you will need)",
     re.IGNORECASE,
 )
 _PREF_HEAD = re.compile(
     r"^(preferred|nice to have|bonus|nice-to-have|pluses|it('|’)s a plus|strong candidates may also|"
     r"extra credit|ideally|additional qualifications|while not required|(it('|’)s )?an? (added )?plus|"
-    r"bonus points|even better|we('|’)d (also )?love it if)",
+    r"bonus points|even better|we('|’)d (also )?love it if|ways to stand out|what will give you a competitive edge|"
+    r"desirable|desired skills|the extras|what will set you apart|technologies we use|our (tech )?stack|tech stack|"
+    r"good to have|would be a plus|additional skills)",
     re.IGNORECASE,
 )
 _OTHER_HEAD = re.compile(
     r"^(responsibilities|what you('|’)ll do|about the (role|team|company)|benefits|compensation|"
     r"the role|in this role|your role|perks|why join|how we|logistics|deadline|annual salary|"
-    r"the (expected )?(base )?(salary|pay)|pay range|equal opportunity|location)",
+    r"the (expected )?(base )?(salary|pay)|pay range|equal opportunity|location|what you('|’)ll be doing|"
+    r"what you will (be )?do(ing)?|what you might do|core responsibilities|your core responsibilities|key responsibilities|"
+    r"essential duties|you will$|how you('|’)ll make an impact|a typical day|our principles|you('|’)re excited about this|"
+    r"what we offer|health|financial benefits|time off|work schedule|additional information|available locations|"
+    r"to apply|see below for)",
     re.IGNORECASE,
 )
 
@@ -41,8 +53,8 @@ def split_requirements(text: str) -> Requirements:
     req = Requirements()
     bucket: list[str] | None = None
     for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
+        line = re.sub(r"^#{1,6}\s*", "", raw.strip()).strip()   # Markdown headings ("# Nice to have:")
+        if not line or set(line) <= {"#", "*", "-", "_"}:
             continue
         if _is_heading(line):
             h = line.rstrip(":").strip()

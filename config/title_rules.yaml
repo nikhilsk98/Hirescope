@@ -1,9 +1,13 @@
-# Applied to titles before matching. Keys are lowercase whole words/phrases.
+# Title rules (two tracks: Co-op/Intern and Full-time). Applied to normalized titles:
+# lowercase, punctuation removed, abbreviations expanded ("Sr. SWE" -> "senior software engineer").
+# Levels (entry/mid/senior/staff+) come from config/levels.yaml, not from here.
+
 abbreviations:
   sr: senior
   jr: junior
   swe: software engineer
   sde: software development engineer
+  sdet: software development engineer in test
   eng: engineer
   engr: engineer
   ml: machine learning
@@ -11,18 +15,70 @@ abbreviations:
   ai: artificial intelligence
   dev: developer
   mgr: manager
+  fullstack: full stack
+  front end: frontend
+  back end: backend
   "new grad": new graduate
   ng: new graduate
+  coop: co op
+  mts: member of technical staff
 
-# Level numerals in titles that imply more experience than entry level.
-# "Software Engineer III" -> treated like a seniority word.
-excluded_level_numerals: [iii, iv, v, "3", "4", "5"]
+# Full-time track: a title containing any of these phrases (or a close fuzzy match) is a match,
+# with or without a level ("Software Engineer", "Software Engineer II", "Backend Engineer, Payments").
+core_titles:
+  - software engineer
+  - software engineering
+  - software developer
+  - software development engineer
+  - software development engineering
+  - backend engineer
+  - frontend engineer
+  - full stack engineer
+  - full stack developer
+  - backend developer
+  - frontend developer
+  - application developer
+  - applications developer
+  - platform engineer
+  - cloud engineer
+  - distributed systems engineer
+  - web developer
+  - member of technical staff     # common SWE title at AI labs; "staff" here is not a level
 
-# rapidfuzz token_set_ratio threshold (0-100) for a title to count as matching
+related_titles:
+  - product engineer
+  - infrastructure engineer
+  - site reliability engineer
+  - devops engineer
+  - data engineer
+  - machine learning engineer
+  - mobile engineer
+  - ios engineer
+  - android engineer
+  - java developer
+  - net developer          # ".NET Developer" normalizes to "net developer"
+  - python developer
+  - javascript developer
+  - react developer
+  - salesforce developer
+  - cloud developer
+  - ui developer
+  - ui engineer
+  - web engineer
+  - integration engineer
+  - build and release engineer
+
+# Co-op/Intern track: an intern/co-op title matches when it also contains one of these words
+# ("Software Engineering Co-op", "SDE Intern", "Spring 2027 Co-op - Backend").
+coop_role_words: [software, developer, software development, sde, swe, backend, frontend,
+  full stack, web, cloud, platform, programming, programmer, computer science,
+  infrastructure, devops, data engineering, machine learning]
+
+# rapidfuzz token_sort_ratio threshold (0-100) for fuzzy title matches
 fuzzy_threshold: 90
 
 # Words that indicate employment type when present in the title.
 employment_type_words:
   internship: [intern, internship]
-  co-op: [co-op, coop]
-  new_grad: [new graduate, university graduate, early career, graduate, entry level, campus]
+  co-op: [co op]
+  new_grad: [new graduate, university graduate, early career, entry level, campus]

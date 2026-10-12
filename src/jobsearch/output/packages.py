@@ -4,7 +4,9 @@ Format v1 — Markdown with YAML front matter:
   front matter keys (in order): package_format, company, title, job_id, apply_url, source,
   posted_date, fetched_at, resume_version_hash, score, label
   body sections (in order, each '## <name>'): Full JD, Minimum requirements, Preferred requirements,
-  Skills required, My matching evidence, Gaps, Flags
+  Skills required, ATS keywords, My matching evidence, Gaps, Flags
+  ATS keywords lines: "- <JD exact term> | <required|preferred|mentioned> | <matched|synonym|missing> |
+  weight <w>[ | resume says <term>][ | evidence (<section>): <resume line>]" after a "Coverage: N%" line.
 """
 from __future__ import annotations
 
@@ -12,10 +14,10 @@ import re
 
 import yaml
 
-PACKAGE_FORMAT = 1
+PACKAGE_FORMAT = 2   # 2: adds the "ATS keywords" section
 FRONT_MATTER_KEYS = ["package_format", "company", "title", "job_id", "apply_url", "source", "posted_date",
                      "fetched_at", "resume_version_hash", "score", "label"]
-SECTIONS = ["Full JD", "Minimum requirements", "Preferred requirements", "Skills required",
+SECTIONS = ["Full JD", "Minimum requirements", "Preferred requirements", "Skills required", "ATS keywords",
             "My matching evidence", "Gaps", "Flags"]
 
 
@@ -54,6 +56,19 @@ def render_package(job: dict, jd_text: str, resume_hash: str) -> str:
     for sk, line in (bd.get("skill_evidence") or {}).items():
         evidence.append(f"{sk}: {line}")
 
+    kw = job.get("keywords") or {}
+    kw_lines = []
+    if kw.get("keywords"):
+        kw_lines.append(f"Coverage: {kw.get('coverage')}% (required {kw.get('required_hit')}/{kw.get('required_total')}) — "
+                        "keyword overlap, not your chance of passing an ATS")
+        for k in kw["keywords"]:
+            line = f"{k['term']} | {k['section']} | {k['status']} | weight {k['weight']}"
+            if k["status"] == "synonym":
+                line += f" | resume says {k['resume_term']}"
+            if k.get("evidence"):
+                line += f" | evidence ({k['evidence_section']}): {k['evidence']}"
+            kw_lines.append(line)
+
     flags = job.get("flags") or {}
     flag_lines = []
     for k in ("sponsorship", "citizenship", "clearance"):
@@ -65,6 +80,10 @@ def render_package(job: dict, jd_text: str, resume_hash: str) -> str:
         flag_lines.append(f"Graduation years mentioned: {', '.join(map(str, job['grad_years']))}")
     if job.get("degree"):
         flag_lines.append(f"Degree mentioned: {job['degree']}")
+    if job.get("eligibility_note"):
+        flag_lines.append(f"Check eligibility: “{job['eligibility_note']}”")
+    if job.get("deadline"):
+        flag_lines.append(f"Apply by: {job['deadline']}" + (f" — “{job['deadline_evidence']}”" if job.get('deadline_evidence') else ""))
 
     body = {
         # escape heading-like JD lines so they can't be mistaken for package sections
@@ -72,6 +91,7 @@ def render_package(job: dict, jd_text: str, resume_hash: str) -> str:
         "Minimum requirements": _bullets(job.get("min_reqs") or []),
         "Preferred requirements": _bullets(job.get("pref_reqs") or []),
         "Skills required": _bullets(skill_lines),
+        "ATS keywords": _bullets(kw_lines, "_No keywords extracted._"),
         "My matching evidence": _bullets(evidence, "_No direct evidence found._"),
         "Gaps": _bullets(job.get("gaps") or [], "_None identified._"),
         "Flags": _bullets(flag_lines),

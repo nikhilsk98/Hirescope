@@ -1,0 +1,283 @@
+# Candidates that failed live verification on 2026-10-12 (not used).
+unverified:
+- name: AMD
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Activision Blizzard
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Akamai
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: American Express
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Atlassian
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Bank of America
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Bloomberg
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Bosch
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Boston Dynamics
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Character.AI
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Citadel
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Crown Innovations
+  tried:
+    board: CrownInnovationsInc
+    source: smartrecruiters
+  reason: 0 postings (unknown id or no openings)
+- name: Cruise
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Dell Technologies
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Electronic Arts
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Etsy
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Expedia
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Fidelity
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Five Rings
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Garmin
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Goldman Sachs
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Grammarly
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: HashiCorp
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Hebbia
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Honeywell
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: HubSpot
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Hudson River Trading
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Hugging Face
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: IBM
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Intel
+  tried:
+    board: intel
+    host: intel.wd1.myworkdayjobs.com
+    site: en-us
+    source: workday
+  reason: 'HTTPStatusError: Client error ''404 Not Found'' for url ''https://intel.wd1.myworkdayjobs.com/wday/cxs/intel/en-us/jobs''
+
+    For more informatio'
+- name: Intuit
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: JPMorgan Chase
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Joby Aviation
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Kraken
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Liberty Mutual
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Lockheed Martin
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Lucid
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: MathWorks
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Mistral
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Motorola Solutions
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Niantic
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Old Mission
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Optiver
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Oracle
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: PayPal
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Postman
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Qualcomm
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Retool
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Rippling
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Rivian
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: SambaNova
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Siemens
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Snap
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Square
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Tableau
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Tesla
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Two Sigma
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Unity
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: VMware
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Valve
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Varda
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Weights & Biases
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Wells Fargo
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: WhatNot
+  tried:
+    board: whatnot
+    source: ashby
+  reason: 'HTTPStatusError: Client error ''404 Not Found'' for url ''https://api.ashbyhq.com/posting-api/job-board/whatnot''
+
+    For more information check:'
+- name: Yelp
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Zebra Technologies
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: Zillow
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
+- name: iRobot
+  tried: null
+  reason: no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site
+    - add it to inputs/my_companies.csv with its careers URL)
