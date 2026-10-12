@@ -1,0 +1,28 @@
+# Applied to titles before matching. Keys are lowercase whole words/phrases.
+abbreviations:
+  sr: senior
+  jr: junior
+  swe: software engineer
+  sde: software development engineer
+  eng: engineer
+  engr: engineer
+  ml: machine learning
+  mle: machine learning engineer
+  ai: artificial intelligence
+  dev: developer
+  mgr: manager
+  "new grad": new graduate
+  ng: new graduate
+
+# Level numerals in titles that imply more experience than entry level.
+# "Software Engineer III" -> treated like a seniority word.
+excluded_level_numerals: [iii, iv, v, "3", "4", "5"]
+
+# rapidfuzz token_set_ratio threshold (0-100) for a title to count as matching
+fuzzy_threshold: 85
+
+# Words that indicate employment type when present in the title.
+employment_type_words:
+  internship: [intern, internship]
+  co-op: [co-op, coop]
+  new_grad: [new graduate, university graduate, early career, graduate, entry level, campus]

@@ -1,0 +1,9 @@
+# Companies scanned by source adapters. Adding a company = adding an entry here.
+# name: display name (also used to match preferences.company_tiers)
+# source: adapter name (phase 1: greenhouse)
+# board: the ATS board token, e.g. https://boards-api.greenhouse.io/v1/boards/<board>/jobs
+# tier: default tier if the company is not listed in preferences.company_tiers
+companies:
+  - {name: Anthropic,  source: greenhouse, board: anthropic,  tier: 1}
+  - {name: Databricks, source: greenhouse, board: databricks, tier: 1}
+  - {name: Figma,      source: greenhouse, board: figma,      tier: 2}

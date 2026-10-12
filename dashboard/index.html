@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file:; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Job Search</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="title-row">
+      <h1>Job Search</h1>
+      <div class="header-actions">
+        <button id="export-statuses" type="button">Export statuses</button>
+        <button id="theme-toggle" type="button" aria-label="Toggle light/dark">◐</button>
+      </div>
+    </div>
+    <div id="run-meta" class="run-meta"></div>
+    <p id="disclaimer" class="disclaimer"></p>
+    <div id="warnings"></div>
+  </header>
+
+  <nav id="tabs" class="tabs" role="tablist"></nav>
+
+  <section class="controls">
+    <input id="search" type="search" placeholder="Search title, company, skills, location…" aria-label="Search">
+    <select id="f-company" aria-label="Company"></select>
+    <select id="f-tier" aria-label="Tier"></select>
+    <select id="f-label" aria-label="Label"></select>
+    <select id="f-type" aria-label="Employment type"></select>
+    <select id="f-location" aria-label="Location / work mode"></select>
+    <select id="f-status" aria-label="My status"></select>
+    <select id="f-flag" aria-label="Flags"></select>
+    <span id="count" class="count"></span>
+  </section>
+
+  <main>
+    <table class="jobs">
+      <thead>
+        <tr><th class="c-score">Score</th><th>Role</th><th class="c-loc">Location</th><th class="c-posted">Posted</th><th class="c-status">My status</th><th class="c-actions">Actions</th></tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p id="empty" class="empty" hidden>No jobs match these filters.</p>
+  </main>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

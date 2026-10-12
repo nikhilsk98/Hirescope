@@ -1,0 +1,15 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.env
+
+# Personal inputs (commit only *.example.*)
+inputs/*
+!inputs/*.example.*
+
+# Generated / runtime data
+data/
+dashboard/data.js

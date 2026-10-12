@@ -1,0 +1,39 @@
+{
+ "jobs": [
+  {
+   "id": 1001,
+   "title": "Software Engineer, New Grad 2027 (DEMO)",
+   "absolute_url": "https://example.com/demo/1001",
+   "location": {
+    "name": "Boston, MA | New York, NY"
+   },
+   "first_published": "2026-10-01T10:00:00-04:00",
+   "updated_at": "2026-10-05T10:00:00-04:00",
+   "content": "&lt;h2&gt;About the role&lt;/h2&gt;&lt;p&gt;DEMO posting. Build backend services.&lt;/p&gt;&lt;h2&gt;Minimum qualifications&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;&lt;p&gt;BS or MS in Computer Science, graduating between December 2026 and June 2027&lt;/p&gt;&lt;/li&gt;&lt;li&gt;&lt;p&gt;Experience with Python, Go and SQL&lt;/p&gt;&lt;/li&gt;&lt;li&gt;&lt;p&gt;Familiarity with Kubernetes (k8s) and AWS&lt;/p&gt;&lt;/li&gt;&lt;/ul&gt;&lt;h2&gt;Preferred qualifications&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;&lt;p&gt;Experience with Kafka&lt;/p&gt;&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;The base salary range is $120,000 - $150,000 USD.&lt;/p&gt;"
+  },
+  {
+   "id": 1002,
+   "title": "Senior Software Engineer (DEMO)",
+   "absolute_url": "https://example.com/demo/1002",
+   "location": {
+    "name": "Remote - US"
+   },
+   "first_published": "2026-09-01T10:00:00-04:00",
+   "updated_at": "2026-09-05T10:00:00-04:00",
+   "content": "&lt;h2&gt;Requirements&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;5+ years of professional software engineering experience&lt;/li&gt;&lt;li&gt;Java&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;We are unable to sponsor visas for this role.&lt;/p&gt;"
+  },
+  {
+   "id": 1003,
+   "title": "Account Executive (DEMO)",
+   "absolute_url": "https://example.com/demo/1003",
+   "location": {
+    "name": "Boston, MA"
+   },
+   "first_published": "2026-10-01T10:00:00-04:00",
+   "content": "&lt;p&gt;Sell things.&lt;/p&gt;"
+  }
+ ],
+ "meta": {
+  "total": 3
+ }
+}

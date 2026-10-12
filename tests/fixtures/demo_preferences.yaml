@@ -1,0 +1,81 @@
+# Copy to inputs/preferences.yaml (gitignored) and fill in YOUR values.
+# Everything below is an EXAMPLE, not facts about you.
+
+# --- Roles -------------------------------------------------------------
+target_titles:            # matched fuzzily against normalized job titles
+  - Software Engineer
+  - Machine Learning Engineer
+related_titles:           # also accepted, scored slightly lower on "level"
+  - Backend Engineer
+  - Data Engineer
+  - Software Developer
+excluded_title_words:     # any of these in the title -> hard-filtered
+  - senior
+  - staff
+  - principal
+  - manager
+  - lead
+  - director
+  - head
+  - architect
+
+# --- Level -------------------------------------------------------------
+experience_level: entry   # entry | mid
+max_yoe: 2                # postings requiring more than this many years are flagged/filtered
+employment_types:         # any of: internship, co-op, new_grad, full_time
+  - new_grad
+  - full_time
+graduation_date: 2027-05  # YYYY-MM
+start_date: 2027-06       # earliest start, YYYY-MM
+
+# --- Location ----------------------------------------------------------
+locations:                # substring match against the job's location text
+  - Boston
+  - New York
+  - San Francisco
+  - Seattle
+work_modes: [remote, hybrid, onsite]
+remote_countries: [United States, US, USA]   # remote roles must be open to one of these
+
+# --- Domain / pay / authorization -------------------------------------
+domains: [machine learning, infrastructure, developer tools]
+salary:
+  min: 100000
+  currency: USD
+  mode: soft              # hard = filter out below min (only when salary is stated); soft = score only
+work_authorization:
+  needs_sponsorship: false        # true -> "no sponsorship" postings become a red flag
+  us_citizen: false               # false -> "US citizens only" postings become a red flag
+
+# --- Companies (tiers) --------------------------------------------------
+company_tiers:
+  tier1: [Anthropic, Databricks]
+  tier2: [Figma]
+  tier3: []
+  excluded: []
+
+# --- Freshness ---------------------------------------------------------
+max_posting_age_days: 60
+
+# --- Hard exclusions vs soft preferences -------------------------------
+# Each of these may be "hard" (hide the job, viewable in the Filtered tab)
+# or "soft" (only lowers the score).
+rules:
+  title: hard
+  seniority: hard
+  location: hard
+  yoe: soft
+  employment_type: soft
+  posting_age: soft
+
+# --- Scoring -----------------------------------------------------------
+weights:
+  qualification: 0.65     # overall = qualification*w + preference*w (weights normalized)
+  preference: 0.35
+  qualification_parts: {skills: 0.4, semantic: 0.4, level: 0.2}
+  preference_parts: {location: 0.35, company_tier: 0.25, freshness: 0.2, employment_type: 0.1, salary: 0.1}
+thresholds:
+  strong: 70              # >= strong -> Strong
+  stretch: 50             # >= stretch -> Stretch, else Weak
+top_n: 200                # max non-filtered jobs written to the dashboard
+timezone: America/New_York
