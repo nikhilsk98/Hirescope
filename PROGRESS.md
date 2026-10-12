@@ -3,7 +3,7 @@
 Resume here: read this file and `git log --oneline` first, then continue from **In progress**.
 
 ## Current phase
-Phase 7 (next): README polish.
+All phases (1–7) complete. Final report below.
 
 ## Completed
 - Phase 1 — vertical slice (Greenhouse → SQLite → scoring → dashboard → job package)
@@ -15,6 +15,7 @@ Phase 7 (next): README polish.
 - Phase 5 — Hacker News Who's Hiring, LinkedIn alert emails (IMAP), optional aggregator, big-tech investigation
 - Phase 6 — launchd schedule + quick checks, lock, offline handling, notifications, early birds, run summary,
   Excel export, source health alerts, hiring seasons, weekly digest, daily backups + restore
+- Phase 7 — README: quick start, data-flow table, adding adapters, troubleshooting table
 
 ## Phase 4 report (2026-10-12)
 **Built**
@@ -113,11 +114,49 @@ regressions).
 co-op / 5 unclear), 1,206 Strong; all profile checks OK; 0 visible LMTS/PMTS; 15 random jobs spot-checked.
 Screenshots: digest (dark), Hiring Seasons (light). launchd itself was **not installed** (Needs Nikhil).
 
+## Final report (2026-10-12)
+**What's built**: discovery from 300 verified seed companies (Greenhouse, Lever, Ashby, Workday, SmartRecruiters),
+Amazon, Netflix, SimplifyJobs (internships incl. off-season + new grad), Hacker News Who's Hiring, LinkedIn alert
+emails (read-only IMAP, optional), an optional aggregator, your 144-company My Companies watchlist with ATS
+auto-detection, and Add job by URL → dedupe (source id, canonical ATS key, fuzzy) → two-track rules (Spring 2027
+co-op/intern, full-time from May 2027, entry–mid 0–5 YOE, USA, sponsorship/citizenship rules from explicit text only)
+→ qualification + preference scoring with freshness, New Grad and preferred-metro boosts, ghost signals and
+bounded feedback learning → dashboard (two track workspaces, ATS keywords, Apply Today, skill gaps, missed matches,
+coverage, My Applications board/table/stats, follow-ups, hiring seasons, run log, ⌘K, bulk actions) → job packages.
+Unattended: launchd full runs + quick checks, lock, offline handling, notifications, health alerts, digest, backups,
+Excel.
+
+**Tests**: 313 passed (`~/.venvs/hirescope/bin/python -m pytest -q`, ~1.5 s, no network, DEMO data).
+
+**Final real run** (scheduled-style, tiers respected): 223 sources due, 155 OK, 22 failed + 46 manual (custom careers
+pages without job data), 202 not due; 36 new, 101 closed; 6,350 visible (5,505 full-time / 840 co-op / 5 unclear),
+1,204 Strong; all profile checks OK.
+
+**Limitations**
+- 22 My Companies careers pages have no readable job data and 46 have no careers URL → "Manual check" (use Add job
+  by URL). Unsupported job systems: Jobvite, Eightfold, Oracle, iCIMS, Paylocity, TikTok, Google/Apple/Meta (terms).
+- Page caps leave ~42 large sources partial (closures verified per job). Netflix requirement parsing ~44%.
+- SimplifyJobs JD enrichment is capped at 200 per feed per run; aggregator/LinkedIn listings may have no JD.
+- Feedback learning has nothing to learn until you label jobs and export statuses.
+- Hiring seasons start with ~1 year of evidence (mostly posting dates); predictions are labeled as guesses.
+- The LinkedIn alert parser is built from the documented layout and DEMO emails; check its first real run.
+
+**Setup checklist (Needs Nikhil)**
+1. `./scripts/schedule.sh install` → `./scripts/schedule.sh status`; Full Disk Access for /bin/zsh if launchd logs
+   "Operation not permitted".
+2. Optional `.env`: `IMAP_USER`, `IMAP_APP_PASSWORD` (Gmail app password) for LinkedIn alerts; create alerts on LinkedIn.
+3. Optional `inputs/Connections.csv` (LinkedIn data export) for the referral finder.
+4. Optional `aggregator.enabled: true` + `JSEARCH_API_KEY` / `SERPAPI_API_KEY`.
+5. Optional `sponsorship_history.enabled: true` + the USCIS H-1B Employer Data Hub CSV at `inputs/h1b_employer_data.csv`.
+6. Use the dashboard and **Export statuses** regularly (learning, applications in SQLite, backups).
+7. Confirm GitHub `main` → I delete the local `backup-before-rewrite` branch; say "delete old branches" for the remote
+   `phase1-vertical-slice` / `phase2`.
+
 ## In progress
-Nothing — Phase 6 pushed.
+Nothing.
 
 ## Next
-Phase 7 (README polish), then the final report.
+Your review.
 
 ## Open issues
 - 21 watchlist companies have custom careers pages without readable job data; 47 need a careers_url (Manual check).

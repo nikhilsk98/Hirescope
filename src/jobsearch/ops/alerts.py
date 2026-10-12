@@ -63,7 +63,8 @@ def summary_text(s: dict) -> str:
     for t, b in (s.get("by_track") or {}).items():
         lines.append(f"  {t}: {b.get('visible', 0):,} visible ({b.get('strong', 0)} Strong, {b.get('stretch', 0)} Stretch)")
     if s.get("new_strong_rows"):
-        lines.append(f"  new Strong matches: {len(s['new_strong_rows'])} ({len(s.get('early_bird') or [])} early birds)")
+        eb = len(s.get("early_bird") or [])
+        lines.append(f"  new Strong matches: {len(s['new_strong_rows'])} ({eb} early bird{'' if eb == 1 else 's'})")
         lines += [f"    {r['score']:.0f}  {r['company']} — {r['title']}" for r in s["new_strong_rows"][:10]]
     for a in s.get("health_alerts") or []:
         lines.append(f"  HEALTH: {a['message']}")
