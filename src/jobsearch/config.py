@@ -105,7 +105,7 @@ class Company(BaseModel):
 class TitleRules(BaseModel):
     abbreviations: dict[str, str] = {}
     excluded_level_numerals: list[str] = []
-    fuzzy_threshold: int = 85
+    fuzzy_threshold: int = 90
     employment_type_words: dict[str, list[str]] = {}
 
 

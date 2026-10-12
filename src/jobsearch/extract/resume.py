@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .skills import canonicalize, extract_skills
 
-SECTIONS = ("experience", "projects", "coursework", "education", "skills")
+SECTIONS = ("experience", "projects", "coursework", "education", "skills", "summary")
 
 
 @dataclass
@@ -90,7 +90,7 @@ def parse_resume(path: Path, synonyms: dict[str, list[str]]) -> Resume:
     listed = list(dict.fromkeys(listed))
 
     evidence: dict[str, str] = {}
-    for sec in ("experience", "projects", "coursework", "education"):
+    for sec in ("experience", "projects", "coursework", "education", "summary"):
         for e in sections[sec]:
             for line in [e.heading, *e.bullets]:
                 for sk in extract_skills(line, synonyms):
