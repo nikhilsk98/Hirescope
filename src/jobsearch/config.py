@@ -103,6 +103,15 @@ class Feedback(BaseModel):
     weight_min_jobs: int = 5        # ...and only with this many positive and negative jobs
 
 
+class Aggregator(BaseModel):
+    """Optional paid/free-tier job-search API (JSearch on RapidAPI, or SerpAPI Google Jobs). Off by default."""
+    enabled: bool = False
+    provider: str = "jsearch"       # jsearch | serpapi (key in .env: JSEARCH_API_KEY / SERPAPI_API_KEY)
+    queries: list[str] = ["software engineer new grad 2027", "software engineer intern spring 2027",
+                          "software engineering co-op 2027", "entry level software engineer"]
+    date_posted: str = "week"       # jsearch: today | 3days | week | month
+
+
 class Applications(BaseModel):
     follow_up_days: tuple[int, int] = (7, 10)   # reminder window after applying (or after your last follow-up)
     ghosted_after_days: int = 30                 # suggest "Ghosted" (you confirm; never automatic)
@@ -181,6 +190,7 @@ class Preferences(BaseModel):
     sponsorship_history: SponsorshipHistory = SponsorshipHistory()
     feedback: Feedback = Feedback()
     applications: Applications = Applications()
+    aggregator: Aggregator = Aggregator()
     connections_csv: str = "inputs/Connections.csv"   # LinkedIn data export (optional): referral finder
     top_n: int = 1000                         # per track
     timezone: str = "America/New_York"
@@ -205,6 +215,7 @@ class Company(BaseModel):
     verified: str | None = None       # date the endpoint was verified live
     origin: str = "seed"              # seed | my_companies | feed
     notes: str | None = None
+    queries: list[str] = []           # aggregator: search queries
 
 
 class TitleRules(BaseModel):

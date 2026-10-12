@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -113,6 +114,12 @@ class Adapter:
         """The `source` value stored for this company's listings (a feed may use its own label)."""
         return self.name
 
+    @classmethod
+    def unavailable(cls, company: Company) -> str | None:
+        """Why this optional source can't run (missing credentials, turned off), or None. Such sources are
+        skipped with that note instead of failing the run."""
+        return None
+
     def fetch_one(self, url: str) -> RawJob | None:
         """Fetch a single posting by its public URL (Add job by URL). Optional."""
         return None
@@ -143,6 +150,14 @@ class Adapter:
 
 class NotModified(Exception):
     pass
+
+
+_SECRET_PARAM = re.compile(r"((?:api_?key|apikey|access_token|token|password|secret)=)[^&\s'\"]+", re.I)
+
+
+def safe_url(text: str) -> str:
+    """Mask credential-looking query parameters (api_key=…) before a URL or error message is logged."""
+    return _SECRET_PARAM.sub(r"\1***", text)
 
 
 class HttpClient:
@@ -200,7 +215,8 @@ class HttpClient:
                     time.sleep(min(int(ra), 60))
             if attempt < self.retries:
                 backoff = (2 ** attempt) + random.uniform(0, 0.5)
-                log.warning("%s %s failed (%s); retry %d in %.1fs", method, url, err, attempt + 1, backoff)
+                log.warning("%s %s failed (%s); retry %d in %.1fs", method, safe_url(url),
+                            safe_url(str(err)), attempt + 1, backoff)
                 time.sleep(backoff)
         assert err is not None
         raise err

@@ -112,3 +112,9 @@ feedback: {enabled: true, min_evidence: 2, max_per_feature: 3, max_total: 6, wei
 applications: {follow_up_days: [7, 10], ghosted_after_days: 30, same_company_window_days: 30}
 # LinkedIn connections export (Settings > Data privacy > Get a copy of your data > Connections). Optional.
 connections_csv: inputs/Connections.csv
+# --- Optional aggregator (off by default; key in .env). Sends only these queries to the provider. -----------
+aggregator:
+  enabled: false
+  provider: jsearch       # jsearch | serpapi
+  queries: ["software engineer new grad 2027", "software engineer intern spring 2027", "software engineering co-op 2027", "entry level software engineer"]
+  date_posted: week

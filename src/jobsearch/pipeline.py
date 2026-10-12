@@ -256,16 +256,26 @@ def plan(conn, cfg: Config, watch: list[WatchItem], *, only_company: str | None 
         if not planned:  # not configured anywhere: try detection by name
             planned.append(Planned(None, WatchItem(only_company), "ad hoc"))
         return planned, skipped
-    for w in watch:
-        planned.append(Planned(None, w, "My Companies: every run"))
+    if not only_source:   # --source X means exactly that adapter (My Companies' sources are known only after detection)
+        for w in watch:
+            planned.append(Planned(None, w, "My Companies: every run"))
     if watchlist_only:
         return planned, skipped
+    if cfg.prefs.aggregator.enabled:
+        a = cfg.prefs.aggregator
+        seeds = [*seeds, Company(name=f"Aggregator ({a.provider})", source="aggregator", board=a.provider,
+                                 queries=a.queries, tier=1, origin="feed")]
     for c in seeds:
         if c.name.casefold() in watch_keys:
             continue  # covered by My Companies
         if only_source and c.source != only_source:
             continue
         adapter = ADAPTERS.get(c.source)
+        if adapter and (why := adapter.unavailable(c)):
+            lbl = adapter(None).source_label(c)  # type: ignore[arg-type]
+            skipped.append(SourceOutcome(c.name, lbl, False, status="skipped", origin=c.origin, tier=c.tier, notes=[why]))
+            db.set_source_status(conn, c.name, lbl, "skipped", why, None, origin=c.origin, tier=c.tier)
+            continue
         label = adapter(None).source_label(c) if adapter else c.source  # type: ignore[arg-type]
         t = tier_of(c, cfg)
         if force_all or only_source or due(conn, c, label, t, now):
@@ -480,6 +490,10 @@ def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
         seen.add(raw.job_id)
         out.new += status == "new"
         out.updated += status == "updated"
+    if f.multi and res.seen_ids:
+        # feed listings reported only as ids (already stored, not re-sent): mark them seen
+        for jid in set(res.seen_ids) - {j.job_id for j in res.jobs}:
+            db.touch_source_id(conn, label, jid, now)
     out.partial = res.partial
     if res.partial:
         # Capped listing: a missing job is closed only if its own posting was verified gone.

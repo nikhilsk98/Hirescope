@@ -735,3 +735,10 @@ def merge_canonical_duplicates(conn, key_of) -> int:
             merged += 1
     conn.commit()
     return merged
+
+
+def touch_source_id(conn, source: str, source_job_id: str, now: str | None = None) -> None:
+    """touch_job for a multi-company feed listing known only by its id."""
+    for (ck,) in conn.execute("SELECT company_key FROM job_sources WHERE source=? AND source_job_id=?",
+                              (source, source_job_id)).fetchall():
+        touch_job(conn, source, ck, source_job_id, now)

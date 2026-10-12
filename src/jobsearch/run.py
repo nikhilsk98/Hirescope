@@ -124,6 +124,7 @@ def parse_args(argv=None):
     p.add_argument("--statuses", type=Path, help="import this dashboard export instead of the newest "
                                                  "jobsearch-statuses*.json in statuses_import_dir")
     p.add_argument("--no-import", action="store_true", help="don't import dashboard statuses this run")
+    p.add_argument("--no-email", action="store_true", help="skip email sources (LinkedIn job-alert emails over IMAP)")
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--resume", type=Path, default=paths.RESUME, help="resume markdown (default inputs/master_resume.md)")
     p.add_argument("--prefs", type=Path, default=paths.PREFERENCES, help="preferences yaml (default inputs/preferences.yaml)")
@@ -148,6 +149,12 @@ def main(argv=None) -> int:
         return 2
     log.info("resume %s (version %s): %d skills; %d seed companies, %d My Companies",
              args.resume, resume.version_hash, len(resume.skills), len(cfg.companies), len(watch))
+
+    from .adapters.aggregator import AggregatorAdapter
+    from .adapters.linkedin_alerts import LinkedInAlertsAdapter
+    LinkedInAlertsAdapter.disabled = args.no_email
+    AggregatorAdapter.enabled = cfg.prefs.aggregator.enabled
+    AggregatorAdapter.date_window = cfg.prefs.aggregator.date_posted
 
     conn = db.connect(paths.DB)
     tmp = None
@@ -188,7 +195,9 @@ def main(argv=None) -> int:
     ensure_extraction_current(conn, cfg)   # re-extracts only when extraction code or config changed
     client = HttpClient(host_intervals={"myworkdayjobs.com": 0.5, "githubusercontent.com": 0.2,
                                          "boards-api.greenhouse.io": 0.25, "api.lever.co": 0.5,
-                                         "api.ashbyhq.com": 0.5, "api.smartrecruiters.com": 0.35})
+                                         "api.ashbyhq.com": 0.5, "api.smartrecruiters.com": 0.35,
+                                         "hacker-news.firebaseio.com": 0.05, "jsearch.p.rapidapi.com": 1.0,
+                                         "serpapi.com": 1.0})
     try:
         summary = run(conn, cfg, resume, [] if args.rescore else None, client, Embedder(conn), jd_dir, watch=watch,
                       only_company=args.company, only_source=args.source, force_all=args.all,

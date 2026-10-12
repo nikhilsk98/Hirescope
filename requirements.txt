@@ -5,3 +5,5 @@ sentence-transformers>=3.0
 rapidfuzz>=3.9
 python-dateutil>=2.9
 pytest>=8.0
+imapclient>=3.0
+openpyxl>=3.1

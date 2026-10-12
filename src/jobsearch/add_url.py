@@ -13,6 +13,7 @@ import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 from . import paths
 from .adapters.base import HttpClient, RawJob
@@ -32,7 +33,19 @@ log = logging.getLogger("jobsearch.add_url")
 SOURCE = "added_url"
 
 
+# Sites whose terms forbid automated access (docs/experimental_big_tech.md) or that we never scrape (LinkedIn):
+# their pages are never fetched; add the job with a pasted JD instead.
+NO_FETCH_HOSTS = ("linkedin.com", "apple.com", "metacareers.com", "facebook.com", "meta.com")
+
+
+def no_fetch(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in NO_FETCH_HOSTS)
+
+
 def resolve(url: str, client: HttpClient, company: str | None) -> tuple[RawJob | None, str]:
+    if no_fetch(url):
+        return None, "not read (this site's terms don't allow automated access): paste the JD with --paste"
     fields = from_url(url) or {}
     adapter_cls = ADAPTERS.get(fields.get("source", ""))
     if adapter_cls is not None:
@@ -58,7 +71,7 @@ def add_job(conn, cfg, url: str, client: HttpClient, *, company: str | None = No
     raw, how = (None, "manual") if jd_text else resolve(url, client, company)
     if raw is None:
         if not jd_text:
-            raise ValueError(f"Could not read {url} automatically. Re-run with --jd-file FILE (or --paste) "
+            raise ValueError(f"Could not read {url} automatically ({how}). Re-run with --jd-file FILE (or --paste) "
                              "plus --company and --title to add it manually.")
         if not (company and title):
             raise ValueError("Manual entry needs --company and --title.")

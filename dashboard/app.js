@@ -611,7 +611,7 @@
     const label = { ok: ["OK", "good"], failed: ["Failed", "flag"], manual: ["Manual check", "warn"], skipped: ["Not due", ""] };
     const tb = el("tbody");
     for (const r of [...rows].sort((a, b) => order[a.status] - order[b.status] || a.company.localeCompare(b.company))) {
-      const [lt, lc] = label[r.status] || [r.status, ""];
+      const [lt, lc] = r.status === "skipped" && r.error ? ["Not set up / off", "warn"] : label[r.status] || [r.status, ""];
       tb.append(el("tr", null,
         el("td", null, el("b", { text: r.company }), r.my_company ? el("span", { class: "chip info", style: "margin-left:6px", text: "My Company" }) : null, r.tier ? el("div", { class: "muted", text: `tier ${r.tier}` }) : null),
         el("td", null, el("span", { class: `chip ${lc}`, text: lt })), el("td", { text: r.source }),

@@ -35,6 +35,18 @@ companies:
   verified: '2026-10-12'
   origin: feed
   notes: New-grad positions
+- name: Hacker News Who's Hiring
+  source: hn_hiring
+  tier: 1
+  verified: '2026-10-12'
+  origin: feed
+  notes: 'monthly "Ask HN: Who is hiring?" thread via the official HN API; only new posts are fetched' 
+- name: LinkedIn Job Alerts
+  source: linkedin_alerts
+  board: '21'
+  tier: 1
+  origin: feed
+  notes: 'your own LinkedIn job-alert emails, read over IMAP (read-only); needs IMAP_USER + IMAP_APP_PASSWORD in .env' 
 - name: AeroVironment
   source: workday
   board: avav
