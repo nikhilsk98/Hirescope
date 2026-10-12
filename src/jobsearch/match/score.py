@@ -121,7 +121,8 @@ def ghost_signals(job: dict, prefs: Preferences, now: datetime, jd_text: str = "
 
 def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, sem: SemanticResult,
               synonyms: dict[str, list[str]], company: Company | None, now: datetime | None = None,
-              discovered_ok: bool = False, jd_text: str = "") -> ScoreResult:
+              discovered_ok: bool = False, jd_text: str = "",
+              learned: list[tuple[str, float]] | None = None) -> ScoreResult:
     now = now or datetime.now(timezone.utc)
     gaps: list[str] = []
     resume_skills = set(resume.skills)
@@ -265,7 +266,12 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         base = (qual * wq + pref * wp) / (wq + wp)
     else:
         base = qual if qual is not None else (pref if pref is not None else 0.0)
-    overall = max(0.0, min(100.0, base + boost_total + fresh_pts - sum(p["points"] for p in penalties)))
+    learned = learned or []
+    learned_total = sum(p for _, p in learned)
+    overall = max(0.0, min(100.0, base + boost_total + fresh_pts + learned_total - sum(p["points"] for p in penalties)))
+    # shown with the other bonuses/penalties (added after the total so nothing is counted twice)
+    bonuses += [{"reason": r, "points": p} for r, p in learned if p > 0]
+    penalties = [*penalties, *({"reason": r, "points": -p} for r, p in learned if p < 0)]
     label = label_for(overall, prefs)
     if rules.stretch_reasons and label == "Strong":   # senior / 6-year roles are Stretch at best
         label = "Stretch"
@@ -287,6 +293,7 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         "penalties": penalties,
         "bonuses": bonuses,
         "bonus_total": round(boost_total + fresh_pts, 1),
+        "learned": [{"reason": r, "points": p} for r, p in learned],
         "freshness": {"points": fresh_pts, "detail": fresh_detail, "age_hours": None if age_h is None else round(age_h, 1)},
         "ghost": [r for r, _ in ghosts],
         "signals": rules.signals,

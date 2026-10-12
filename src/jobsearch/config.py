@@ -92,6 +92,23 @@ class SponsorshipHistory(BaseModel):
     file: str = "inputs/h1b_employer_data.csv"
 
 
+class Feedback(BaseModel):
+    """Learning from your dashboard statuses (shortlist / applied = positive, skip with a reason = negative).
+    Bounded and transparent: every adjustment is listed in the dashboard with its evidence."""
+    enabled: bool = True
+    min_evidence: int = 2           # a company / skill / location / level needs this many labeled jobs
+    max_per_feature: float = 3      # points, per feature group (company, skills, domain, location, level)
+    max_total: float = 6            # points, per job (all learned adjustments together)
+    weight_nudge_max: float = 0.25  # component weights move at most +/-25% of their configured value
+    weight_min_jobs: int = 5        # ...and only with this many positive and negative jobs
+
+
+class Applications(BaseModel):
+    follow_up_days: tuple[int, int] = (7, 10)   # reminder window after applying (or after your last follow-up)
+    ghosted_after_days: int = 30                 # suggest "Ghosted" (you confirm; never automatic)
+    same_company_window_days: int = 30           # duplicate guard: other applications at the company this recent
+
+
 class Weights(BaseModel):
     qualification: float = 0.65
     preference: float = 0.35
@@ -162,6 +179,9 @@ class Preferences(BaseModel):
     ghost: Ghost = Ghost()
     prefilter: Prefilter = Prefilter()
     sponsorship_history: SponsorshipHistory = SponsorshipHistory()
+    feedback: Feedback = Feedback()
+    applications: Applications = Applications()
+    connections_csv: str = "inputs/Connections.csv"   # LinkedIn data export (optional): referral finder
     top_n: int = 1000                         # per track
     timezone: str = "America/New_York"
     my_companies_csv: str = "inputs/my_companies.csv"

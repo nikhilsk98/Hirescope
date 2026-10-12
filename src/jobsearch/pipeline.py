@@ -310,7 +310,8 @@ def _fetch(client: HttpClient, company: Company, ctx: FetchContext) -> FetchResu
 def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[Company] | None,
         client: HttpClient, embedder: Embedder, jd_dir: Path | None = paths.JD_DIR, *,
         watch: list[WatchItem] | None = None, only_company: str | None = None, only_source: str | None = None,
-        force_all: bool = False, workers: int = WORKERS, watchlist_only: bool = False) -> RunSummary:
+        force_all: bool = False, workers: int = WORKERS, watchlist_only: bool = False,
+        learned=None) -> RunSummary:
     """companies=None -> use cfg.companies with tier scheduling; a list -> check exactly those."""
     summary = RunSummary()
     watch = watch or []
@@ -412,7 +413,7 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
         for pool in pools.values():
             pool.shutdown(wait=True)
 
-    score_all(conn, cfg, resume, embedder, summary)
+    score_all(conn, cfg, resume, embedder, summary, learned)
     return summary
 
 
@@ -505,7 +506,8 @@ def _jd(job: dict) -> str:
 
 
 def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: Embedder,
-              summary: RunSummary) -> None:
+              summary: RunSummary, learned=None) -> None:
+    """learned: tracker.feedback.Learned (bounded adjustments from your statuses), or None."""
     from .extract.keywords import compare, extract_keywords, resume_terms, vocab_for
     from .match.prefilter import candidate, job_text, rescue
 
@@ -536,6 +538,7 @@ def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: E
                 rescued += not results[j["id"]].hidden
     summary.rescued = rescued
 
+    score_prefs = learned.apply_weights(prefs) if learned else prefs
     vocab = vocab_for(cfg.synonyms)
     rt = resume_terms(resume)
     kw_fp = hashlib.sha256((resume.version_hash + extraction_fingerprint()).encode()).hexdigest()[:12]
@@ -555,8 +558,9 @@ def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: E
         jd = _jd(job)
         sem = semantic_match(embedder, resume_lines, jd_chunks(jd, job.get("min_reqs") or [], job.get("pref_reqs") or []))
         discovered_ok = job["first_seen"] > _shift(first_scan[(job["company_key"], job["source"])], hours=1)
-        res = score_job(job, resume, prefs, rules, sem, cfg.synonyms, by_name.get(job["company_key"]), now,
-                        discovered_ok=discovered_ok, jd_text=jd)
+        res = score_job(job, resume, score_prefs, rules, sem, cfg.synonyms, by_name.get(job["company_key"]), now,
+                        discovered_ok=discovered_ok, jd_text=jd,
+                        learned=learned.for_job(job, prefs) if learned else None)
         key = f"{job.get('jd_hash')}:{kw_fp}"
         extra_fields = {}
         if job.get("keywords_key") != key:

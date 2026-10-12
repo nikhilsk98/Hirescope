@@ -13,7 +13,16 @@ Phase 4 (starting).
 - Setup — work authorization rules (needs sponsorship, not a US citizen), watchlist brand resolution (144 companies),
   preferred metros (Boston, Atlanta, Seattle, SF Bay Area), venv moved to ~/.venvs/hirescope
 
-## In progress
+## In progress — Phase 4
+- [x] Backend: status import/merge (newest `jobsearch-statuses*.json`, SQLite wins unless newer; format 1–3),
+  `applications` + `application_events` tables (migration 6), saved JD copies, SQLite → dashboard `sync.js`,
+  feedback learning (bounded, transparent), referral finder (Connections.csv), reopened-role detection,
+  `python -m jobsearch.apps` CLI, shared tracker logic in `dashboard/core.js` (parity-tested with Python)
+- [ ] Dashboard: My Applications (board / table / drawer / stats / add form), Follow-ups Due, Stats, Run Log,
+  mark-applied + duplicate guard, referral badges, Cmd+K palette, bulk select, URL-hash filters, salary slider
+- [ ] Visual QA (DEMO 50+ jobs, 15+ applications; light/dark), real run, phase report, push
+
+## Setup (done)
 - [x] Disable Claude attribution in `.claude/settings.json` (`attribution.commit` / `.pr` = "", `sessionUrl` = false)
 - [x] Ground rule added to BUILD_PROMPT.md
 - [x] Backup branch `backup-before-rewrite` (local only), main's messages rewritten (author/dates unchanged), force-pushed;

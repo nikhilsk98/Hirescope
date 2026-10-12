@@ -23,6 +23,7 @@ from .output.links import check_links
 from .pipeline import compute_similar, ensure_extraction_current, run
 from .watchlist import WatchlistError, load_watchlist, resolve
 from .storage import db
+from .tracker import feedback, referrals, statuses
 
 log = logging.getLogger("jobsearch")
 
@@ -54,7 +55,7 @@ def setup_logging(verbose: bool) -> Path:
 
 
 def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_file: Path,
-            partial_run: bool = False, last_run: str | None = None) -> dict:
+            partial_run: bool = False, last_run: str | None = None, learned=None, imported: dict | None = None) -> dict:
     """Write dashboard/data.js from the current DB state."""
     by_name = {db.company_key(c.name): c.tier for c in cfg.companies}
     mine = {w.company.casefold() for w in watch}
@@ -71,9 +72,23 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
         "partial_run": partial_run,
         "repo_root": str(paths.ROOT),
         "coverage": coverage,
+        "learned": (learned or feedback.learn(db.labeled_jobs(conn), cfg.prefs)).describe(),
+        "applications_cfg": cfg.prefs.applications.model_dump(),
+        "statuses_import": imported or {},
+        "runs": db.recent_runs(conn),
     }
     jobs = db.open_jobs(conn)
     shown = select_visible(jobs, cfg.prefs.top_n)
+    conn_file = paths.ROOT / cfg.prefs.connections_csv
+    if conn_file.exists():
+        try:
+            people = referrals.load(conn_file)
+            names = sorted({j["company"] for j in shown} | {r[0] for r in conn.execute("SELECT company FROM applications")})
+            meta["referrals"] = referrals.match(names, people, paths.CONFIG / "company_aliases.yaml")
+            meta["connections"] = len(people)
+        except (OSError, ValueError) as e:
+            log.warning("referral finder: %s: %s", conn_file, e)
+    statuses.write_sync_js(paths.SYNC_JS, statuses.sync_payload(conn))
     compute_similar(conn, Embedder(conn), shown)            # "More like this"
     jobs = db.open_jobs(conn)
     h1b = {}
@@ -106,6 +121,9 @@ def parse_args(argv=None):
     p.add_argument("--rescore", action="store_true", help="no fetching: re-extract and re-score stored jobs and rewrite the "
                                                           "dashboard (after editing preferences, config or the resume)")
     p.add_argument("--workers", type=int, default=16, help="parallel fetches (default 16)")
+    p.add_argument("--statuses", type=Path, help="import this dashboard export instead of the newest "
+                                                 "jobsearch-statuses*.json in statuses_import_dir")
+    p.add_argument("--no-import", action="store_true", help="don't import dashboard statuses this run")
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--resume", type=Path, default=paths.RESUME, help="resume markdown (default inputs/master_resume.md)")
     p.add_argument("--prefs", type=Path, default=paths.PREFERENCES, help="preferences yaml (default inputs/preferences.yaml)")
@@ -145,6 +163,26 @@ def main(argv=None) -> int:
         jd_dir = paths.JD_DIR
 
     run_id = db.start_run(conn, args.dry_run)
+    run_started = db.utcnow()
+    imported = {}
+    if not args.no_import:
+        try:
+            if args.statuses:
+                res = statuses.merge(conn, statuses.load_export(args.statuses), None if args.dry_run else paths.APPS_DIR)
+                res.file = str(args.statuses)
+            else:
+                res = statuses.import_newest(conn, Path(cfg.prefs.statuses_import_dir).expanduser(),
+                                             None if args.dry_run else paths.APPS_DIR,
+                                             None if args.dry_run else paths.IMPORTS_DIR)
+            imported = res.as_dict()
+            if res.errors:
+                log.warning("statuses import: %d entries skipped: %s", len(res.errors), "; ".join(res.errors[:5]))
+        except (OSError, ValueError) as e:
+            log.error("statuses import failed: %s", e)
+            imported = {"skipped_reason": f"failed: {e}"}
+    learned = feedback.learn(db.labeled_jobs(conn), cfg.prefs)
+    if learned.labeled:
+        log.info("feedback learning: %s", learned.describe()["status"])
     db.record_resume_version(conn, resume.version_hash, str(args.resume))
     last_fetch = None
     ensure_extraction_current(conn, cfg)   # re-extracts only when extraction code or config changed
@@ -154,7 +192,7 @@ def main(argv=None) -> int:
     try:
         summary = run(conn, cfg, resume, [] if args.rescore else None, client, Embedder(conn), jd_dir, watch=watch,
                       only_company=args.company, only_source=args.source, force_all=args.all,
-                      workers=args.workers, watchlist_only=args.watchlist)
+                      workers=args.workers, watchlist_only=args.watchlist, learned=learned)
         conn.commit()
         links = None
         if not args.no_link_check and not args.dry_run and not args.rescore:
@@ -164,6 +202,9 @@ def main(argv=None) -> int:
         client.close()
     s = summary.as_dict()
     s["links"] = links
+    s["reopened"] = [f"{r['company']}: {r['title']}" for r in statuses.reopened_shortlisted(conn, run_started)]
+    for r in s["reopened"]:
+        log.warning("REOPENED (you had it shortlisted): %s", r)
     s["scope"] = "rescore" if args.rescore else ("partial" if (args.company or args.source or args.watchlist) else "full")
     db.finish_run(conn, run_id, s)
 
@@ -175,10 +216,12 @@ def main(argv=None) -> int:
         if last:
             last_fetch = last[1]
             s = {**json.loads(last[0]), "scored": s["scored"], "filtered": s["filtered"], "strong": s["strong"],
+                 "reopened": s["reopened"],
                  "by_track": s["by_track"], "rescored_at": db.utcnow(), "scope": "full"}
     if not args.dry_run:
         publish(conn, cfg, resume, s, coverage_rows(conn, summary, watch), watch, log_file,
-                partial_run=bool(args.source or args.company or args.watchlist), last_run=last_fetch if args.rescore else None)
+                partial_run=bool(args.source or args.company or args.watchlist), last_run=last_fetch if args.rescore else None,
+                learned=learned, imported=imported)
     conn.close()
     if tmp:
         tmp.cleanup()

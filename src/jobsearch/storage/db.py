@@ -189,6 +189,46 @@ MIGRATIONS: list[str] = [
     ALTER TABLE jobs ADD COLUMN signals TEXT;
     ALTER TABLE jobs ADD COLUMN similar TEXT;
     """,
+    # 6: Phase 4 - My Applications (merged from dashboard exports), track-override timestamps
+    """
+    ALTER TABLE jobs ADD COLUMN track_override_at TEXT;
+    CREATE TABLE applications (
+        id TEXT PRIMARY KEY,
+        job_key TEXT,
+        job_pk INTEGER,
+        company TEXT NOT NULL,
+        company_key TEXT NOT NULL,
+        title TEXT NOT NULL,
+        track TEXT,
+        link TEXT,
+        source TEXT,
+        applied_date TEXT,
+        stage TEXT NOT NULL DEFAULT 'applied',
+        next_step TEXT,
+        next_step_date TEXT,
+        contact TEXT,
+        referral TEXT,
+        notes TEXT,
+        package TEXT,
+        jd_path TEXT,
+        followed_up TEXT,
+        deleted INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        extra TEXT
+    );
+    CREATE INDEX applications_company ON applications(company_key);
+    CREATE TABLE application_events (
+        id INTEGER PRIMARY KEY,
+        app_id TEXT NOT NULL REFERENCES applications(id),
+        at TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        from_stage TEXT NOT NULL DEFAULT '',
+        to_stage TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        UNIQUE(app_id, at, kind, to_stage, note)
+    );
+    """,
 ]
 
 
@@ -649,3 +689,20 @@ def recent_job_counts(conn, company: str, source: str, runs: int = 5) -> list[in
 
 def open_jobs(conn) -> list[dict]:
     return [decode_row(r) for r in conn.execute("SELECT * FROM jobs WHERE job_status != 'closed'")]
+
+
+def labeled_jobs(conn) -> list[dict]:
+    """Every job (open or closed) you gave a status, for feedback learning."""
+    return [decode_row(r) for r in conn.execute("SELECT * FROM jobs WHERE user_status IS NOT NULL")]
+
+
+def recent_runs(conn, n: int = 14) -> list[dict]:
+    out = []
+    for r in conn.execute("SELECT id, started_at, finished_at, summary FROM runs WHERE dry_run = 0 AND summary IS NOT "
+                          "NULL ORDER BY id DESC LIMIT ?", (n,)):
+        s = json.loads(r["summary"])
+        out.append({"id": r["id"], "started_at": r["started_at"], "finished_at": r["finished_at"],
+                    **{k: s.get(k) for k in ("scope", "sources_checked", "sources_ok", "sources_failed",
+                                             "sources_manual", "sources_partial", "jobs_found", "new", "updated",
+                                             "closed", "strong", "scored", "filtered")}})
+    return out

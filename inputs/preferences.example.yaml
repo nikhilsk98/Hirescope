@@ -106,3 +106,9 @@ top_n: 1000               # max non-filtered jobs per track written to the dashb
 timezone: America/New_York
 my_companies_csv: inputs/my_companies.csv
 statuses_import_dir: ~/Downloads
+# --- Feedback learning (from your dashboard statuses; bounded, listed under "Learned adjustments") --------
+feedback: {enabled: true, min_evidence: 2, max_per_feature: 3, max_total: 6, weight_nudge_max: 0.25, weight_min_jobs: 5}
+# --- My Applications ---------------------------------------------------------------------------
+applications: {follow_up_days: [7, 10], ghosted_after_days: 30, same_company_window_days: 30}
+# LinkedIn connections export (Settings > Data privacy > Get a copy of your data > Connections). Optional.
+connections_csv: inputs/Connections.csv

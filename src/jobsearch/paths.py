@@ -18,3 +18,6 @@ DB = DATA / "jobs.db"
 JD_DIR = DATA / "jd"
 PACKAGES_DIR = DATA / "packages"
 LOG_DIR = DATA / "logs"
+APPS_DIR = DATA / "applications"      # saved JD copies for your applications (kept after postings close)
+IMPORTS_DIR = DATA / "imports"        # archived copies of imported dashboard exports
+SYNC_JS = DASHBOARD / "sync.js"       # SQLite -> dashboard: your statuses and applications
