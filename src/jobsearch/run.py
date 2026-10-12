@@ -15,8 +15,10 @@ from .adapters.base import HttpClient
 from .config import load_config
 from .extract.resume import parse_resume
 from .match.semantic import Embedder
-from .output.dashboard import write_data_js
+from .output.dashboard import coverage_rows, write_data_js
+from .output.links import check_links
 from .pipeline import run
+from .watchlist import WatchlistError, load_watchlist
 from .storage import db
 
 log = logging.getLogger("jobsearch")
@@ -52,7 +54,11 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(prog="jobsearch.run", description=__doc__)
     p.add_argument("--dry-run", action="store_true", help="fetch and score, but write nothing (DB, JD files, dashboard)")
     p.add_argument("--source", help="only run companies using this adapter (e.g. greenhouse)")
-    p.add_argument("--company", help="only run this company (case-insensitive)")
+    p.add_argument("--company", help="only run this company (case-insensitive); works for seed, My Companies, "
+                                     "or any company name (auto-detects its job system)")
+    p.add_argument("--all", action="store_true", help="ignore tier schedules and check every company now")
+    p.add_argument("--no-link-check", action="store_true", help="skip the apply-link check")
+    p.add_argument("--workers", type=int, default=8, help="parallel fetches (default 8)")
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--resume", type=Path, default=paths.RESUME, help="resume markdown (default inputs/master_resume.md)")
     p.add_argument("--prefs", type=Path, default=paths.PREFERENCES, help="preferences yaml (default inputs/preferences.yaml)")
@@ -69,16 +75,13 @@ def main(argv=None) -> int:
         log.error("%s", e)
         return 2
 
-    companies = cfg.companies
-    if args.source:
-        companies = [c for c in companies if c.source == args.source]
-    if args.company:
-        companies = [c for c in companies if c.name.casefold() == args.company.casefold()]
-        if not companies:
-            log.error("company %r not found in config/companies.yaml", args.company)
-            return 2
-    log.info("resume %s (version %s): %d skills; %d companies to check",
-             args.resume, resume.version_hash, len(resume.skills), len(companies))
+    try:
+        watch = load_watchlist(paths.ROOT / cfg.prefs.my_companies_csv)
+    except WatchlistError as e:
+        log.error("%s", e)
+        return 2
+    log.info("resume %s (version %s): %d skills; %d seed companies, %d My Companies",
+             args.resume, resume.version_hash, len(resume.skills), len(cfg.companies), len(watch))
 
     conn = db.connect(paths.DB)
     tmp = None
@@ -95,18 +98,27 @@ def main(argv=None) -> int:
 
     run_id = db.start_run(conn, args.dry_run)
     db.record_resume_version(conn, resume.version_hash, str(args.resume))
-    client = HttpClient()
+    client = HttpClient(host_intervals={"myworkdayjobs.com": 0.5, "githubusercontent.com": 0.2})
     try:
-        summary = run(conn, cfg, resume, companies, client, Embedder(conn), jd_dir)
+        summary = run(conn, cfg, resume, None, client, Embedder(conn), jd_dir, watch=watch,
+                      only_company=args.company, only_source=args.source, force_all=args.all,
+                      workers=args.workers)
         conn.commit()
+        links = None
+        if not args.no_link_check and not args.dry_run:
+            links = check_links(conn, client, db.open_jobs(conn))
+            log.info("apply links: %s", links)
     finally:
         client.close()
     s = summary.as_dict()
+    s["links"] = links
     db.finish_run(conn, run_id, s)
 
     if not args.dry_run:
         by_name = {db.company_key(c.name): c.tier for c in cfg.companies}
-        tier_of = lambda j: cfg.prefs.company_tiers.tier_of(j["company"]) or by_name.get(j["company_key"])  # noqa: E731
+        mine = {w.company.casefold() for w in watch}
+        tier_of = lambda j: (1 if j["company"].casefold() in mine else None) or \
+            cfg.prefs.company_tiers.tier_of(j["company"]) or by_name.get(j["company_key"])  # noqa: E731
         meta = {
             "last_run": db.utcnow(),
             "summary": s,
@@ -114,9 +126,10 @@ def main(argv=None) -> int:
             "resume_path": str(args.resume),
             "resume_version_hash": resume.version_hash,
             "partial_run": bool(args.source or args.company),
+            "coverage": coverage_rows(conn, summary, watch),
         }
         counts = write_data_js(paths.DASHBOARD / "data.js", db.open_jobs(conn), meta, cfg.prefs.timezone,
-                               resume.version_hash, cfg.prefs.top_n, tier_of)
+                               resume.version_hash, cfg.prefs.top_n, tier_of, {w.company for w in watch})
         log.info("dashboard: %d visible, %d filtered -> %s", counts["visible"], counts["filtered"],
                  paths.DASHBOARD / "index.html")
     conn.close()
@@ -124,8 +137,15 @@ def main(argv=None) -> int:
         tmp.cleanup()
 
     log.info("run summary: %s", json.dumps({k: v for k, v in s.items() if k != "new_strong"}))
+    ok, attempted = s["sources_ok"], s["sources_checked"]
+    log.info("coverage: %d of %d companies/sources checked successfully this run (%d not due, skipped)",
+             ok, attempted, s["sources_skipped"])
     for f in s["failures"]:
         log.warning("INCOMPLETE COVERAGE: %s (%s) failed: %s", f["company"], f["source"], f["error"])
+    for m in s["manual"]:
+        log.warning("MANUAL CHECK NEEDED: %s %s (%s)", m["company"], m["url"] or "", m["error"])
+    for p in s["partial"]:
+        log.warning("PARTIAL: %s (%s): %s", p["company"], p["source"], p["why"])
     return 0 if s["complete"] else 1
 
 

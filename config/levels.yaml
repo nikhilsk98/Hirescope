@@ -1,0 +1,51 @@
+# Map title level names to a common scale:
+#   intern < entry < mid < senior < staff_plus ; manager is separate (people management).
+# Patterns are regexes searched in the normalized title (lowercase, abbreviations expanded, e.g.
+# "Sr. SWE II" -> "senior software engineer ii"). Company rules are checked first, then generic.
+# "mid_or_senior" means it depends on stated years of experience: <= mid_max_yoe -> mid, else senior.
+mid_max_yoe: 5
+
+companies:
+  Amazon:
+    - {pattern: '\b(sde|software development engineer|software dev engineer)\s*(i|1)\b(?!\s*(i|1))', level: entry}
+    - {pattern: '\b(sde|software development engineer|software dev engineer)\s*(ii|2)\b', level: mid}
+    - {pattern: '\b(sde|software development engineer|software dev engineer)\s*(iii|3)\b', level: senior}
+    - {pattern: '\bprincipal\b', level: staff_plus}
+  Google:
+    - {pattern: '\bl3\b', level: entry}
+    - {pattern: '\bl4\b', level: mid}
+    - {pattern: '\bl5\b', level: senior}
+    - {pattern: '\bsoftware engineer iii\b', level: mid}     # Google SWE III ~ L4, 2-5 YOE
+    - {pattern: '\bsoftware engineer ii\b', level: entry}    # Google SWE II ~ L3
+  Microsoft:
+    - {pattern: '\b(59|60)\b', level: entry}
+    - {pattern: '\b(61|62)\b', level: mid}
+    - {pattern: '\b(63|64)\b', level: senior}
+    - {pattern: '\bsoftware engineer ii\b', level: mid}
+  Meta:
+    - {pattern: '\be3\b', level: entry}
+    - {pattern: '\be4\b', level: mid}
+    - {pattern: '\be5\b', level: senior}
+    - {pattern: '\be[6-9]\b', level: staff_plus}
+  Apple:
+    - {pattern: '\bict ?2\b', level: entry}
+    - {pattern: '\bict ?3\b', level: mid}
+    - {pattern: '\bict ?4\b', level: senior}
+    - {pattern: '\bict ?[56]\b', level: staff_plus}
+
+generic:   # first match wins, so order matters
+  - {pattern: '\b(intern|internship|co op|coop|apprentice)\b', level: intern}
+  - {pattern: '\b(distinguished|fellow)\b', level: staff_plus}
+  - {pattern: '\b(principal|staff)\b', level: staff_plus}
+  - {pattern: '\barchitect\b', level: staff_plus}
+  - {pattern: '\b(director|head of|vp|vice president|chief)\b', level: manager}
+  - {pattern: '\b(engineering manager|manager|management)\b', level: manager}
+  - {pattern: '\b(senior|sr)\b', level: senior}
+  - {pattern: '\blead\b', level: senior}
+  - {pattern: '\b(new graduate|university graduate|college graduate|early career|entry level|junior|graduate|associate|apprenticeship|rotational)\b', level: entry}
+  - {pattern: '\b(engineer|developer|sde|swe|programmer)\s+(i|1)\b(?!\s*(i|1))', level: entry}
+  - {pattern: '\b(engineer|developer|sde|swe|programmer|analyst)\s+(ii|2)\b', level: mid}
+  - {pattern: '\b(engineer|developer|sde|swe|programmer)\s+(iii|3)\b', level: mid_or_senior}
+  - {pattern: '\b(engineer|developer|sde|swe|programmer)\s+(iv|v|vi|4|5|6)\b', level: senior}
+  - {pattern: '\b(level|l)\s*(1|2)\b', level: entry}
+  - {pattern: '\b(level|l)\s*3\b', level: mid}

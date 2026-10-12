@@ -1,56 +1,66 @@
 # Copy to inputs/preferences.yaml (gitignored) and fill in YOUR values.
-# Everything below is an EXAMPLE, not facts about you.
+# Defaults below are the two-track profile: Spring 2027 co-op/intern + full-time from May 2027, USA,
+# entry through mid level (0-5 years). Titles and level words live in config/title_rules.yaml and
+# config/levels.yaml; anything here is added on top.
 
 # --- Roles -------------------------------------------------------------
-target_titles:            # matched fuzzily against normalized job titles
-  - Software Engineer
-  - Machine Learning Engineer
-related_titles:           # also accepted, scored slightly lower on "level"
-  - Backend Engineer
-  - Data Engineer
-  - Software Developer
-excluded_title_words:     # any of these in the title -> hard-filtered
-  - senior
+target_titles: []         # extra core titles (title_rules.yaml core_titles already covers SWE/SDE/etc.)
+related_titles: []        # extra related titles
+excluded_title_words:     # any of these in the title -> filtered ("senior" is handled as Stretch below)
   - staff
   - principal
-  - manager
-  - lead
+  - distinguished
   - director
-  - head
+  - manager
+  - engineering manager
   - architect
+  - head of
 
-# --- Level -------------------------------------------------------------
-experience_level: entry   # entry | mid
-max_yoe: 2                # postings requiring more than this many years are flagged/filtered
-employment_types:         # any of: internship, co-op, new_grad, full_time
-  - new_grad
-  - full_time
+# --- Level & experience --------------------------------------------------
+levels:
+  include: [intern, entry, mid, unknown]   # "unknown" = no level in the title (plain "Software Engineer")
+  stretch: [senior]                        # kept with label capped at Stretch, if it asks <= yoe.match_max
+  exclude: [staff_plus, manager]
+yoe:
+  match_max: 5            # roles asking 0-5 years are a full match
+  stretch_max: 6          # 5-6 years -> Stretch
+  filter_min: 7           # 7+ years -> Filtered Out (with the reason)
+years_experience: null    # your own years of professional experience (informational)
 graduation_date: 2027-05  # YYYY-MM
-start_date: 2027-06       # earliest start, YYYY-MM
+
+# --- Tracks (both searched every run) --------------------------------------
+tracks:
+  coop_intern:
+    enabled: true
+    start_window: ["2026-12", "2027-03"]   # Spring co-op / off-cycle start window
+    boost_terms: ["Spring 2027", "Winter 2027", "January 2027", "Jan 2027"]
+    filter_summer_only: true               # summer-only internships hidden (full-time starts May 2027)
+  full_time:
+    enabled: true
+    start_from: "2027-05"
+    boost_terms: ["Class of 2027", "2027 start", "New Grad 2027", "2027 New Grad"]
 
 # --- Location ----------------------------------------------------------
-locations:                # substring match against the job's location text
-  - Boston
-  - New York
-  - San Francisco
-  - Seattle
+country: US               # all US states + Remote (US); non-US postings are filtered
+preferred_locations: []   # optional soft boost, e.g. [Boston, New York, Seattle]
 work_modes: [remote, hybrid, onsite]
-remote_countries: [United States, US, USA]   # remote roles must be open to one of these
 
 # --- Domain / pay / authorization -------------------------------------
-domains: [machine learning, infrastructure, developer tools]
+domains: []
 salary:
-  min: 100000
+  min: null
   currency: USD
   mode: soft              # hard = filter out below min (only when salary is stated); soft = score only
-work_authorization:
-  needs_sponsorship: false        # true -> "no sponsorship" postings become a red flag
-  us_citizen: false               # false -> "US citizens only" postings become a red flag
+work_authorization:       # never assumed: fill these in yourself
+  needs_sponsorship: null # true -> "no sponsorship" postings are penalized; null = unknown (flag only)
+  us_citizen: null        # false -> "US citizens only" postings are penalized; null = unknown
 
 # --- Companies (tiers) --------------------------------------------------
+# Tiers override config/companies.yaml. tier1: every run; tier2: daily; tier3: every 3 days.
+# Companies in inputs/my_companies.csv are checked every run regardless.
 company_tiers:
-  tier1: [Anthropic, Databricks]
-  tier2: [Figma]
+  tier1: []
+  tier2: []
   tier3: []
   excluded: []
 
@@ -58,24 +68,24 @@ company_tiers:
 max_posting_age_days: 60
 
 # --- Hard exclusions vs soft preferences -------------------------------
-# Each of these may be "hard" (hide the job, viewable in the Filtered tab)
-# or "soft" (only lowers the score).
 rules:
   title: hard
   seniority: hard
   location: hard
-  yoe: soft
-  employment_type: soft
+  yoe: hard               # applies to yoe.filter_min+
+  employment_type: soft   # contract / part-time / temporary
   posting_age: soft
 
 # --- Scoring -----------------------------------------------------------
 weights:
-  qualification: 0.65     # overall = qualification*w + preference*w (weights normalized)
+  qualification: 0.65
   preference: 0.35
   qualification_parts: {skills: 0.4, semantic: 0.4, level: 0.2}
-  preference_parts: {location: 0.35, company_tier: 0.25, freshness: 0.2, employment_type: 0.1, salary: 0.1}
+  preference_parts: {location: 0.3, company_tier: 0.25, freshness: 0.25, employment_type: 0.1, salary: 0.1}
 thresholds:
-  strong: 70              # >= strong -> Strong
-  stretch: 50             # >= stretch -> Stretch, else Weak
-top_n: 200                # max non-filtered jobs written to the dashboard
+  strong: 70
+  stretch: 50
+top_n: 1500               # max non-filtered jobs written to the dashboard
 timezone: America/New_York
+my_companies_csv: inputs/my_companies.csv
+statuses_import_dir: ~/Downloads

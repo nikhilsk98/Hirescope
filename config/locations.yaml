@@ -1,0 +1,132 @@
+# Location aliases and country detection. Matching is case-insensitive.
+# Edit freely; no code changes needed.
+
+# Variant -> canonical display name (applied to each location part).
+aliases:
+  nyc: New York, NY
+  new york city: New York, NY
+  new york city, ny: New York, NY
+  manhattan: New York, NY
+  sf: San Francisco, CA
+  san francisco bay area: SF Bay Area, CA
+  sf bay area: SF Bay Area, CA
+  bay area: SF Bay Area, CA
+  silicon valley: SF Bay Area, CA
+  la: Los Angeles, CA
+  dc: Washington, DC
+  washington d.c.: Washington, DC
+  washington, d.c.: Washington, DC
+  dmv: Washington, DC
+  boston metro: Boston, MA
+  greater boston: Boston, MA
+  seattle metro: Seattle, WA
+  greater seattle area: Seattle, WA
+  research triangle: Raleigh, NC
+
+# Phrases that mean "remote, open to the United States".
+remote_us:
+  - remote - us
+  - remote – us
+  - remote-us
+  - remote us
+  - us remote
+  - us-remote
+  - remote (us)
+  - remote (usa)
+  - remote, us
+  - remote, usa
+  - remote, united states
+  - remote - united states
+  - remote in the us
+  - remote within the us
+  - remote within the united states
+  - united states (remote)
+  - united states - remote
+  - us (remote)
+  - usa (remote)
+  - anywhere in us
+  - anywhere in the us
+  - anywhere in the united states
+  - north america (remote)
+
+# Strings that alone mean the United States.
+us_names: [united states, united states of america, usa, u.s.a., u.s., us, america]
+
+us_states:
+  AL: Alabama
+  AK: Alaska
+  AZ: Arizona
+  AR: Arkansas
+  CA: California
+  CO: Colorado
+  CT: Connecticut
+  DE: Delaware
+  DC: District of Columbia
+  FL: Florida
+  GA: Georgia
+  HI: Hawaii
+  ID: Idaho
+  IL: Illinois
+  IN: Indiana
+  IA: Iowa
+  KS: Kansas
+  KY: Kentucky
+  LA: Louisiana
+  ME: Maine
+  MD: Maryland
+  MA: Massachusetts
+  MI: Michigan
+  MN: Minnesota
+  MS: Mississippi
+  MO: Missouri
+  MT: Montana
+  NE: Nebraska
+  NV: Nevada
+  NH: New Hampshire
+  NJ: New Jersey
+  NM: New Mexico
+  NY: New York
+  NC: North Carolina
+  ND: North Dakota
+  OH: Ohio
+  OK: Oklahoma
+  OR: Oregon
+  PA: Pennsylvania
+  RI: Rhode Island
+  SC: South Carolina
+  SD: South Dakota
+  TN: Tennessee
+  TX: Texas
+  UT: Utah
+  VT: Vermont
+  VA: Virginia
+  WA: Washington
+  WV: West Virginia
+  WI: Wisconsin
+  WY: Wyoming
+  PR: Puerto Rico
+
+# Well-known US cities that often appear without a state.
+us_cities: [new york, san francisco, seattle, boston, austin, chicago, los angeles, san jose, mountain view,
+  palo alto, menlo park, sunnyvale, santa clara, cupertino, redmond, bellevue, kirkland, cambridge, denver,
+  boulder, atlanta, dallas, houston, miami, phoenix, portland, pittsburgh, philadelphia, raleigh, durham,
+  salt lake city, san diego, irvine, oakland, berkeley, brooklyn, jersey city, arlington, mclean, reston,
+  herndon, washington dc, nashville, minneapolis, detroit, columbus, charlotte, st. louis, baltimore,
+  sacramento, san mateo, redwood city, foster city, south san francisco, burlingame, fremont, milpitas,
+  somerville, waltham, lexington, burlington, new haven, providence, ann arbor, madison, madison wi, plano,
+  irving, frisco, scottsdale, tempe, chandler, lehi, provo, boise, orlando, tampa, jacksonville, richmond,
+  huntsville, albuquerque, las vegas, honolulu, anchorage, hillsboro, beaverton, vancouver wa, everett, tacoma]
+
+# Countries and cities that mean "not the US". (Canadian provinces are listed so ", ON" isn't a US state.)
+non_us: [canada, ontario, quebec, british columbia, alberta, toronto, montreal, vancouver, ottawa, waterloo,
+  calgary, united kingdom, uk, england, scotland, wales, london, manchester, edinburgh, cambridge uk, ireland,
+  dublin, india, bengaluru, bangalore, hyderabad, pune, mumbai, chennai, gurgaon, gurugram, noida, new delhi,
+  delhi, germany, berlin, munich, frankfurt, hamburg, france, paris, netherlands, amsterdam, spain, madrid,
+  barcelona, portugal, lisbon, italy, milan, poland, warsaw, krakow, romania, bucharest, serbia, belgrade,
+  switzerland, zurich, geneva, sweden, stockholm, denmark, copenhagen, aarhus, norway, oslo, finland, helsinki,
+  israel, tel aviv, haifa, yokneam, singapore, japan, tokyo, china, beijing, shanghai, shenzhen, hong kong,
+  taiwan, taipei, korea, seoul, australia, sydney, melbourne, new zealand, auckland, brazil, sao paulo,
+  são paulo, mexico, mexico city, guadalajara, argentina, buenos aires, colombia, bogota, chile, philippines,
+  manila, vietnam, indonesia, malaysia, thailand, uae, dubai, saudi arabia, south africa, nigeria, egypt,
+  turkey, istanbul, armenia, yerevan, ukraine, kyiv, czech republic, prague, austria, vienna, belgium,
+  brussels, greece, athens, hungary, budapest, emea, apac, latam, europe, asia]
