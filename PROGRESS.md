@@ -3,7 +3,7 @@
 Resume here: read this file and `git log --oneline` first, then continue from **In progress**.
 
 ## Current phase
-Pre-Phase 4 housekeeping: remove Claude co-author lines from history.
+Phase 4 (starting).
 
 ## Completed
 - Phase 1 — vertical slice (Greenhouse → SQLite → scoring → dashboard → job package)
@@ -16,7 +16,8 @@ Pre-Phase 4 housekeeping: remove Claude co-author lines from history.
 ## In progress
 - [x] Disable Claude attribution in `.claude/settings.json` (`attribution.commit` / `.pr` = "", `sessionUrl` = false)
 - [x] Ground rule added to BUILD_PROMPT.md
-- [ ] Backup branch `backup-before-rewrite`, rewrite main's commit messages, force-push, verify
+- [x] Backup branch `backup-before-rewrite` (local only), main's messages rewritten (author/dates unchanged), force-pushed;
+  `git log origin/main` has 0 Co-Authored-By: Claude lines
 
 ## Next
 Phases 4 → 7 per BUILD_PROMPT.md.
@@ -26,4 +27,6 @@ Phases 4 → 7 per BUILD_PROMPT.md.
 - 45 sources return partial listings (page caps); closures for those are verified per job.
 
 ## Needs Nikhil
-(none yet)
+- Confirm GitHub `main` looks right → then I delete the local `backup-before-rewrite` branch.
+- Old remote branches `phase1-vertical-slice` and `phase2` still contain the 3 original commits with the Claude
+  trailer (their content is already in main). Say "delete old branches" to remove them from GitHub.
