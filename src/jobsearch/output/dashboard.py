@@ -94,7 +94,8 @@ def coverage_rows(conn, summary, watch) -> list[dict]:
         multi = r["source"].startswith("simplify")
         rows.append({
             "company": r["company"], "source": r["source"],
-            "status": o.status if o else ("skipped" if r["status"] == "ok" else r["status"]),
+            # not checked this run -> "skipped" (not due); a --rescore run checks nothing, so keep the last status
+            "status": o.status if o else (r["status"] if not this_run or r["status"] != "ok" else "skipped"),
             "last_status": r["status"], "last_checked": r["last_checked"], "last_ok": r.get("last_ok"),
             "error": r["error"] if r["status"] != "ok" else None, "notes": r["error"] if r["status"] == "ok" else None,
             "partial": r.get("partial"), "detected_via": r.get("detected_via"), "tier": r.get("tier"),
@@ -116,7 +117,16 @@ def write_data_js(path: Path, jobs: list[dict], meta: dict, tz: str, resume_hash
     then the rest, up to max_filtered; counts per reason cover all of them.
     """
     mine = {c.casefold() for c in (my_companies or set())}
-    visible = sorted((j for j in jobs if not j.get("filtered")), key=lambda j: -(j.get("score") or 0))[:top_n]
+    # top_n per track, so one track never crowds the other out of the dashboard
+    ranked = sorted((j for j in jobs if not j.get("filtered")), key=lambda j: -(j.get("score") or 0))
+    per_track: dict[str, int] = {}
+    visible = []
+    for j in ranked:
+        t = j.get("track_override") or j.get("track") or "full_time"
+        if per_track.get(t, 0) < top_n:
+            per_track[t] = per_track.get(t, 0) + 1
+            visible.append(j)
+    visible_total = len(ranked)
     filtered = [j for j in jobs if j.get("filtered")]
     reason_counts: dict[str, int] = {}
     for j in filtered:
@@ -130,6 +140,7 @@ def write_data_js(path: Path, jobs: list[dict], meta: dict, tz: str, resume_hash
     for e in entries:
         e["my_company"] = e["company"].casefold() in mine
     meta = {**meta, "disclaimer": DISCLAIMER, "timezone": tz, "visible_count": len(visible),
+            "visible_total": visible_total, "top_n_per_track": top_n,
             "filtered_count": len(filtered), "filtered_listed": len(shown_filtered),
             "filtered_reasons": dict(sorted(reason_counts.items(), key=lambda kv: -kv[1]))}
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,9 +1,11 @@
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 INPUTS = ROOT / "inputs"
 CONFIG = ROOT / "config"
-DATA = ROOT / "data"
+# Runtime data (SQLite, JDs, logs). Override with JOBSEARCH_DATA_DIR, e.g. to keep it out of iCloud Drive.
+DATA = Path(os.environ["JOBSEARCH_DATA_DIR"]).expanduser() if os.environ.get("JOBSEARCH_DATA_DIR") else ROOT / "data"
 DASHBOARD = ROOT / "dashboard"
 
 RESUME = INPUTS / "master_resume.md"

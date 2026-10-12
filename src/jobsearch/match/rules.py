@@ -29,7 +29,7 @@ class TitleMatch:
 def _phrase_or_fuzzy(norm_title: str, phrases: list[str], rules: TitleRules) -> tuple[str | None, float]:
     best, best_r = None, 0.0
     for t in phrases:
-        nt = normalize_title(t, rules)
+        nt = normalize_title(t, rules)  # cached
         # the wanted title as a contiguous phrase -> match ("software engineer, backend" contains "software engineer").
         # Not a bag of words: "data center electrical engineer" must not match "data engineer".
         r = 100.0 if has_word(norm_title, nt) else fuzz.token_sort_ratio(nt, norm_title)

@@ -167,6 +167,14 @@ MIGRATIONS: list[str] = [
         payload TEXT
     );
     """,
+    # 3: job_sources lookups by job (fuzzy-dedupe NOT EXISTS, closed detection) were full scans
+    """
+    CREATE INDEX job_sources_job ON job_sources(job_pk, source);
+    """,
+    # 4: key/value metadata (extraction version + config fingerprint)
+    """
+    CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+    """,
 ]
 
 
@@ -441,6 +449,37 @@ def mark_missing(conn: sqlite3.Connection, source: str, company: str | None, see
     return closed
 
 
+def mark_missing_ids(conn, source: str, company: str | None, ids: set[str], now: str | None = None) -> int:
+    """Bump misses only for these listings (verified gone), closing jobs missing everywhere. Returns closed."""
+    now = now or utcnow()
+    closed = 0
+    for jid in ids:
+        q = "SELECT job_pk, company_key FROM job_sources WHERE source=? AND source_job_id=?"
+        args: tuple = (source, jid)
+        if company is not None:
+            q += " AND company_key=?"
+            args += (company_key(company),)
+        for r in conn.execute(q, args).fetchall():
+            conn.execute("UPDATE job_sources SET miss_count = miss_count + 1 WHERE source=? AND company_key=? "
+                         "AND source_job_id=?", (source, r["company_key"], jid))
+            if not conn.execute("SELECT 1 FROM job_sources WHERE job_pk=? AND miss_count < ?",
+                                (r["job_pk"], CLOSE_AFTER_MISSES)).fetchone():
+                closed += conn.execute("UPDATE jobs SET job_status='closed', status_changed_at=? WHERE id=? AND "
+                                       "job_status!='closed'", (now, r["job_pk"])).rowcount
+    return closed
+
+
+def relevant_listings(conn, source: str, company: str | None) -> dict[str, str | None]:
+    """Visible (not filtered) open listings for a source/company: job id -> apply url."""
+    q = ("SELECT s.source_job_id, j.apply_url FROM job_sources s JOIN jobs j ON j.id = s.job_pk WHERE s.source=? "
+         "AND j.filtered = 0 AND j.job_status != 'closed'")
+    args: tuple = (source,)
+    if company is not None:
+        q += " AND s.company_key=?"
+        args += (company_key(company),)
+    return {r[0]: r[1] for r in conn.execute(q, args)}
+
+
 def save_scores(conn: sqlite3.Connection, pk: int, **fields) -> None:
     conn.execute(
         f"UPDATE jobs SET {','.join(f'{k}=?' for k in fields)} WHERE id=?",
@@ -539,6 +578,24 @@ def set_link_check(conn, url: str, http_status: int | None, ok: bool | None, fin
                  "ON CONFLICT(url) DO UPDATE SET checked_at=excluded.checked_at, http_status=excluded.http_status, "
                  "ok=excluded.ok, final_url=excluded.final_url, note=excluded.note",
                  (url, utcnow(), http_status, None if ok is None else int(ok), final_url, note))
+
+
+def get_meta(conn, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def set_meta(conn, key: str, value: str) -> None:
+    conn.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                 (key, value))
+
+
+def update_extracted(conn, pk: int, rec: "JobRecord") -> None:
+    """Overwrite derived fields (re-extraction); identity, status and history are untouched."""
+    fields = [f for f in _EXTRACTED if f not in ("jd_path", "jd_hash", "source_url", "apply_url", "posted_date",
+                                                 "source_official", "canonical_key")]
+    conn.execute(f"UPDATE jobs SET {','.join(f'{f}=?' for f in fields)} WHERE id=?",
+                 [*(_enc(f, getattr(rec, f)) for f in fields), pk])
 
 
 def record_resume_version(conn, hash_: str, path: str) -> bool:

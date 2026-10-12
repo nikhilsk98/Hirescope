@@ -219,3 +219,9 @@ def test_score_bounded(cfg, resume):
     res = score(cfg, resume, job(yoe_required=6, employment_type="contract",
                                  flags={"clearance": {"value": "Clearance required"}}))
     assert 0 <= res.overall <= 100
+
+
+def test_no_jd_is_neutral_not_a_match(cfg, resume):
+    res = score(cfg, resume, job(min_reqs=[], pref_reqs=[], skills=[], extra={"has_jd": False}))
+    assert res.qualification == 50.0 and res.label != "Strong"
+    assert any("No job description" in g for g in res.gaps)

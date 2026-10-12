@@ -11,7 +11,7 @@ import yaml
 from .. import paths
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)   # hashed by identity (the loaded config is cached)
 class LocationConfig:
     aliases: dict[str, str]
     remote_us: tuple[str, ...]
@@ -34,11 +34,20 @@ def load_location_config(path: Path = paths.CONFIG / "locations.yaml") -> Locati
     )
 
 
-def _has(text: str, phrase: str) -> bool:
-    return re.search(rf"(?<![a-z]){re.escape(phrase)}(?![a-z])", text) is not None
+def _alt(phrases) -> re.Pattern:
+    """One compiled alternation with letter boundaries (longest phrases first)."""
+    body = "|".join(re.escape(p) for p in sorted(set(phrases), key=len, reverse=True)) or "(?!)"
+    return re.compile(rf"(?<![a-z])(?:{body})(?![a-z])")
 
 
-@dataclass
+@lru_cache(maxsize=4)
+def _patterns(cfg: "LocationConfig") -> dict[str, re.Pattern]:
+    return {"remote_us": _alt(cfg.remote_us), "non_us": _alt(cfg.non_us),
+            "states": _alt(n.lower() for n in cfg.states.values()), "us_names": _alt(cfg.us_names),
+            "us_cities": _alt(cfg.us_cities)}
+
+
+@dataclass(frozen=True)
 class Place:
     text: str
     country: str | None     # "US" | "non-US" | None (unknown)
@@ -51,10 +60,11 @@ class LocationInfo:
 
     @property
     def us(self) -> bool | None:
-        """True if any place is in the US, False if every place is known non-US, None if unknown."""
+        """True if any place is in the US; False if none is and at least one is known non-US
+        ("Warsaw - Poland · Digital"); None if nothing is known."""
         if any(p.country == "US" for p in self.places):
             return True
-        if self.places and all(p.country == "non-US" for p in self.places):
+        if any(p.country == "non-US" for p in self.places):
             return False
         return None
 
@@ -79,8 +89,9 @@ def _classify(part: str, cfg: LocationConfig) -> Place:
     low = re.sub(r"\s+", " ", raw.lower())
     if low in cfg.aliases:
         raw, low = cfg.aliases[low], cfg.aliases[low].lower()
+    pat = _patterns(cfg)
     remote = "remote" in low or "telecommute" in low or "work from home" in low or "anywhere" in low
-    if any(_has(low, p) for p in cfg.remote_us):
+    if pat["remote_us"].search(low):
         return Place("Remote (US)", "US", True)
 
     # "US, CA, Santa Clara" / "USA - CA - Santa Clara" / "US-WA-Seattle" (Amazon, Workday)
@@ -92,21 +103,28 @@ def _classify(part: str, cfg: LocationConfig) -> Place:
             return Place("Remote (US)", "US", True)
         return Place(raw, "US", remote)
 
-    # ", CA" / ", NY 10001" state abbreviation (case-sensitive so "on" or "in" never count)
-    if m := re.search(r",\s*([A-Z]{2})(?:\s+\d{5})?\s*(?:,\s*(?:US|USA|United States)\s*)?$", raw):
+    # ", CA" / ", NY 10001" / "...Meade MD" state abbreviation at the end (case-sensitive: "on"/"in" never count)
+    if m := re.search(r"(?:,|\s)\s*([A-Z]{2})(?:\s+\d{5})?\s*(?:,\s*(?:US|USA|United States)\s*)?$", raw):
         if m.group(1) in cfg.states:
             return Place(raw, "US", remote)
-    for name in cfg.non_us:  # before US cities: "London" is London, UK unless a state was given
-        if _has(low, name):
-            return Place(raw, "non-US", remote)
-    for name in cfg.states.values():
-        if _has(low, name.lower()):
-            return Place(raw, "US", remote)
-    if any(_has(low, n) for n in cfg.us_names):
+    # "CT - Hartford" / "GA - Alpharetta" (state code first)
+    if (m := re.match(r"^([A-Z]{2})\s*[-–]\s*[A-Za-z]", raw)) and m.group(1) in cfg.states:
+        return Place(raw, "US", remote)
+    if pat["non_us"].search(low):  # before US cities: "London" is London, UK unless a state was given
+        return Place(raw, "non-US", remote)
+    if pat["states"].search(low):
+        return Place(raw, "US", remote)
+    if pat["us_names"].search(low):
         return Place("Remote (US)" if remote else raw, "US", remote)
-    if any(_has(low, c) for c in cfg.us_cities):
+    if pat["us_cities"].search(low):
         return Place(raw, "US", remote)
     return Place(raw if raw else "Unknown", None, remote)
+
+
+@lru_cache(maxsize=20000)
+def _normalize_cached(text: str, cfg: LocationConfig) -> tuple[Place, ...]:
+    parts = [p for p in re.split(r"\s*[·|;•\n]\s*|\s+/\s+", text) if p.strip(" -–,()")]
+    return tuple(_classify(p, cfg) for p in parts)
 
 
 def normalize_location(text: str | None, cfg: LocationConfig | None = None) -> LocationInfo:
@@ -114,5 +132,4 @@ def normalize_location(text: str | None, cfg: LocationConfig | None = None) -> L
     cfg = cfg or load_location_config()
     if not text or not text.strip():
         return LocationInfo()
-    parts = [p for p in re.split(r"\s*[·|;•\n]\s*|\s+/\s+", text) if p.strip(" -–,()")]
-    return LocationInfo([_classify(p, cfg) for p in parts])
+    return LocationInfo(list(_normalize_cached(text, cfg)))

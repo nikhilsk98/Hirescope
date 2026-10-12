@@ -16,12 +16,14 @@ that later lists the same posting (same canonical key) takes the record over.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from ..config import Company
 from ..extract.track import COOP, FULL_TIME
 from .base import Adapter, Capabilities, FetchContext, FetchResult, NotModified, RawJob, SourceError
 from .canonical import canonical_key
+from .detect import from_url
 from .util import parse_dt
 
 log = logging.getLogger(__name__)
@@ -64,7 +66,7 @@ class SimplifyAdapter(Adapter):
 
         from .registry import ADAPTERS  # local import: registry imports this module
         enrichers = {n: ADAPTERS[n](self.http) for n in ENRICH_SOURCES if n in ADAPTERS}
-        jobs, enriched, failed = [], 0, 0
+        jobs, to_enrich = [], []
         for x in data:
             if not (x.get("active") and x.get("is_visible", True) and x.get("id") and x.get("title")):
                 continue
@@ -88,26 +90,40 @@ class SimplifyAdapter(Adapter):
                        "degrees": x.get("degrees")},
             )
             ats = (raw.canonical_key or "").split(":")[0]
-            if raw.description == "" and ats in enrichers and enriched < ctx.max_details \
-                    and ctx.want(raw.title, raw.location):
-                try:
-                    full = enrichers[ats].fetch_one(link, company=raw.company)
-                except Exception as e:  # noqa: BLE001 - keep the listing without a JD
-                    log.debug("simplify enrich failed %s: %s", link, e)
-                    full = None
-                    failed += 1
-                if full is not None:
-                    enriched += 1
-                    raw.description = full.description or ""
-                    raw.location = full.location or raw.location
-                    raw.posted_date = full.posted_date or raw.posted_date
-                    raw.employment_type = full.employment_type
-                    raw.extra.update({k: v for k, v in full.extra.items() if k == "deadline"})
+            board = (from_url(link) or {}).get("board", "")
+            if (ats, board.casefold()) in ctx.covered:
+                pass  # the employer's own board is fetched this run; that adapter supplies the JD
+            elif raw.description == "" and ats in enrichers and ctx.want(raw.title, raw.location):
+                to_enrich.append((raw, ats))
             jobs.append(raw)
+        # newest first, capped per run; the rest are enriched on later runs
+        to_enrich.sort(key=lambda t: -(t[0].posted_date.timestamp() if t[0].posted_date else 0))
+        capped = len(to_enrich) > ctx.max_details
+        to_enrich = to_enrich[:ctx.max_details]
+
+        def enrich(item):
+            raw, ats = item
+            try:
+                return raw, enrichers[ats].fetch_one(raw.apply_url, company=raw.company)
+            except Exception as e:  # noqa: BLE001 - keep the listing without a JD
+                log.debug("simplify enrich failed %s: %s", raw.apply_url, e)
+                return raw, None
+        enriched = failed = 0
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for raw, full in pool.map(enrich, to_enrich):
+                if full is None:
+                    failed += 1
+                    continue
+                enriched += 1
+                raw.description = full.description or ""
+                raw.location = full.location or raw.location
+                raw.posted_date = full.posted_date or raw.posted_date
+                raw.employment_type = full.employment_type
+                raw.extra.update({k: v for k, v in full.extra.items() if k == "deadline"})
         notes = [f"JD pulled from employer ATS for {enriched} new listings" + (f" ({failed} failed)" if failed else "")]
         partial = None
-        if enriched >= ctx.max_details:
-            notes.append(f"JD enrichment capped at {ctx.max_details}; more next run")
-        from .detect import directory_from_simplify
+        if capped:
+            notes.append(f"JD enrichment capped at {ctx.max_details} newest listings; the rest are enriched on later runs")
+        from .detect import directory_from_simplify  # noqa: F811
         return FetchResult(jobs=jobs, validators={url: self.http.validators_of(resp)}, notes=notes, partial=partial,
                            directory=directory_from_simplify([x for x in data if x.get("active")]))

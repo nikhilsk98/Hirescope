@@ -21,6 +21,17 @@
     <div id="warnings"></div>
   </header>
 
+  <div class="track-bar" role="radiogroup" aria-label="Track">
+    <span class="track-label">Track</span>
+    <button type="button" data-track="coop_intern" class="track-btn coop" role="radio">Co-op / Intern <span class="n"></span></button>
+    <button type="button" data-track="full_time" class="track-btn ft" role="radio">Full-time <span class="n"></span></button>
+    <button type="button" data-track="both" class="track-btn" role="radio">Both <span class="n"></span></button>
+    <form id="add-job" class="add-job" autocomplete="off">
+      <input id="add-url" type="url" placeholder="Add job by URL (school co-op board, any posting)…" aria-label="Job URL">
+      <button type="submit">Copy add command</button>
+    </form>
+  </div>
+
   <nav id="tabs" class="tabs" role="tablist"></nav>
 
   <section class="controls">
@@ -32,6 +43,8 @@
     <select id="f-location" aria-label="Location / work mode"></select>
     <select id="f-status" aria-label="My status"></select>
     <select id="f-flag" aria-label="Flags"></select>
+    <select id="f-mine" aria-label="My Companies"></select>
+    <select id="f-level" aria-label="Level"></select>
     <span id="count" class="count"></span>
   </section>
 
@@ -43,6 +56,8 @@
       <tbody id="rows"></tbody>
     </table>
     <p id="empty" class="empty" hidden>No jobs match these filters.</p>
+    <section id="coverage" hidden></section>
+    <section id="filtered-summary" class="muted" hidden></section>
   </main>
 
   <script src="data.js"></script>

@@ -56,6 +56,7 @@ class Capabilities:
     official: bool                # the employer's own ATS / careers system (vs an aggregator list)
     conditional: bool = False     # supports ETag / If-None-Match
     multi_company: bool = False   # one feed lists many companies (closed detection spans the feed)
+    query_based: bool = False     # listing comes from searches, so "not returned" != "closed" (verify instead)
 
 
 def _always(title: str, location: str | None) -> bool:
@@ -72,6 +73,8 @@ class FetchContext:
     validators: dict[str, dict] = field(default_factory=dict)   # url -> {"etag","last_modified"}
     pages: dict[str, dict] = field(default_factory=dict)        # url -> {"lastmod","payload"} (page cache)
     max_details: int = 400                  # detail fetches allowed this run for this company
+    covered: set[tuple[str, str]] = field(default_factory=set)  # (source, board) fetched officially this run
+    known_relevant: dict[str, str | None] = field(default_factory=dict)  # visible job id -> apply url
 
     def needs_detail(self, job_id: str, now: datetime | None = None) -> bool:
         ts = self.known.get(job_id)
@@ -91,6 +94,9 @@ class FetchResult:
     seen_ids: set[str] | None = None        # all ids present at the source (if more than `jobs`)
     notes: list[str] = field(default_factory=list)
     directory: dict[str, dict] | None = None  # company -> ATS fields learned from a feed (for detection)
+    confirmed_open: set[str] = field(default_factory=set)    # partial listing: verified still open
+    confirmed_closed: set[str] = field(default_factory=set)  # partial listing: verified gone (404 / inactive)
+    protected: set[str] = field(default_factory=set)         # relevant, missing, not verified: treat as present
 
 
 class Adapter:
@@ -110,6 +116,29 @@ class Adapter:
     def fetch_one(self, url: str) -> RawJob | None:
         """Fetch a single posting by its public URL (Add job by URL). Optional."""
         return None
+
+    def check_open(self, company: Company, job_id: str, apply_url: str | None) -> bool | None:
+        """Is this posting still open? True / False (404, inactive) / None (can't tell). Used when a listing
+        was capped, so a missing job can't be assumed closed."""
+        return None
+
+    def verify_missing(self, company: Company, ctx: FetchContext, res: FetchResult, limit: int = 50) -> None:
+        """For capped listings: check relevant jobs we expected but didn't see."""
+        seen = {j.job_id for j in res.jobs} | set(res.seen_ids or ())
+        missing = [(k, v) for k, v in ctx.known_relevant.items() if k not in seen]
+        for i, (jid, url) in enumerate(missing):
+            state = None
+            if i < limit:
+                try:
+                    state = self.check_open(company, jid, url)
+                except Exception:  # noqa: BLE001 - unknown: leave it alone
+                    state = None
+            if state is True:
+                res.confirmed_open.add(jid)
+            elif state is False:
+                res.confirmed_closed.add(jid)
+            else:
+                res.protected.add(jid)   # can't tell this run: never close on a guess
 
 
 class NotModified(Exception):

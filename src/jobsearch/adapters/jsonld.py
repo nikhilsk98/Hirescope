@@ -62,7 +62,13 @@ def _place(p) -> str | None:
     country = a.get("addressCountry")
     if isinstance(country, dict):
         country = country.get("name")
-    return ", ".join(x for x in (a.get("addressLocality"), a.get("addressRegion"), country) if x) or p.get("name")
+    parts: list[str] = []
+    for x in (a.get("addressLocality"), a.get("addressRegion"), country):
+        for piece in str(x or "").split(","):
+            piece = piece.strip()
+            if piece and piece.casefold() not in (q.casefold() for q in parts):
+                parts.append(piece)
+    return ", ".join(parts) or p.get("name")
 
 
 def posting_to_raw(company: str, d: dict, page_url: str, source: str) -> RawJob:

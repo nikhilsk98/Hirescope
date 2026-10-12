@@ -35,10 +35,18 @@ from .watchlist import WatchItem
 
 log = logging.getLogger(__name__)
 
+# Bump when extraction logic changes; stored jobs are then re-extracted from their saved title/location/JD.
+EXTRACT_VERSION = "2026-10-12.2"
+EXTRACT_CONFIGS = ("title_rules.yaml", "levels.yaml", "locations.yaml", "skills_synonyms.yaml")
 TIER_INTERVAL_HOURS = {1: 0, 2: 20, 3: 70}       # tier 1 every run, tier 2 daily, tier 3 every 3 days
 TIER_MAX_PAGES = {1: 100, 2: 25, 3: 10}
 DIRECTORY_KEY = "ats_directory:simplify"
-WORKERS = 8
+WORKERS = 16
+# Each source family gets its own worker pool so a slow shared host (e.g. api.smartrecruiters.com, where
+# every request waits for the per-host rate limiter) can never hold every worker (head-of-line blocking).
+# Workday tenants each have their own host, so that family gets the most workers.
+POOL_SIZES = {"greenhouse": 3, "lever": 2, "ashby": 2, "smartrecruiters": 2, "workday": 6, "amazon": 1,
+              "netflix": 1, "simplify": 2, "jsonld": 3, "jsonld_sitemap": 1}
 
 
 @dataclass
@@ -142,12 +150,61 @@ def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None, official: bool = Tr
         grad_years=parse_grad_years(f"{raw.title}\n{text}"),
         flags=extract_flags(text),
         extra={**raw.extra, **({"yoe_preferred": y.min, "yoe_preferred_evidence": y.evidence} if y.min is not None
-                               else {}), **({"has_jd": False} if not text else {})},
+                               else {}), **({"has_jd": False} if not text else {}),
+               **({"employment_type_raw": raw.employment_type} if raw.employment_type else {})},
         track=track.track, track_evidence=track.evidence, track_confidence=track.confidence,
         level=level.level, level_evidence=level.evidence, terms=terms,
         canonical_key=raw.canonical_key, location_us=loc.us, remote_us=loc.remote_us,
         source_official=official,
     )
+
+
+def extraction_fingerprint() -> str:
+    h = hashlib.sha256(EXTRACT_VERSION.encode())
+    for name in EXTRACT_CONFIGS:
+        p = paths.CONFIG / name
+        if p.exists():
+            h.update(p.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def reextract_all(conn, cfg: Config) -> int:
+    """Recompute derived fields (track, level, location flags, terms, skills, requirements, flags) for every open
+    job from what is stored, so parser/config fixes apply without re-downloading anything."""
+    n = 0
+    for job in db.open_jobs(conn):
+        jd = ""
+        if job.get("jd_path") and Path(job["jd_path"]).exists():
+            jd = Path(job["jd_path"]).read_text(encoding="utf-8")
+        hint = {"simplify_internships": "coop_intern", "simplify_newgrad": "full_time"}.get(job["source"])
+        raw = RawJob(company=job["company"], job_id=job["job_id"], title=job["title"], source=job["source"],
+                     source_url=job.get("source_url") or "", apply_url=job.get("apply_url"),
+                     location=job.get("location"), description=jd,
+                     employment_type=(job.get("extra") or {}).get("employment_type_raw") or job.get("employment_type"),
+                     canonical_key=job.get("canonical_key"),
+                     track_hint=hint, terms=[t for t in (job.get("terms") or []) if t],
+                     extra={k: v for k, v in (job.get("extra") or {}).items() if k != "has_jd"})
+        rec = to_record(raw, cfg, None, bool(job.get("source_official", 1)))
+        db.update_extracted(conn, job["id"], rec)
+        n += 1
+    conn.commit()
+    return n
+
+
+def ensure_extraction_current(conn, cfg: Config, force: bool = False) -> int:
+    fp = extraction_fingerprint()
+    if not force and db.get_meta(conn, "extraction") == fp:
+        return 0
+    n = reextract_all(conn, cfg)
+    if db.get_meta(conn, "extract_version") != EXTRACT_VERSION:
+        # extraction code changed: let the next fetch re-download (no 304s) so values only the source has
+        # (raw employment types etc.) are re-read too
+        conn.execute("DELETE FROM http_cache")
+        db.set_meta(conn, "extract_version", EXTRACT_VERSION)
+    db.set_meta(conn, "extraction", fp)
+    conn.commit()
+    log.info("re-extracted %d stored jobs (extraction version/config changed)", n)
+    return n
 
 
 # --- planning ------------------------------------------------------------------------------------
@@ -227,9 +284,10 @@ def _context(conn, cfg: Config, company: Company, label: str, multi: bool, tier:
         max_pages=TIER_MAX_PAGES.get(tier, 10),
         want=lambda title, loc: quick_relevant(title, loc, cfg.prefs, cfg.title_rules),
         known=db.known_listings(conn, label, None if multi else company.name),
+        known_relevant=db.relevant_listings(conn, label, None if multi else company.name),
         validators=validators,
         pages=pages_cache,
-        max_details=400 if full else 150,
+        max_details=200 if multi else (400 if full else 150),
     )
 
 
@@ -268,10 +326,11 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
         w = p.watch
         assert w is not None
         det = detector.detect(w.company, w.careers_url, db.get_company_source(conn, w.company))
+        origin = "ad_hoc" if p.reason == "ad hoc" else "my_companies"
         if det.company is None:
-            summary.outcomes.append(SourceOutcome(w.company, "none", False, status="manual", origin="my_companies",
+            summary.outcomes.append(SourceOutcome(w.company, "none", False, status="manual", origin=origin,
                                                   tier=1, detected_via="manual", url=w.careers_url, error=det.detail))
-            db.set_source_status(conn, w.company, "none", "manual", det.detail, None, origin="my_companies", tier=1,
+            db.set_source_status(conn, w.company, "none", "manual", det.detail, None, origin=origin, tier=1,
                                  url=w.careers_url, detected_via="manual")
             continue
         if det.via != "cache":
@@ -291,6 +350,8 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
         ctx = contexts[(company.name, company.source)]
         try:
             res = adapter.fetch(company, ctx)
+            if res.partial or adapter.capabilities.query_based:
+                adapter.verify_missing(company, ctx, res)
             return Fetched(p, company, via, res, None, label, adapter.capabilities.official, multi)
         except Exception as e:  # noqa: BLE001 - isolate every source failure
             if via == "cache" and p.watch is not None:  # cached detection failed: re-detect once now
@@ -309,21 +370,35 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
     contexts: dict[tuple[str, str], FetchContext] = {}
     validators = {r[0]: {"etag": r[1], "last_modified": r[2]}
                   for r in conn.execute("SELECT url, etag, last_modified FROM http_cache")}
+    covered = {(c.source, (c.board or "").casefold()) for _, c, _ in jobs_to_run if c.board}
     for p, company, via in jobs_to_run:
         cls = ADAPTERS.get(company.source)
         if cls is None:
             continue
         a = cls(client)
         t = 1 if company.origin == "my_companies" else tier_of(company, cfg)
-        contexts[(company.name, company.source)] = _context(conn, cfg, company, a.source_label(company),
-                                                           a.capabilities.multi_company, t, pages_cache, validators)
+        ctx = _context(conn, cfg, company, a.source_label(company), a.capabilities.multi_company, t, pages_cache,
+                       validators)
+        ctx.covered = covered
+        contexts[(company.name, company.source)] = ctx
 
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        futures = [pool.submit(work, item) for item in jobs_to_run]
+    scale = max(1, workers) / WORKERS
+    pools: dict[str, ThreadPoolExecutor] = {}
+    try:
+        futures = []
+        for item in jobs_to_run:
+            fam = item[1].source
+            if fam not in pools:
+                pools[fam] = ThreadPoolExecutor(max_workers=max(1, round(POOL_SIZES.get(fam, 2) * scale)),
+                                                thread_name_prefix=fam)
+            futures.append(pools[fam].submit(work, item))
         for fut in as_completed(futures):
             f = fut.result()
             summary.outcomes.append(_store(conn, cfg, f, jd_dir))
             conn.commit()
+    finally:
+        for pool in pools.values():
+            pool.shutdown(wait=True)
 
     score_all(conn, cfg, resume, embedder, summary)
     return summary
@@ -332,7 +407,7 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
 def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
     company = f.company
     assert company is not None
-    origin = f.planned.watch and "my_companies" or company.origin
+    origin = ("ad_hoc" if f.planned.reason == "ad hoc" else "my_companies") if f.planned.watch else company.origin
     tier = 1 if origin == "my_companies" else tier_of(company, cfg)
     label = f.label or company.source
     name = f.planned.watch.company if f.planned.watch else company.name
@@ -391,9 +466,18 @@ def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
         out.updated += status == "updated"
     out.partial = res.partial
     if res.partial:
-        out.notes = [*out.notes, "closed-job detection skipped (listing incomplete)"]
+        # Capped listing: a missing job is closed only if its own posting was verified gone.
+        for jid in res.confirmed_open:
+            db.touch_job(conn, label, name, jid, now)
+        out.closed = db.mark_missing_ids(conn, label, scope, res.confirmed_closed, now)
+        if res.confirmed_open or res.confirmed_closed:
+            out.notes = [*out.notes, f"listing capped: verified {len(res.confirmed_open)} still open, "
+                                     f"{len(res.confirmed_closed)} gone"]
     else:
-        out.closed = db.mark_missing(conn, label, scope, seen, now)
+        # search-based sources: relevant jobs we couldn't verify are kept as present (never closed on a guess)
+        for jid in res.confirmed_open | res.protected:
+            db.touch_job(conn, label, name, jid, now)
+        out.closed = db.mark_missing(conn, label, scope, seen | res.confirmed_open | res.protected, now)
     out.ok, out.status, out.jobs = True, "ok", len(seen)
     db.set_source_status(conn, name, label, "ok", "; ".join(out.notes) or None, len(seen), now,
                          partial=res.partial, **extra)

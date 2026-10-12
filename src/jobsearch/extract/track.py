@@ -46,8 +46,11 @@ def normalize_employment_type(value: str | None) -> str | None:
     if not value:
         return None
     v = value.strip().lower()
-    if v in _ET_COOP or "intern" in v or "co-op" in v:
-        return "internship" if "co-op" not in v and "coop" not in v else "co-op"
+    if re.search(r"\b(co-?op)\b", v):
+        return "co-op"
+    # whole words only: Lever's "International EOR" is not an internship
+    if v in _ET_COOP or re.search(r"\b(intern|interns|internship|apprentice|student)\b", v):
+        return "internship"
     if v in _ET_FT or "full" in v or "regular" in v or "permanent" in v:
         return "full_time"
     if "part" in v:
