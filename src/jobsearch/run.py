@@ -24,6 +24,11 @@ from .pipeline import compute_similar, ensure_extraction_current, run
 from .watchlist import WatchlistError, load_watchlist, resolve
 from .storage import db
 from .tracker import feedback, referrals, statuses
+from .ops import alerts, backup, digest, excel, health, notify
+from .ops.lock import Locked, RunLock
+from .ops.seasons import track_seasons
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 log = logging.getLogger("jobsearch")
 
@@ -55,7 +60,8 @@ def setup_logging(verbose: bool) -> Path:
 
 
 def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_file: Path,
-            partial_run: bool = False, last_run: str | None = None, learned=None, imported: dict | None = None) -> dict:
+            partial_run: bool = False, last_run: str | None = None, learned=None, imported: dict | None = None,
+            seasons: list[dict] | None = None) -> dict:
     """Write dashboard/data.js from the current DB state."""
     by_name = {db.company_key(c.name): c.tier for c in cfg.companies}
     mine = {w.company.casefold() for w in watch}
@@ -76,6 +82,8 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
         "applications_cfg": cfg.prefs.applications.model_dump(),
         "statuses_import": imported or {},
         "runs": db.recent_runs(conn),
+        "seasons": seasons or [],
+        "health_alerts": summary.get("health_alerts") or [],
     }
     jobs = db.open_jobs(conn)
     shown = select_visible(jobs, cfg.prefs.top_n)
@@ -125,16 +133,43 @@ def parse_args(argv=None):
                                                  "jobsearch-statuses*.json in statuses_import_dir")
     p.add_argument("--no-import", action="store_true", help="don't import dashboard statuses this run")
     p.add_argument("--no-email", action="store_true", help="skip email sources (LinkedIn job-alert emails over IMAP)")
+    p.add_argument("--quick", action="store_true", help="quick check: My Companies + tier-1 only, no link check, "
+                                                        "no backup/digest (what launchd runs every 2–3 hours)")
+    p.add_argument("--export-excel", nargs="?", const="", metavar="FILE", type=str,
+                   help="also write an .xlsx (default data/exports/hirescope-<date>.xlsx)")
+    p.add_argument("--digest", action="store_true", help="write the weekly digest now (default: first run on Sunday)")
+    p.add_argument("--no-notify", action="store_true", help="no macOS notifications this run")
+    p.add_argument("--no-backup", action="store_true", help="skip the daily backup this run")
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--resume", type=Path, default=paths.RESUME, help="resume markdown (default inputs/master_resume.md)")
     p.add_argument("--prefs", type=Path, default=paths.PREFERENCES, help="preferences yaml (default inputs/preferences.yaml)")
     return p.parse_args(argv)
 
 
+EX_TEMPFAIL = 75   # offline: launchd's next scheduled run retries
+
+
 def main(argv=None) -> int:
+    """Lock (one run at a time; stale locks replaced), offline check, then the run itself."""
     args = parse_args(argv)
     faulthandler.register(signal.SIGUSR1)  # `kill -USR1 <pid>` dumps every thread's stack to stderr
     log_file = setup_logging(args.verbose)
+    if not (args.rescore or args.dry_run) and not alerts.online():
+        log.error("offline (no network): nothing fetched; the next scheduled run will retry")
+        return EX_TEMPFAIL
+    lock = RunLock(paths.DATA / "run.lock", stale_hours=3, what="quick check" if args.quick else "run")
+    try:
+        lock.acquire()
+    except Locked as e:
+        log.warning("%s — skipping this %s", e, "quick check" if args.quick else "run")
+        return 0 if args.quick else 3
+    try:
+        return _main(args, log_file)
+    finally:
+        lock.release()
+
+
+def _main(args, log_file: Path) -> int:
     try:
         cfg = load_config(args.prefs)
         resume = parse_resume(args.resume, cfg.synonyms)
@@ -153,6 +188,7 @@ def main(argv=None) -> int:
     from .adapters.aggregator import AggregatorAdapter
     from .adapters.linkedin_alerts import LinkedInAlertsAdapter
     LinkedInAlertsAdapter.disabled = args.no_email
+    notify.ENABLED = cfg.prefs.notifications.enabled and not args.no_notify and not args.dry_run
     AggregatorAdapter.enabled = cfg.prefs.aggregator.enabled
     AggregatorAdapter.date_window = cfg.prefs.aggregator.date_posted
 
@@ -201,10 +237,10 @@ def main(argv=None) -> int:
     try:
         summary = run(conn, cfg, resume, [] if args.rescore else None, client, Embedder(conn), jd_dir, watch=watch,
                       only_company=args.company, only_source=args.source, force_all=args.all,
-                      workers=args.workers, watchlist_only=args.watchlist, learned=learned)
+                      workers=args.workers, watchlist_only=args.watchlist, learned=learned, quick=args.quick)
         conn.commit()
         links = None
-        if not args.no_link_check and not args.dry_run and not args.rescore:
+        if not args.no_link_check and not args.dry_run and not args.rescore and not args.quick:
             links = check_links(conn, client, db.open_jobs(conn))
             log.info("apply links: %s", links)
     finally:
@@ -214,7 +250,14 @@ def main(argv=None) -> int:
     s["reopened"] = [f"{r['company']}: {r['title']}" for r in statuses.reopened_shortlisted(conn, run_started)]
     for r in s["reopened"]:
         log.warning("REOPENED (you had it shortlisted): %s", r)
-    s["scope"] = "rescore" if args.rescore else ("partial" if (args.company or args.source or args.watchlist) else "full")
+    s["scope"] = "rescore" if args.rescore else "quick" if args.quick else (
+        "partial" if (args.company or args.source or args.watchlist) else "full")
+    s["health_alerts"] = [] if args.rescore else health.check(
+        summary.outcomes, lambda c, src: db.recent_job_counts(conn, c, src, 5))
+    for a in s["health_alerts"]:
+        log.warning("SOURCE HEALTH: %s", a["message"])
+    rows, early = alerts.new_strong(conn, run_started, cfg.prefs.notifications.early_bird_hours)
+    s["new_strong_rows"], s["early_bird"] = ([] if args.rescore else rows[:50]), ([] if args.rescore else early[:50])
     db.finish_run(conn, run_id, s)
 
     if args.rescore:  # keep the last real run's summary in the header
@@ -228,14 +271,39 @@ def main(argv=None) -> int:
                  "reopened": s["reopened"],
                  "by_track": s["by_track"], "rescored_at": db.utcnow(), "scope": "full"}
     if not args.dry_run:
+        tz = ZoneInfo(cfg.prefs.timezone)
+        today = datetime.now(tz).date()
+        seasons = track_seasons(conn, today)
         publish(conn, cfg, resume, s, coverage_rows(conn, summary, watch), watch, log_file,
-                partial_run=bool(args.source or args.company or args.watchlist), last_run=last_fetch if args.rescore else None,
-                learned=learned, imported=imported)
+                partial_run=bool(args.source or args.company or args.watchlist or args.quick),
+                last_run=last_fetch if args.rescore else None, learned=learned, imported=imported, seasons=seasons)
+        if not args.quick:
+            if not args.no_backup:
+                try:
+                    b = backup.backup(paths.DB, backup.backups_dir(cfg.prefs.backups.dir), today.isoformat(),
+                                      keep=cfg.prefs.backups.keep, extra_dirs=(paths.IMPORTS_DIR, paths.APPS_DIR))
+                    s["backup"] = str(b) if b else None
+                except (OSError, sqlite3.Error) as e:
+                    log.error("backup failed: %s", e)
+            dg_dir = paths.DATA / "digests"
+            if args.digest or digest.due(today, cfg.prefs.notifications.digest_weekday, dg_dir):
+                p = digest.write(conn, dg_dir, today, seasons, tuple(cfg.prefs.applications.follow_up_days))
+                s["digest"] = str(p)
+                notify.notify("HireScope weekly digest", f"Your week in review is ready: {p.name}", "data/digests")
+        if args.export_excel is not None:
+            out = Path(args.export_excel) if args.export_excel else paths.DATA / "exports" / f"hirescope-{today}.xlsx"
+            s["excel"] = str(excel.export(conn, out, cfg.prefs.top_n))
+            log.info("excel export: %s", s["excel"])
+        if not args.rescore:
+            alerts.send(s, cfg.prefs.notifications.early_bird_hours)
+        text = alerts.summary_text(s)
+        (paths.LOG_DIR / "last_run_summary.txt").write_text(text + "\n", encoding="utf-8")
+        print(text, file=sys.stderr)
     conn.close()
     if tmp:
         tmp.cleanup()
 
-    log.info("run summary: %s", json.dumps({k: v for k, v in s.items() if k != "new_strong"}))
+    log.info("run summary: %s", json.dumps({k: v for k, v in s.items() if k not in ("new_strong", "new_strong_rows")}))
     ok, attempted = s["sources_ok"], s["sources_checked"]
     log.info("coverage: %d of %d companies/sources checked successfully this run (%d not due, skipped)",
              ok, attempted, s["sources_skipped"])

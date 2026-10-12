@@ -38,7 +38,7 @@ from .watchlist import WatchItem
 log = logging.getLogger(__name__)
 
 # Bump when extraction logic changes; stored jobs are then re-extracted from their saved title/location/JD.
-EXTRACT_VERSION = "2026-10-12.12"  # .12: Workday "_R123-1" reposts share a canonical key (merged)
+EXTRACT_VERSION = "2026-10-12.14"  # .14: "2027 Summer Intern" term order; .13: "Toronto, CA" = Canada
 EXTRACT_CONFIGS = ("title_rules.yaml", "levels.yaml", "locations.yaml", "skills_synonyms.yaml", "ats_keywords.yaml")
 TIER_INTERVAL_HOURS = {1: 0, 2: 20, 3: 70}       # tier 1 every run, tier 2 daily, tier 3 every 3 days
 TIER_MAX_PAGES = {1: 100, 2: 25, 3: 10}
@@ -242,7 +242,9 @@ def due(conn, company: Company, label: str, tier: int, now: datetime) -> bool:
 
 def plan(conn, cfg: Config, watch: list[WatchItem], *, only_company: str | None = None,
          only_source: str | None = None, force_all: bool = False, now: datetime | None = None,
-         watchlist_only: bool = False) -> tuple[list[Planned], list[SourceOutcome]]:
+         watchlist_only: bool = False, quick: bool = False) -> tuple[list[Planned], list[SourceOutcome]]:
+    """quick: the 2–3-hourly check — My Companies plus tier-1 companies and feeds (conditional requests keep it
+    cheap); everything else waits for the next full run."""
     now = now or datetime.now(timezone.utc)
     seeds = [c for c in cfg.companies if not cfg.prefs.company_tiers.is_excluded(c.name)]
     watch_keys = {w.company.casefold() for w in watch}
@@ -278,7 +280,9 @@ def plan(conn, cfg: Config, watch: list[WatchItem], *, only_company: str | None 
             continue
         label = adapter(None).source_label(c) if adapter else c.source  # type: ignore[arg-type]
         t = tier_of(c, cfg)
-        if force_all or only_source or due(conn, c, label, t, now):
+        if quick and t != 1:
+            continue
+        if force_all or only_source or quick or due(conn, c, label, t, now):
             planned.append(Planned(c, None, f"tier {t}"))
         else:
             skipped.append(SourceOutcome(c.name, c.source, False, status="skipped", origin=c.origin, tier=t,
@@ -324,7 +328,7 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
         client: HttpClient, embedder: Embedder, jd_dir: Path | None = paths.JD_DIR, *,
         watch: list[WatchItem] | None = None, only_company: str | None = None, only_source: str | None = None,
         force_all: bool = False, workers: int = WORKERS, watchlist_only: bool = False,
-        learned=None) -> RunSummary:
+        learned=None, quick: bool = False) -> RunSummary:
     """companies=None -> use cfg.companies with tier scheduling; a list -> check exactly those."""
     summary = RunSummary()
     watch = watch or []
@@ -333,7 +337,7 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
         skipped: list[SourceOutcome] = []
     else:
         planned, skipped = plan(conn, cfg, watch, only_company=only_company, only_source=only_source,
-                                force_all=force_all, watchlist_only=watchlist_only)
+                                force_all=force_all, watchlist_only=watchlist_only, quick=quick)
     summary.skipped = skipped
 
     directory = {}

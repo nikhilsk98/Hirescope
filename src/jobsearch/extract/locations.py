@@ -110,6 +110,9 @@ def _classify(part: str, cfg: LocationConfig) -> Place:
 
     # ", CA" / ", NY 10001" / "...Meade MD" state abbreviation at the end (case-sensitive: "on"/"in" never count)
     if m := re.search(r"(?:,|\s)\s*([A-Z]{2})(?:\s+\d{5})?\s*(?:,\s*(?:US|USA|United States)\s*)?$", raw):
+        # "Toronto, CA" is Canada's country code after a known non-US city, not California
+        if m.group(1) == "CA" and pat["non_us"].search(low[:m.start()]):
+            return Place(raw, "non-US", remote)
         if m.group(1) in cfg.states:
             return Place(raw, "US", remote)
     # "CT - Hartford" / "GA - Alpharetta" (state code first)

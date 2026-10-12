@@ -112,6 +112,22 @@ class Aggregator(BaseModel):
     date_posted: str = "week"       # jsearch: today | 3days | week | month
 
 
+class Backups(BaseModel):
+    dir: str | None = None          # default data/backups; e.g. "~/Library/Mobile Documents/com~apple~CloudDocs/HireScope"
+    keep: int = 14
+
+
+class Schedule(BaseModel):
+    full_times: list[str] = ["08:00", "18:00"]   # launchd full runs (local time)
+    quick_hours: float = 2.5                     # quick checks (My Companies + tier 1) between full runs; 0 = off
+
+
+class Notifications(BaseModel):
+    enabled: bool = True
+    early_bird_hours: int = 48       # "early bird": Strong matches posted within this many hours
+    digest_weekday: str = "Sunday"   # weekly digest (data/digests/) on the first run of this day
+
+
 class Applications(BaseModel):
     follow_up_days: tuple[int, int] = (7, 10)   # reminder window after applying (or after your last follow-up)
     ghosted_after_days: int = 30                 # suggest "Ghosted" (you confirm; never automatic)
@@ -191,6 +207,9 @@ class Preferences(BaseModel):
     feedback: Feedback = Feedback()
     applications: Applications = Applications()
     aggregator: Aggregator = Aggregator()
+    backups: Backups = Backups()
+    schedule: Schedule = Schedule()
+    notifications: Notifications = Notifications()
     connections_csv: str = "inputs/Connections.csv"   # LinkedIn data export (optional): referral finder
     top_n: int = 1000                         # per track
     timezone: str = "America/New_York"

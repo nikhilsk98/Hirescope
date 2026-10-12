@@ -90,6 +90,7 @@ def classify_track(title: str, employment_type: str | None = None, text: str = "
 
 
 _SEASON = re.compile(r"\b(spring|summer|fall|autumn|winter)\s*(?:'|’)?\s*(20\d\d|\d\d)\b", re.I)
+_YEAR_SEASON = re.compile(r"\b(20\d\d)\s+(spring|summer|fall|autumn|winter)\b", re.I)   # "2027 Summer Intern"
 _MONTH_START = re.compile(
     r"\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|"
     r"jun|jul|aug|sep|sept|oct|nov|dec)\.?\s+(20\d\d)\s+(start|cohort|intake)\b|"
@@ -100,10 +101,11 @@ _MONTH_START = re.compile(
 def parse_terms(text: str) -> list[str]:
     """Internship/co-op terms like 'Spring 2027', 'Summer 2027', 'January 2027 start' (deduped, in order)."""
     out: list[str] = []
-    for m in _SEASON.finditer(text or ""):
-        season = m.group(1).capitalize().replace("Autumn", "Fall")
-        year = m.group(2) if len(m.group(2)) == 4 else "20" + m.group(2)
-        out.append(f"{season} {year}")
+    found = [(m.start(), m.group(1), m.group(2) if len(m.group(2)) == 4 else "20" + m.group(2))
+             for m in _SEASON.finditer(text or "")]
+    found += [(m.start(), m.group(2), m.group(1)) for m in _YEAR_SEASON.finditer(text or "")]
+    for _, season, year in sorted(found):
+        out.append(f"{season.capitalize().replace('Autumn', 'Fall')} {year}")
     for m in _MONTH_START.finditer(text or ""):
         month = (m.group(1) or m.group(6) or "").capitalize()
         year = m.group(2) or m.group(7)

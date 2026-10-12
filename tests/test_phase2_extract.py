@@ -155,3 +155,28 @@ def test_preferred_metros():
     assert preferred_match("Alpharetta, GA", prefs) == "Atlanta"
     assert preferred_match("Austin, TX", prefs) is None
     assert preferred_match("Cambridge, UK · Austin, TX", prefs) is None      # only US places count
+
+
+def test_canadian_city_with_ca_country_code_is_not_california():
+    from jobsearch.extract.locations import normalize_location
+    assert normalize_location("Toronto, CA").us is False
+    assert normalize_location("Vancouver, CA").us is False
+    assert normalize_location("San Francisco, CA").us is True
+    assert normalize_location("Toronto, CA · Seattle, WA").us is True     # any US place keeps it
+
+
+def test_member_of_technical_staff_ladder():
+    from jobsearch.config import load_title_rules
+    from jobsearch.extract.levels import map_level
+    from jobsearch.extract.normalize import normalize_title
+    r = load_title_rules()
+    lv = lambda t: map_level(normalize_title(t, r), "Salesforce").level  # noqa: E731
+    assert lv("Software Engineering LMTS - Data (Remote)") == "staff_plus"
+    assert lv("SMTS Software Engineer") == "senior"
+    assert lv("AMTS, Software Engineering") == "entry"
+
+
+def test_terms_with_year_before_season():
+    from jobsearch.extract.track import parse_terms
+    assert parse_terms("2027 Summer Intern, MS/PhD, Perception") == ["Summer 2027"]
+    assert parse_terms("Spring 2027 co-op; also 2027 Fall") == ["Spring 2027", "Fall 2027"]

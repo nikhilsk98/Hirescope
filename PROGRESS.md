@@ -3,8 +3,7 @@
 Resume here: read this file and `git log --oneline` first, then continue from **In progress**.
 
 ## Current phase
-Phase 6 (next): launchd scheduling + quick checks, lock, notifications, run summary, Excel export, source health
-alerts, early-bird alerts, hiring-season tracker, weekly digest, backups.
+Phase 7 (next): README polish.
 
 ## Completed
 - Phase 1 — vertical slice (Greenhouse → SQLite → scoring → dashboard → job package)
@@ -14,6 +13,8 @@ alerts, early-bird alerts, hiring-season tracker, weekly digest, backups.
 - Phase 4 — statuses import/merge, feedback learning, My Applications, follow-ups, outcome stats, referral finder,
   duplicate guard, reopened alerts, dashboard polish (report below)
 - Phase 5 — Hacker News Who's Hiring, LinkedIn alert emails (IMAP), optional aggregator, big-tech investigation
+- Phase 6 — launchd schedule + quick checks, lock, offline handling, notifications, early birds, run summary,
+  Excel export, source health alerts, hiring seasons, weekly digest, daily backups + restore
 
 ## Phase 4 report (2026-10-12)
 **Built**
@@ -82,11 +83,41 @@ OM1's Greenhouse board now 404), 42 partial; HN re-checked with 0 new fetches; L
 staff+, senior-Strong, summer-only co-op, grad mismatch; no visible full-time no-sponsorship / citizenship / clearance).
 Screenshots: HN job detail (light), Coverage with the skipped source (dark).
 
+## Phase 6 report (2026-10-12)
+**Built** (`src/jobsearch/ops/`)
+- `schedule.py` + `scripts/schedule.sh install | uninstall | status | change-time` + templates
+  `scripts/launchd/com.nikhil.jobsearch{,.quick}.plist.template`: full runs 08:00 / 18:00 (`schedule.full_times`),
+  quick checks every 2.5 h (`schedule.quick_hours`); rendered plists validated with plistlib.
+- `--quick`: My Companies + tier-1 sources only, no link check / backup / digest.
+- `lock.py`: `data/run.lock` (pid + start), stale when the process is gone or > 3 h; quick checks yield (exit 0),
+  a second full run exits 3. Offline → exit 75, the next scheduled run retries.
+- `notify.py` (osascript, escaped), `alerts.py`: new Strong matches with early birds (posted < 48 h), reopened
+  shortlisted roles, source-health alerts; run summary printed + `data/logs/last_run_summary.txt`.
+- `health.py`: 0 jobs (usual ≥ 3) or > 70% drop (usual ≥ 10) vs the last 5 successful runs → banner, log, notification.
+- `excel.py` (`--export-excel [FILE]`): per-track jobs, applications, coverage; hyperlinks; formula-safe text.
+- `backup.py`: daily gzipped SQLite snapshot (embeddings cache dropped; 553 MB → 42 MB) + imports + application JDs,
+  keep 14, `python -m jobsearch.ops.backup list | now | restore DAY` (keeps the current DB first).
+- `digest.py`: weekly HTML digest on the first Sunday run (or `--digest`).
+- `seasons.py` + dashboard **Hiring Seasons** view (inline SVG month strips, reminders ~3 weeks ahead).
+- Fixes found in QA: "Toronto, CA" was read as California (now Canada); "LMTS/PMTS/SMTS/AMTS" level ladder
+  (an LMTS role was visible as Strong); "2027 Summer Intern" term order (45 summer-only internships now filtered).
+
+**Tests**: 313 passed (16 new: lock incl. stale pid/age/garbage, notification escaping + switch, alert sending +
+summary text, health thresholds, quick plan, Excel, backup/restore/prune/once-a-day, digest escaping + weekday, seasons,
+schedule render/install/uninstall with a fake launchctl, offline + locked exit codes, online probe, plus 3 extraction
+regressions).
+
+**Real runs**: `--all --export-excel --digest`: 357 of 424 OK (21 failed + 46 manual custom pages, 42 partial), backup
+42 MB, digest + xlsx written, 5 new Strong matches (5 early birds), notification sent, lock released. `--quick`:
+223 sources (My Companies + tier 1), 156 OK, 47 new, ~15 min. After the fixes: 6,352 visible (5,508 full-time / 839
+co-op / 5 unclear), 1,206 Strong; all profile checks OK; 0 visible LMTS/PMTS; 15 random jobs spot-checked.
+Screenshots: digest (dark), Hiring Seasons (light). launchd itself was **not installed** (Needs Nikhil).
+
 ## In progress
-Nothing — Phase 5 pushed.
+Nothing — Phase 6 pushed.
 
 ## Next
-Phase 6 → 7 per BUILD_PROMPT.md.
+Phase 7 (README polish), then the final report.
 
 ## Open issues
 - 21 watchlist companies have custom careers pages without readable job data; 47 need a careers_url (Manual check).
@@ -95,9 +126,12 @@ Phase 6 → 7 per BUILD_PROMPT.md.
 - Merged duplicates keep the older record until the official source is fetched again (its data then takes over).
 - HN posts with non-US remote wording ("REMOTE (European time zones)") can stay visible: the region isn't parsed.
 - OM1 (My Companies): its cached Greenhouse board returns 404; needs a careers URL or re-detection.
-- Reading `~/Downloads` from a launchd job may need macOS permission (Phase 6 will document / handle it).
+- launchd jobs reading `~/Documents` (the repo) and `~/Downloads` (exports) may need Full Disk Access for /bin/zsh.
+- A quick check takes ~15 min (My Companies custom pages + tier-1 Workday tenants); fine for a 2.5 h interval.
 
 ## Needs Nikhil
+- Install the schedule: `./scripts/schedule.sh install` (then `status`). If `data/logs/launchd-full.log` shows
+  "Operation not permitted", give /bin/zsh Full Disk Access (README → Running on a schedule).
 - Confirm GitHub `main` looks right → then I delete the local `backup-before-rewrite` branch.
 - Old remote branches `phase1-vertical-slice` and `phase2` still contain the 3 original commits with the Claude
   trailer (their content is already in main). Say "delete old branches" to remove them from GitHub.
@@ -123,6 +157,8 @@ Phases 4 → 7 per BUILD_PROMPT.md.
 - 45 sources return partial listings (page caps); closures for those are verified per job.
 
 ## Needs Nikhil
+- Install the schedule: `./scripts/schedule.sh install` (then `status`). If `data/logs/launchd-full.log` shows
+  "Operation not permitted", give /bin/zsh Full Disk Access (README → Running on a schedule).
 - Confirm GitHub `main` looks right → then I delete the local `backup-before-rewrite` branch.
 - Old remote branches `phase1-vertical-slice` and `phase2` still contain the 3 original commits with the Claude
   trailer (their content is already in main). Say "delete old branches" to remove them from GitHub.

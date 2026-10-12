@@ -158,6 +158,7 @@
     { id: "closing", label: "Closing Soon", ic: "⏳", jobs: () => visibleJobs().filter((j) => j.deadline && daysUntil(j.deadline) >= 0 && daysUntil(j.deadline) <= 7) },
     { id: "skillgaps", label: "Skill Gaps", ic: "◔", group: "Insights", special: true, count: () => ((META.skill_gaps || {})[`${ui.track}:30`] || { skills: [] }).skills.length },
     { id: "stats", label: "Stats", ic: "▥", special: true, count: () => appsInTrack().length },
+    { id: "seasons", label: "Hiring Seasons", ic: "◷", special: true, count: () => seasonsInTrack().filter((x) => x.remind).length },
     { id: "missed", label: "Missed Matches", ic: "◎", jobs: () => (META.missed || []).map((id) => BY_ID.get(id)).filter((j) => j && inTrack(j)) },
     { id: "filtered", label: "Filtered Out", ic: "⊘", jobs: () => JOBS.filter((j) => j.filtered && inTrack(j)) },
     { id: "coverage", label: "Coverage", ic: "◍", group: "System", special: true, count: () => (META.coverage || []).length },
@@ -283,7 +284,12 @@
     } else if (partial.length) {
       box.append(el("div", { class: "banner warn" }, `${partial.length} sources returned partial listings (page caps); closures for those are verified per job. See Coverage.`));
     }
-    if (META.partial_run) box.append(el("div", { class: "banner warn", text: "The last run checked only one company/source; other companies were not re-checked." }));
+    if (META.partial_run) box.append(el("div", { class: "banner warn", text: (META.summary || {}).scope === "quick"
+      ? "Last run was a quick check (My Companies and tier-1 sources); everything else was refreshed by the last full run."
+      : "The last run checked only one company/source; other companies were not re-checked." }));
+    const ha = META.health_alerts || [];
+    if (ha.length) box.append(el("div", { class: "banner err" }, el("details", null, el("summary", { text: `Source health: ${ha.length} source${ha.length > 1 ? "s" : ""} returned far fewer jobs than usual (likely broken, not "no new jobs")` }),
+      el("ul", null, ha.map((a) => el("li", { text: a.message }))))));
     if (/example/i.test(META.resume_path || "")) box.append(el("div", { class: "banner warn", text: `Scored against ${META.resume_path} (DEMO resume).` }));
     if (unsynced()) box.append(el("div", { class: "banner info" }, el("span", { text: "Unsynced changes — your statuses live only in this browser until you export them." }),
       el("button", { class: "btn small x", type: "button", onclick: exportStatuses }, "Export statuses")));
@@ -524,7 +530,7 @@
   function setView(id) { tstate().view = id; saveUI(); closePop(); renderAll(); }
   const modeOf = (vid) => (tstate().modes || {})[vid] || ui.mode || "cards";
   const SPECIAL = { coverage: () => renderCoverage, skillgaps: () => renderSkillGaps, applications: () => renderApplications,
-    followups: () => renderFollowups, stats: () => renderStatsView, runlog: () => renderRunLog };
+    followups: () => renderFollowups, stats: () => renderStatsView, runlog: () => renderRunLog, seasons: () => renderSeasons };
   function renderList(keepScroll) {
     const st = tstate();
     const v = viewById(st.view || defaultView());
@@ -864,6 +870,40 @@
       gh.map((a) => row(a, el("span", { style: "display:flex;gap:6px" },
         el("button", { class: "btn small", type: "button", onclick: () => moveTo(a, "ghosted") }, "Mark Ghosted"),
         el("button", { class: "btn small ghost", type: "button", onclick: () => saveApp(C.edit(a, { events: [...(a.events || []), { at: new Date().toISOString(), kind: "note", from: null, to: null, note: "Still waiting (checked)" }] }), "Noted — reminder reset") }, "Still waiting"))))));
+  }
+
+  // ----- hiring seasons -----
+  const SEASON_TRACK = { coop_intern: "coop_intern", full_time: "new_grad" };
+  const seasonsInTrack = () => (META.seasons || []).filter((x) => ui.both || x.track === SEASON_TRACK[ui.track]);
+  function monthStrip(sea) {
+    const W = 360, H = 40, cw = W / 12, years = Object.keys(sea.years);
+    const g = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart season", role: "img",
+      "aria-label": `${sea.company}: first postings ${years.map((y) => sea.years[y]).join(", ")}; next expected ${sea.predicted}` });
+    for (let m = 0; m < 12; m++) {
+      g.append(svg("rect", { x: m * cw + 1, y: 6, width: cw - 2, height: 18, rx: 3, class: "cell" }));
+      g.append(svg("text", { x: m * cw + cw / 2, y: 37, "text-anchor": "middle", class: "lbl" }, "JFMAMJJASOND"[m]));
+    }
+    years.forEach((y, i) => { const m = Number(sea.years[y].slice(5, 7)) - 1;
+      g.append(svg("circle", { cx: m * cw + cw / 2 - 6 + 6 * (i % 3), cy: 15, r: 4, class: "seen" }, svg("title", {}, `${y}: first posted ${sea.years[y]}`))); });
+    const pm = Number(sea.predicted.slice(5, 7)) - 1;
+    g.append(svg("rect", { x: pm * cw + 1, y: 6, width: cw - 2, height: 18, rx: 3, class: "pred" }, svg("title", {}, `expected ${sea.predicted}`)));
+    return g;
+  }
+  function renderSeasons(box) {
+    const list = seasonsInTrack();
+    box.append(el("p", { class: "muted", style: "margin-top:0", text: `When each company first posted ${ui.both ? "co-op/intern and new-grad" : ui.track === "coop_intern" ? "co-op / intern" : "new-grad"} roles, from your own job history (posting dates, else first-seen). Dots = first posting each year; outlined month = expected next window. One year of history is a guess.` }));
+    if (!list.length) { box.append(el("div", { class: "empty", text: "No history yet — seasons appear as runs accumulate." })); return; }
+    const soon = list.filter((x) => x.remind);
+    if (soon.length) box.append(el("div", { class: "banner warn", style: "margin:0 0 12px" }, `Coming up (no postings yet): ${soon.slice(0, 8).map((x) => `${x.company} (${x.status.replace("expected ", "")})`).join(" · ")}`));
+    const q = (tstate().q || "").toLowerCase();
+    const rows = list.filter((x) => !q || x.company.toLowerCase().includes(q)).slice(0, 300);
+    box.append(el("div", { class: "table-wrap" }, el("table", { class: "grid seasons" },
+      el("thead", null, el("tr", null, ["Company", "Track", "Months (first posting per year)", "Next window", "Status"].map((h) => el("th", { text: h })))),
+      el("tbody", null, rows.map((x) => el("tr", null, el("td", null, el("b", { text: x.company })),
+        el("td", { text: x.track === "new_grad" ? "New grad" : "Co-op / Intern" }), el("td", null, monthStrip(x)),
+        el("td", { class: "nowrap", text: x.predicted }),
+        el("td", null, el("span", { class: `chip ${x.open_now ? "good" : x.remind ? "warn" : ""}`, text: x.status }), el("div", { class: "muted", style: "font-size:11px", text: x.confidence }))))))));
+    if (list.length > rows.length) box.append(el("p", { class: "muted", text: `Showing ${rows.length} of ${list.length}; search to narrow.` }));
   }
 
   // ----- run log view -----

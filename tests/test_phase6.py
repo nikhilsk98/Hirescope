@@ -1,0 +1,227 @@
+"""Phase 6 (DEMO data): lock, notifications, source health, quick plan, Excel, backups/restore, digest, seasons,
+launchd schedule rendering, offline handling, run summary."""
+import gzip
+import json
+import os
+import plistlib
+import sqlite3
+from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
+
+import pytest
+from openpyxl import load_workbook
+
+from jobsearch.config import Company
+from jobsearch.ops import alerts, backup, digest, excel, health, notify, schedule, seasons
+from jobsearch.ops.lock import Locked, RunLock
+from jobsearch.pipeline import plan
+from jobsearch.storage import db
+from jobsearch.tracker import statuses
+
+from .test_storage import rec
+
+
+# --- lock ------------------------------------------------------------------------------------------
+def test_lock_blocks_second_run_and_releases(tmp_path):
+    p = tmp_path / "run.lock"
+    with RunLock(p):
+        assert json.loads(p.read_text())["pid"] == os.getpid()
+        with pytest.raises(Locked):
+            RunLock(p).acquire()
+    assert not p.exists()
+
+
+def test_stale_locks_are_replaced(tmp_path):
+    p = tmp_path / "run.lock"
+    p.write_text(json.dumps({"pid": 999_999_9, "started": datetime.now(timezone.utc).isoformat()}))   # dead pid
+    with RunLock(p):
+        assert json.loads(p.read_text())["pid"] == os.getpid()
+    old = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+    p.write_text(json.dumps({"pid": os.getppid(), "started": old}))                             # alive but hung
+    with RunLock(p, stale_hours=3):
+        pass
+    p.write_text("garbage")
+    with RunLock(p):
+        pass
+
+
+# --- notifications ---------------------------------------------------------------------------------
+def test_notification_command_escapes_job_text(monkeypatch):
+    cmd = notify.command('3 new "Strong" matches', 'DemoCo — SWE \\ "New Grad"\nline2', "sub")
+    assert cmd[:2] == ["osascript", "-e"]
+    assert '\\"Strong\\"' in cmd[2] and '\\\\' in cmd[2] and "\n" not in cmd[2]
+    calls = []
+    monkeypatch.setattr(notify.sys, "platform", "darwin")
+    monkeypatch.delenv("HIRESCOPE_NO_NOTIFY", raising=False)
+    monkeypatch.setattr(notify, "ENABLED", True)
+    assert notify.notify("t", "m", runner=lambda c, **k: calls.append(c)) and calls
+    monkeypatch.setattr(notify, "ENABLED", False)
+    assert not notify.notify("t", "m", runner=lambda c, **k: calls.append(c)) and len(calls) == 1
+
+
+def test_alerts_send_and_summary(monkeypatch):
+    sent = []
+    monkeypatch.setattr(notify, "notify", lambda *a, **k: sent.append(a))
+    s = {"new_strong_rows": [{"company": "DemoCo", "title": "SWE (DEMO)", "score": 88.0}] * 3,
+         "early_bird": [{"company": "DemoCo", "title": "SWE (DEMO)", "score": 88.0}],
+         "reopened": ["DemoCo: SWE (DEMO)"], "health_alerts": [{"message": "DemoCo returned 0 jobs"}],
+         "sources_ok": 3, "sources_checked": 4, "by_track": {"full_time": {"visible": 3, "strong": 3, "stretch": 0}}}
+    titles = alerts.send(s)
+    assert len(titles) == 3 and "3 new Strong matches" in titles[0] and sent[0][2].startswith("1 early bird")
+    txt = alerts.summary_text(s)
+    assert "3 of 4 sources OK" in txt and "HEALTH: DemoCo returned 0 jobs" in txt and "REOPENED" in txt
+
+
+# --- source health ---------------------------------------------------------------------------------
+def test_health_thresholds():
+    o = lambda c, n, ok=True, unchanged=False: SimpleNamespace(company=c, source="greenhouse", ok=ok, jobs=n, unchanged=unchanged)  # noqa: E731
+    hist = {"Zero": [20, 22, 18], "Drop": [100, 110, 90], "Fine": [100, 95], "Small": [6, 5, 7], "New": [50],
+            "Tiny": [1, 2], "Down": [100, 100]}
+    alerts_ = health.check([o("Zero", 0), o("Drop", 25), o("Fine", 40), o("Small", 1), o("New", 0), o("Tiny", 0),
+                            o("Down", 0, ok=False), o("Drop", 0, unchanged=True)], lambda c, s: hist[c])
+    got = {(a["company"], a["kind"]) for a in alerts_}
+    assert got == {("Zero", "zero"), ("Drop", "drop")}          # Fine = -60% (< 70%), Small/Tiny too small, New no history
+
+
+# --- quick plan ------------------------------------------------------------------------------------
+def test_quick_plan_is_my_companies_plus_tier1(conn, cfg):
+    cfg.companies += [Company(name="Tier2Co", source="greenhouse", board="t2", tier=2),
+                      Company(name="Tier3Co", source="greenhouse", board="t3", tier=3)]
+    from jobsearch.watchlist import WatchItem
+    planned, _ = plan(conn, cfg, [WatchItem("MineCo")], quick=True)
+    names = {(p.company.name if p.company else p.watch.company) for p in planned}
+    assert names == {"DemoCo", "MineCo"}
+
+
+# --- excel -----------------------------------------------------------------------------------------
+def test_excel_export(conn, tmp_path):
+    pk, _ = db.upsert_job(conn, rec(title="=HYPERLINK(\"x\") (DEMO)"))
+    db.save_scores(conn, pk, filtered=0, score=81, qual_score=70, label="Strong")
+    conn.execute("UPDATE jobs SET track='full_time' WHERE id=?", (pk,))
+    statuses.merge(conn, {"exported_at": "2026-10-12T00:00:00Z", "format": 3, "statuses": {},
+                          "applications": {"a1": {"company": "DemoCo", "title": "SWE", "applied_date": "2026-10-01",
+                                                  "updated_at": "2026-10-01T00:00:00Z"}}}, None)
+    out = excel.export(conn, tmp_path / "x.xlsx", 100)
+    wb = load_workbook(out)
+    assert wb.sheetnames == ["Co-op & Internships", "Full-time", "Applications", "Coverage"]
+    ft = wb["Full-time"]
+    assert ft["A2"].value == "DemoCo" and ft["B2"].value.startswith("'=")      # never a live formula
+    assert ft["O2"].hyperlink.target == "https://example.com/1"
+    assert wb["Applications"]["A2"].value == "DemoCo"
+
+
+# --- backups ---------------------------------------------------------------------------------------
+def _file_db(path, title):
+    c = db.connect(path)
+    db.upsert_job(c, rec(title=title))
+    c.execute("INSERT INTO embeddings (text_hash, model, vector) VALUES ('h', 'm', x'00')")
+    c.commit()
+    return c
+
+
+def test_backup_restore_and_prune(tmp_path, monkeypatch):
+    monkeypatch.setattr(backup.paths, "DATA", tmp_path / "data")
+    live = tmp_path / "jobs.db"
+    c = _file_db(live, "Before (DEMO)")
+    c.close()
+    imports = tmp_path / "imports"
+    imports.mkdir()
+    (imports / "statuses-1.json").write_text("{}")
+    root = tmp_path / "backups"
+    b = backup.backup(live, root, "2026-10-01", keep=14, extra_dirs=(imports,))
+    assert (b / "jobs.db.gz").exists() and (b / "imports" / "statuses-1.json").exists()
+    assert backup.backup(live, root, "2026-10-01") is None                     # once a day
+    snap = sqlite3.connect(":memory:")
+    snap.deserialize(gzip.decompress((b / "jobs.db.gz").read_bytes()))
+    assert snap.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0] == 0   # cache dropped
+    c = db.connect(live)
+    c.execute("UPDATE jobs SET title='After (DEMO)'")
+    c.commit()
+    c.close()
+    kept = backup.restore(root, "2026-10-01", live)
+    assert kept.name.startswith("jobs.db.before-restore-")
+    assert sqlite3.connect(live).execute("SELECT title FROM jobs").fetchone()[0] == "Before (DEMO)"
+    with pytest.raises(FileNotFoundError):
+        backup.restore(root, "1999-01-01", live)
+    for d in range(2, 20):
+        backup.backup(live, root, f"2026-10-{d:02d}", keep=14)
+    names = [p.name for p in backup.list_backups(root)]
+    assert len(names) == 14 and names[0] == "2026-10-06" and names[-1] == "2026-10-19"
+
+
+# --- digest ----------------------------------------------------------------------------------------
+def test_digest_escapes_and_summarizes(conn, tmp_path):
+    pk, _ = db.upsert_job(conn, rec(title="<script>alert(1)</script> Engineer (DEMO)"))
+    db.save_scores(conn, pk, filtered=0, score=90, label="Strong")
+    conn.execute("UPDATE jobs SET track='full_time', first_seen=? WHERE id=?", (datetime.now(timezone.utc).isoformat(), pk))
+    today = datetime.now(timezone.utc).date()
+    statuses.merge(conn, {"exported_at": datetime.now(timezone.utc).isoformat(), "format": 3, "statuses": {},
+                          "applications": {"a1": {"company": "DemoCo", "title": "SWE", "applied_date": (today - timedelta(days=8)).isoformat(),
+                                                  "updated_at": "2026-10-01T00:00:00Z", "track": "full_time"}}}, None)
+    html = digest.build(conn, today, [{"company": "DemoCo", "track": "coop_intern", "status": "expected in 9 days",
+                                       "confidence": "one year of history", "remind": True}])
+    assert "<script>" not in html and "&lt;script&gt;" in html
+    assert "New Strong matches — Full-time (1)" in html and "Follow-ups due (1)" in html and "Hiring seasons" in html
+    assert digest.due(date(2026, 10, 11), "Sunday", tmp_path) and not digest.due(date(2026, 10, 12), "Sunday", tmp_path)
+    p = digest.write(conn, tmp_path, date(2026, 10, 11))
+    assert p.name == "2026-10-11.html" and not digest.due(date(2026, 10, 11), "Sunday", tmp_path)
+
+
+# --- seasons ---------------------------------------------------------------------------------------
+def test_hiring_seasons(conn):
+    def add(jid, title, posted, track, status="closed"):
+        pk, _ = db.upsert_job(conn, rec(job_id=jid, title=title, normalized_title=title.lower(), posted_date=posted))
+        conn.execute("UPDATE jobs SET track=?, job_status=? WHERE id=?", (track, status, pk))
+    add("1", "SWE Co-op (DEMO)", "2025-09-03T00:00:00+00:00", "coop_intern")
+    add("2", "SWE Co-op Spring (DEMO)", "2025-09-20T00:00:00+00:00", "coop_intern")
+    add("3", "SWE Co-op (DEMO)", "2024-09-10T00:00:00+00:00", "coop_intern")
+    add("4", "Software Engineer, New Grad (DEMO)", "2025-08-01T00:00:00+00:00", "full_time")
+    add("5", "Software Engineer (DEMO)", "2025-05-01T00:00:00+00:00", "full_time")       # not new grad: ignored
+    out = {(s["company"], s["track"]): s for s in seasons.track_seasons(conn, date(2026, 8, 20))}
+    co = out[("DemoCo", "coop_intern")]
+    assert co["years"] == {"2024": "2024-09-10", "2025": "2025-09-03"} and co["predicted"] == "2026-09"
+    assert co["remind"] and co["status"] == "expected in 14 days" and co["confidence"] == "repeating pattern"
+    ng = out[("DemoCo", "new_grad")]
+    assert ng["predicted"] == "2026-08" and not ng["remind"] and ng["confidence"] == "one year of history"
+    assert len(out) == 2
+
+
+# --- launchd schedule ------------------------------------------------------------------------------
+def test_schedule_render_and_install(tmp_path):
+    full = plistlib.loads(schedule.render_full("18:00,08:00", repo=tmp_path / "repo & co", log_dir=tmp_path).encode())
+    assert full["Label"] == "com.nikhil.jobsearch"
+    assert full["StartCalendarInterval"] == [{"Hour": 8, "Minute": 0}, {"Hour": 18, "Minute": 0}]
+    assert full["ProgramArguments"][1].endswith("repo & co/scripts/run.sh")
+    quick = plistlib.loads(schedule.render_quick(2.5, repo=tmp_path, log_dir=tmp_path).encode())
+    assert quick["StartInterval"] == 9000 and quick["ProgramArguments"][-1] == "--quick"
+    for bad in ("25:00", "8", "", "08:60"):
+        with pytest.raises(ValueError):
+            schedule.parse_times(bad)
+    with pytest.raises(ValueError):
+        schedule.render_quick(0.1)
+    calls = []
+    run = lambda cmd, **k: (calls.append(cmd), SimpleNamespace(returncode=0))[1]  # noqa: E731
+    written = schedule.install(["07:30"], 3, agents=tmp_path / "agents", run=run)
+    assert [p.name for p in written] == ["com.nikhil.jobsearch.plist", "com.nikhil.jobsearch.quick.plist"]
+    assert [c[1] for c in calls] == ["bootout", "bootout", "bootstrap", "bootstrap"]
+    schedule.install(["07:30"], 0, agents=tmp_path / "agents", run=run)          # quick checks off
+    assert not (tmp_path / "agents" / "com.nikhil.jobsearch.quick.plist").exists()
+    schedule.uninstall(agents=tmp_path / "agents", run=run)
+    assert not list((tmp_path / "agents").iterdir())
+
+
+# --- offline / lock in main ------------------------------------------------------------------------
+def test_main_offline_and_locked(monkeypatch, tmp_path):
+    from jobsearch import run as R
+    monkeypatch.setattr(R.paths, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(R.paths, "DATA", tmp_path)
+    monkeypatch.setattr(R.alerts, "online", lambda: False)
+    assert R.main([]) == R.EX_TEMPFAIL
+    monkeypatch.setattr(R.alerts, "online", lambda: True)
+    with RunLock(tmp_path / "run.lock"):
+        assert R.main(["--quick"]) == 0          # a quick check yields to a running full run
+        assert R.main([]) == 3
+
+
+def test_online_probe():
+    assert alerts.online(timeout=0.2, hosts=(("127.0.0.1", 9),)) is False

@@ -374,3 +374,6 @@ dialog.wide { max-width: 640px; width: calc(100vw - 32px); }
 @media (max-width: 1180px) { .tiles.mini { grid-template-columns: repeat(3, minmax(0, 1fr)); } .stats-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 640px) { .form-grid { grid-template-columns: minmax(0, 1fr); } .timeline .when { width: 90px; } }
 table.grid th.num { text-align: right; }
+svg.season { width: 240px; max-width: 100%; } svg.season .cell { fill: var(--surface-2); }
+svg.season .seen { fill: var(--accent); } svg.season .pred { fill: none; stroke: var(--stretch); stroke-width: 2; }
+table.seasons td { vertical-align: middle; }

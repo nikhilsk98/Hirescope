@@ -44,6 +44,10 @@ companies:
 
 generic:   # first match wins, so order matters
   - {pattern: '\b(intern|internship|co op|coop|apprentice)\b', level: intern}
+  # "Member of Technical Staff" ladders (Salesforce, Oracle, VMware…): AMTS entry, MTS mid, SMTS senior, LMTS/PMTS staff+
+  - {pattern: '\b(lmts|pmts|lead member of technical staff|principal member of technical staff)\b', level: staff_plus}
+  - {pattern: '\b(smts|senior member of technical staff)\b', level: senior}
+  - {pattern: '\b(amts|associate member of technical staff)\b', level: entry}
   - {pattern: '\b(distinguished|fellow)\b', level: staff_plus}
   - {pattern: '\b(principal|staff)\b', level: staff_plus}
   - {pattern: '\barchitect\b', level: staff_plus}

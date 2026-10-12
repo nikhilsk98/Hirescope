@@ -32,13 +32,16 @@ source ~/.venvs/hirescope/bin/activate && python -m jobsearch.run --verbose     
 python -m jobsearch.run --company "Figma" --verbose               # one company
 python -m jobsearch.run --source greenhouse --dry-run             # only that adapter; fetch + score, write nothing
 python -m jobsearch.run --no-email                                # skip LinkedIn alert emails (IMAP) this run
+python -m jobsearch.run --quick                                   # quick check: My Companies + tier 1 (what launchd runs every 2.5 h)
+python -m jobsearch.run --export-excel --digest                   # also write an .xlsx and the weekly digest now
+python -m jobsearch.run --rescore                                 # no fetching: re-score after editing preferences / resume
 python -m jobsearch.run --all                                     # ignore tier schedules this run
 python -m jobsearch.run --resume path.md --prefs path.yaml        # alternate inputs
 ```
 
 Then double-click `dashboard/index.html` (opens via `file://`, no server). The exit code is `0` when every
 source succeeded, `1` when any failed (the run still completes and the dashboard flags the missing coverage),
-and `2` for missing or invalid inputs.
+`2` for missing or invalid inputs, `3` when another run holds the lock, and `75` when offline.
 
 ### Two tracks
 Every job gets a `track`: **Co-op/Intern**, **Full-time**, or **Unclear**, decided by (in order) the title,
@@ -276,6 +279,45 @@ sections. `parse_package()` is the reference parser. v2 added **ATS keywords**: 
 then one line per keyword: `JD exact term | required|preferred|mentioned | matched|synonym|missing | weight w
 [| resume says X] [| evidence (section): resume line]`.
 
+## Running on a schedule
+
+```sh
+./scripts/schedule.sh install                 # full runs at schedule.full_times (08:00, 18:00) + quick checks every 2.5 h
+./scripts/schedule.sh change-time 07:30,19:00 # new full-run times (quick-check interval: --quick-hours 3, 0 = off)
+./scripts/schedule.sh status                  # what's installed and loaded
+./scripts/schedule.sh uninstall
+./scripts/schedule.sh install --dry-run       # print the plists and launchctl commands only
+```
+Plists are rendered from `scripts/launchd/com.nikhil.jobsearch{,.quick}.plist.template` into `~/Library/LaunchAgents`.
+- **Asleep** at a scheduled time: launchd starts the missed full run once when the Mac wakes. **Powered off**:
+  that run is skipped. **Offline**: the run logs "offline" and exits (code 75); the next scheduled run retries.
+  Each request also retries with backoff, and a failed source never stops the run.
+- **Quick checks** (`--quick`): My Companies + tier-1 companies and feeds, conditional requests (ETag/304), no link
+  check, backup or digest — new postings from the companies you care most about surface within ~2.5 hours.
+- **One run at a time**: `data/run.lock` (pid + start). A quick check that meets a running full run just skips; a lock
+  whose process died, or older than 3 hours, is replaced.
+- **macOS permissions**: the repo lives in `~/Documents` and statuses are imported from `~/Downloads`, both protected
+  folders. If `data/logs/launchd-full.log` shows "Operation not permitted", give `/bin/zsh` Full Disk Access
+  (System Settings → Privacy & Security → Full Disk Access), or move the repo out of Documents.
+
+### After every run
+- **Run summary**: printed, logged, and saved to `data/logs/last_run_summary.txt` (coverage, new / updated / closed,
+  per-track counts, new Strong matches, health alerts, reopened roles, backup).
+- **Notifications** (`notifications.enabled`, `--no-notify`): new Strong matches with **early birds** (posted within
+  `early_bird_hours`, 48), reopened roles you had shortlisted, broken-looking sources, the weekly digest.
+- **Source health**: a source that returns 0 jobs, or > 70% fewer than its recent average, is flagged (banner,
+  Coverage, notification) — a broken source never looks like "no new jobs".
+- **Daily backup** (`backups.dir`, `keep: 14`): `data/backups/YYYY-MM-DD/` with a gzipped SQLite snapshot (embeddings
+  cache dropped), imported status exports and saved application JDs. `python -m jobsearch.ops.backup list | now |
+  restore YYYY-MM-DD` (restore keeps the current DB as `jobs.db.before-restore-…`). `--no-backup` skips it.
+- **Weekly digest**: on the first run of `notifications.digest_weekday` (Sunday), or `--digest`:
+  `data/digests/YYYY-MM-DD.html` — new Strong matches, applications sent, follow-ups due, skill gaps, outcome stats,
+  hiring seasons coming up.
+- **Hiring seasons**: dashboard view of when each company first posted co-op/intern and new-grad roles each year (from
+  your DB history), the predicted next window, and a reminder ~3 weeks before it when nothing is posted yet.
+- **Excel**: `--export-excel [FILE]` writes `data/exports/hirescope-<date>.xlsx` (jobs per track, applications,
+  coverage; links clickable, text never turned into formulas).
+
 ## Data & storage
 
 | Path | Contents |
@@ -285,6 +327,9 @@ then one line per keyword: `JD exact term | required|preferred|mentioned | match
 | `data/logs/jobsearch.log` | JSON-lines log, rotated at 2 MB × 5 |
 | `data/applications/` | saved JD copies for your applications |
 | `data/imports/` | archived dashboard exports that were imported |
+| `data/backups/` | daily backups (last 14) |
+| `data/digests/`, `data/exports/` | weekly digest pages, Excel exports |
+| `data/run.lock`, `data/logs/last_run_summary.txt` | run lock, last run's summary |
 | `dashboard/data.js` | generated `window.META` / `window.JOBS` |
 | `dashboard/sync.js` | generated from SQLite: your statuses, notes, overrides and applications (gitignored) |
 

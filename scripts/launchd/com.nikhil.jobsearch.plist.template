@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- HireScope full runs. Rendered by `scripts/schedule.sh install`; times come from preferences.yaml -> schedule. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{{LABEL}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/scripts/run.sh</string>
+    {{ARGS}}
+  </array>
+  <key>WorkingDirectory</key><string>{{REPO}}</string>
+  <!-- A run missed while the Mac was asleep starts on wake; a run while powered off is skipped. -->
+  <key>StartCalendarInterval</key>
+  <array>
+{{CALENDAR}}
+  </array>
+  <key>StandardOutPath</key><string>{{LOG_DIR}}/launchd-full.log</string>
+  <key>StandardErrorPath</key><string>{{LOG_DIR}}/launchd-full.log</string>
+  <key>ProcessType</key><string>Background</string>
+  <key>LowPriorityIO</key><true/>
+  <key>Nice</key><integer>5</integer>
+</dict>
+</plist>

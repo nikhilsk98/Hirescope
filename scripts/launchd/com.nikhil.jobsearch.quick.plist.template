@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- HireScope quick checks (My Companies + tier-1, conditional requests). Rendered by `scripts/schedule.sh install`. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{{LABEL}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/scripts/run.sh</string>
+    <string>--quick</string>
+  </array>
+  <key>WorkingDirectory</key><string>{{REPO}}</string>
+  <key>StartInterval</key><integer>{{INTERVAL}}</integer>
+  <key>StandardOutPath</key><string>{{LOG_DIR}}/launchd-quick.log</string>
+  <key>StandardErrorPath</key><string>{{LOG_DIR}}/launchd-quick.log</string>
+  <key>ProcessType</key><string>Background</string>
+  <key>LowPriorityIO</key><true/>
+  <key>Nice</key><integer>10</integer>
+</dict>
+</plist>
