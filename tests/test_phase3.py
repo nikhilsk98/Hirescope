@@ -148,3 +148,71 @@ def test_business_development_intern_is_not_software(cfg):
     assert match_title(n, "coop_intern", cfg.prefs, cfg.title_rules).kind == "none"
     n = normalize_title("Software Development Intern", cfg.title_rules)
     assert match_title(n, "coop_intern", cfg.prefs, cfg.title_rules).kind == "coop"
+
+
+# --- work authorization (needs sponsorship, not a US citizen) -------------------------------------
+def auth_prefs(cfg):
+    p = cfg.prefs.model_copy(deep=True)
+    p.work_authorization.needs_sponsorship = True
+    p.work_authorization.us_citizen = False
+    return p
+
+
+def flag(value, evidence="quoted line"):
+    return {"value": value, "evidence": evidence}
+
+
+def test_full_time_explicit_restrictions_filtered_with_quote(cfg):
+    p = auth_prefs(cfg)
+    ns = apply_rules(job(flags={"sponsorship": flag("No sponsorship", "We are unable to sponsor visas.")}), p, cfg.title_rules, NOW)
+    assert ns.hidden and "unable to sponsor" in ns.reasons[0]
+    assert apply_rules(job(flags={"citizenship": flag("US citizenship required")}), p, cfg.title_rules, NOW).hidden
+    assert apply_rules(job(flags={"citizenship": flag("US person required (export control)")}), p, cfg.title_rules, NOW).hidden
+    assert apply_rules(job(flags={"clearance": flag("Clearance required")}), p, cfg.title_rules, NOW).hidden
+
+
+def test_coop_no_sponsorship_kept_with_cpt_opt_flag(cfg):
+    p = auth_prefs(cfg)
+    coop = dict(track="coop_intern", normalized_title="software engineer intern")
+    r = apply_rules(job(**coop, flags={"sponsorship": flag("No sponsorship", "No visa sponsorship for this role.")}), p, cfg.title_rules, NOW)
+    assert not r.hidden and r.signals["check_cpt_opt"]
+    assert apply_rules(job(**coop, flags={"citizenship": flag("US citizenship required")}), p, cfg.title_rules, NOW).hidden
+    assert apply_rules(job(**coop, flags={"clearance": flag("Clearance required")}), p, cfg.title_rules, NOW).hidden
+
+
+def test_silence_never_filters(cfg):
+    p = auth_prefs(cfg)
+    r = apply_rules(job(flags={k: {"value": "Not stated", "evidence": None} for k in ("sponsorship", "citizenship", "clearance")}),
+                    p, cfg.title_rules, NOW)
+    assert not r.hidden
+    assert not apply_rules(job(flags={"clearance": flag("Clearance preferred")}), p, cfg.title_rules, NOW).hidden
+
+
+def test_flag_extraction_us_person_and_optional_clearance():
+    from jobsearch.extract.flags import extract_flags
+    f = extract_flags("Due to ITAR requirements, candidates must be a U.S. person.")
+    assert f["citizenship"]["value"] == "US person required (export control)"
+    assert extract_flags("Ability to obtain a security clearance is a plus.")["clearance"]["value"] == "Clearance preferred"
+    assert extract_flags("Must hold an active Secret security clearance.")["clearance"]["value"] == "Clearance required"
+    assert extract_flags("We have offices around the world and 5 years of growth.")["citizenship"]["value"] == "Not stated"
+
+
+def test_work_authorization_flag_precision():
+    from jobsearch.extract.flags import extract_flags as ef
+    # export-license wording is not visa sponsorship
+    assert ef("must be able to work under U.S. export laws without sponsorship for an export license.")["sponsorship"]["value"] == "Not stated"
+    assert ef("We are unable to sponsor or take over sponsorship of an employment visa.")["sponsorship"]["value"] == "No sponsorship"
+    # boilerplate about other positions is not this job's requirement
+    assert ef("U.S. Citizenship is required for all positions with a government clearance and certain other "
+              "restricted positions.")["citizenship"]["value"] == "Not stated"
+    assert ef("Applicant must be a U.S. citizen, lawful permanent resident of the United States, or other protected "
+              "individual.")["citizenship"]["value"] == "US person required (export control)"
+    assert ef("U.S. citizenship is required.")["citizenship"]["value"] == "US citizenship required"
+    assert ef("Applicants may need to meet eligibility requirements for access to classified information, including a "
+              "security clearance.")["clearance"]["value"] != "Clearance required"
+
+
+def test_j1_only_statement_is_not_general_no_sponsorship():
+    from jobsearch.extract.flags import extract_flags as ef
+    assert ef("DoorDash does not support students on J-1 visas at this time.")["sponsorship"]["value"] == "Not stated"
+    assert ef("We do not sponsor H-1B or J-1 visas.")["sponsorship"]["value"] == "No sponsorship"

@@ -42,7 +42,7 @@ tracks:
 
 # --- Location ----------------------------------------------------------
 country: US               # all US states + Remote (US); non-US postings are filtered
-preferred_locations: []   # optional soft boost, e.g. [Boston, New York, Seattle]
+preferred_locations: []   # optional soft boost; metros from config/locations.yaml, e.g. [Boston, SF Bay Area]
 work_modes: [remote, hybrid, onsite]
 
 # --- Domain / pay / authorization -------------------------------------
@@ -52,8 +52,8 @@ salary:
   currency: USD
   mode: soft              # hard = filter out below min (only when salary is stated); soft = score only
 work_authorization:       # never assumed: fill these in yourself
-  needs_sponsorship: null # true -> "no sponsorship" postings are penalized; null = unknown (flag only)
-  us_citizen: null        # false -> "US citizens only" postings are penalized; null = unknown
+  needs_sponsorship: null # true -> full-time "no sponsorship" filtered, co-op flagged (CPT/OPT); null = unknown
+  us_citizen: null        # false -> "US citizens / US persons only" and "clearance required" filtered
 
 # --- Companies (tiers) --------------------------------------------------
 # Tiers override config/companies.yaml. tier1: every run; tier2: daily; tier3: every 3 days.
@@ -79,6 +79,7 @@ rules:
   grad_window: hard       # a stated graduation window ("Class of 2026") that excludes your graduation date
   start_window: soft      # a stated start date outside the track's window
   stale_posting: hard     # posted more than ghost.stale_days ago (likely a stale or evergreen listing)
+  work_authorization: hard  # explicit no-sponsorship (full-time) / citizens-only / clearance-required postings
 
 # --- Scoring -----------------------------------------------------------
 weights:

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from ..config import Company, Preferences
+from ..extract.locations import preferred_match
 from ..extract.resume import Resume
 from ..extract.skills import extract_skills
 from .rules import RuleResult
@@ -196,9 +197,9 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     if rules.location_ok is not None:
         loc_score = 0.0
         if rules.location_ok:
-            loc = (job.get("location") or "").casefold()
-            if prefs.preferred_locations and any(p.casefold() in loc for p in prefs.preferred_locations):
-                loc_score, loc_detail = 100.0, "preferred location"
+            pref_hit = preferred_match(job.get("location"), prefs.preferred_locations)
+            if pref_hit:
+                loc_score, loc_detail = 100.0, f"preferred: {pref_hit}"
             elif job.get("remote_us"):
                 loc_score, loc_detail = 90.0, "remote (US)"
             else:
@@ -237,13 +238,13 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
                           "points": min(PENALTY_YOE_CAP, PENALTY_YOE_PER_YEAR * (yoe - y.match_max))})
     flags = job.get("flags") or {}
     auth = prefs.work_authorization
-    if auth.needs_sponsorship and flags.get("sponsorship", {}).get("value") == "No sponsorship":
-        penalties.append({"reason": "States no visa sponsorship", "points": PENALTY_NO_SPONSORSHIP})
-        gaps.append("Posting states no sponsorship; you need sponsorship")
-    if auth.us_citizen is False and flags.get("citizenship", {}).get("value") == "US citizenship required":
-        penalties.append({"reason": "US citizenship required", "points": PENALTY_CITIZENSHIP})
-        gaps.append("Posting requires US citizenship")
-    if flags.get("clearance", {}).get("value") == "Clearance required":
+    # Explicit no-sponsorship / citizens-only / clearance are hard rules (rules._work_authorization); what reaches
+    # scoring is either "Not stated" or the co-op CPT/OPT case, which is flagged, not penalized.
+    if rules.signals.get("check_cpt_opt"):
+        gaps.append("States no visa sponsorship — check whether CPT/OPT is allowed for this co-op/internship")
+    if auth.us_citizen is None and flags.get("citizenship", {}).get("value", "").startswith(("US citizenship", "US person")):
+        penalties.append({"reason": "Citizenship / US person requirement (your status isn't set)", "points": PENALTY_CITIZENSHIP})
+    if flags.get("clearance", {}).get("value") == "Clearance required" and auth.us_citizen is None:
         penalties.append({"reason": "Security clearance required", "points": PENALTY_CLEARANCE})
 
     ghosts = ghost_signals(job, prefs, now, jd_text)

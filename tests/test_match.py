@@ -191,15 +191,6 @@ def test_grad_year_match(cfg, resume):
     assert good.breakdown["qualification"]["parts"]["level"]["score"] > bad.breakdown["qualification"]["parts"]["level"]["score"]
 
 
-def test_red_flag_penalties_only_when_relevant(cfg, resume):
-    flags = {"sponsorship": {"value": "No sponsorship"}, "citizenship": {"value": "Not stated"}}
-    base = score(cfg, resume, job(flags=flags))           # work authorization unknown: flag only, no penalty
-    assert not any("sponsorship" in p["reason"] for p in base.breakdown["penalties"])
-    cfg.prefs.work_authorization.needs_sponsorship = True
-    hit = score(cfg, resume, job(flags=flags))
-    assert hit.overall < base.overall and any("sponsorship" in g for g in hit.gaps)
-
-
 def test_freshness_is_a_capped_bonus(cfg, resume):
     now = NOW
     f = lambda **kw: score(cfg, resume, job(**kw)).breakdown["freshness"]["points"]  # noqa: E731

@@ -1,0 +1,47 @@
+# Company name resolution for inputs/my_companies.csv (and any company name).
+# Legal entity names, old names and acquired companies -> the brand that recruits today.
+# Rows that resolve to the same brand are merged (their notes and careers URLs are kept).
+# Only well-established facts belong here; anything uncertain goes under `manual` with a note.
+
+aliases:
+  "LastPass US LP": LastPass
+  "N-able, Inc.": N-able
+  "N-able Technologies, Inc.": N-able                 # same company, two legal entities
+  "The MathWorks, Inc.": MathWorks
+  "MathWorks": MathWorks
+  "Veeam Software Corporation": Veeam
+  "CGI Technologies and Solutions Inc.": CGI
+  "RSA Security LLC": RSA
+  "Zerto, Inc.": Hewlett Packard Enterprise            # acquired by HPE (2021); recruits through HPE
+  "Nuance Communications, Inc.": Microsoft             # acquired by Microsoft (2022)
+  "Charles River Development, Inc.": State Street      # acquired by State Street (2018)
+  "Art Technology Group, Inc.": Oracle                 # ATG, acquired by Oracle (2011)
+  "Oracle OTC Subsidiary LLC / ATG": Oracle
+  "Dassault Systemes Holdings LLC": Dassault Systèmes
+  "Dassault Systemes SolidWorks Corporation": Dassault Systèmes   # SOLIDWORKS recruits with Dassault Systèmes
+  "Sapient Corporation / Publicis Sapient": Publicis Sapient
+  "Medical Information Technology, Inc. / MEDITECH": MEDITECH
+  "Raytheon BBN Technologies Corp.": RTX               # BBN is part of RTX (Raytheon)
+  "ITA Software LLC": Google                           # acquired by Google (2011)
+  "Black Duck Software, Inc.": Black Duck
+  "NTT DATA International Services, Inc.": NTT DATA
+  "Thrive Operations, LLC": Thrive (managed IT services)
+  "Semrush Holdings, Inc.": Semrush
+  "Akamai Technologies, Inc.": Akamai
+  "Bitsight Technologies, Inc.": Bitsight
+  "22nd Century Technologies Inc.": 22nd Century Technologies
+  "ZOLL Medical Corporation": ZOLL Medical
+  "Pegasystems Inc.": Pegasystems
+  "Immersive (formerly Immersive Labs)": Immersive
+  "Numerated (check Moody's recruiting)": Numerated
+  "Velsera (Seven Bridges)": Velsera
+  "Juniper Networks, Inc.": Juniper Networks
+
+# Names that can't be mapped to a current employer with a job board: always "Manual check needed".
+manual:
+  "Endure Digital Intermediate Holdings, Inc.": "Could not identify the current employer (possibly Newfold Digital, formerly Endurance International Group — unverified)."
+  "GetGo Investment LLC": "Could not identify the current employer (possibly related to GoTo, formerly LogMeIn — unverified)."
+  "Excel Switching Corporation": "Historical company (acquired in 1999); no current careers site found."
+
+# Legal suffixes stripped when no alias applies ("Toast, Inc." -> "Toast").
+legal_suffixes: [inc, incorporated, llc, l.l.c, ltd, limited, corp, corporation, co, company, plc, lp, llp, holdings]
