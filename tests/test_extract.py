@@ -2,8 +2,7 @@
 import pytest
 
 from jobsearch.extract.flags import extract_flags
-from jobsearch.extract.normalize import (clean_location, employment_type_from_title, normalize_title, parse_salary,
-                                         seniority, work_mode)
+from jobsearch.extract.normalize import employment_type_from_title, normalize_title, parse_salary, work_mode
 from jobsearch.extract.requirements import parse_degree, parse_grad_years, parse_yoe, split_requirements
 from jobsearch.extract.skills import extract_skills
 from jobsearch.extract.text import html_to_text
@@ -117,14 +116,11 @@ def test_skills_synonyms_and_short_alias_rules(cfg):
 def test_normalize_title_and_seniority(cfg):
     n = normalize_title("Sr. SWE, ML Platform", cfg.title_rules)
     assert n == "senior software engineer machine learning platform"
-    assert seniority(n, cfg.title_rules) == "senior"
-    assert seniority(normalize_title("Software Engineer III", cfg.title_rules), cfg.title_rules) == "level iii"
     assert employment_type_from_title(normalize_title("SWE Intern", cfg.title_rules), cfg.title_rules) == "internship"
     assert employment_type_from_title(normalize_title("Software Engineer, New Grad", cfg.title_rules), cfg.title_rules) == "new_grad"
 
 
 def test_location_and_work_mode():
-    assert clean_location("SF, CA | NYC; SF, CA • Seattle") == "SF, CA · NYC · Seattle"
     assert work_mode("Remote - US") == "remote"
     assert work_mode("Boston, MA", "This is a hybrid role") == "hybrid"
     assert work_mode("Boston, MA", "We run a hybrid cloud") == "onsite"

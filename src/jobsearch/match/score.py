@@ -101,17 +101,23 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         **{k: ("–" if v is None else f"{v:.0f}") for k, v in sem.sections.items()}) if sem.score is not None
         else "Not enough JD/resume text")
 
+    # Level fit: entry and mid roles are both full matches (no penalty for being "below" 4+ years of
+    # experience, none for mid roles because of graduation status). Senior is a Stretch.
     level_bits, level_notes = [], []
     if rules.title and rules.title.kind != "none":
-        level_bits.append(100 if rules.title.kind == "target" else 85)
+        level_bits.append(85 if rules.title.kind == "related" else 100)
         level_notes.append(f"title ~ {rules.title.matched} ({rules.title.kind})")
+    lvl = job.get("level") or "unknown"
+    if lvl != "unknown":
+        level_bits.append({"intern": 100, "entry": 100, "mid": 100, "senior": 60}.get(lvl, 30))
+        level_notes.append(f"level {lvl}")
     yoe = job.get("yoe_required")
-    if yoe is not None and prefs.max_yoe is not None:
-        over = yoe - prefs.max_yoe
-        level_bits.append(100 if over <= 0 else 50 if over <= 1 else 15)
+    y = prefs.yoe
+    if yoe is not None:
+        level_bits.append(100 if yoe <= y.match_max else 60 if yoe <= y.stretch_max else 20)
         level_notes.append(f"{yoe:g}+ yrs required")
-        if over > 0:
-            gaps.append(f"Requires {yoe:g}+ years; your max is {prefs.max_yoe:g}")
+        if yoe > y.match_max:
+            gaps.append(f"Requires {yoe:g}+ years; your match window is 0–{y.match_max:g}")
     grad = job.get("grad_years") or []
     my_grad = int(prefs.graduation_date[:4]) if prefs.graduation_date else None
     if grad and my_grad:
@@ -135,7 +141,18 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     qual, qual_missing = _weighted(qual_parts)
 
     # --- Preference ----------------------------------------------------
-    loc_score = None if rules.location_ok is None else (100 if rules.location_ok else 0)
+    loc_score, loc_detail = None, "Location unknown"
+    if rules.location_ok is not None:
+        loc_score = 0.0
+        if rules.location_ok:
+            loc = (job.get("location") or "").casefold()
+            if prefs.preferred_locations and any(p.casefold() in loc for p in prefs.preferred_locations):
+                loc_score, loc_detail = 100.0, "preferred location"
+            elif job.get("remote_us"):
+                loc_score, loc_detail = 90.0, "remote (US)"
+            else:
+                loc_score = 100.0 if not prefs.preferred_locations else 75.0
+                loc_detail = "in the US"
     tier = prefs.company_tiers.tier_of(job["company"]) or (company.tier if company else None)
     tier_score = {1: 100, 2: 75, 3: 50}.get(tier) if tier else None
 
@@ -147,7 +164,7 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         fresh_detail = f"posted {age} days ago"
 
     et = job.get("employment_type")
-    et_score = None if not et or not prefs.employment_types else (100 if et in prefs.employment_types else 0)
+    et_score = None if not et else (0.0 if et in ("contract", "part_time", "temporary") else 100.0)
 
     sal_score, sal_detail = None, "Salary not stated"
     s = prefs.salary
@@ -157,7 +174,8 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
 
     w = prefs.weights.preference_parts
     pref_parts = {
-        "location": Part(loc_score, w.get("location", 0), f"{job.get('location') or 'Unknown'} · {job.get('work_mode')}"),
+        "location": Part(loc_score, w.get("location", 0),
+                         f"{job.get('location') or 'Unknown'} · {job.get('work_mode')} ({loc_detail})"),
         "company_tier": Part(tier_score, w.get("company_tier", 0), f"tier {tier}" if tier else "Untiered"),
         "freshness": Part(fresh_score, w.get("freshness", 0), fresh_detail),
         "employment_type": Part(et_score, w.get("employment_type", 0), et or "Not stated"),
@@ -168,9 +186,9 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     # --- Penalties -----------------------------------------------------
     penalties = [{"reason": r, "points": PENALTY_SOFT_RULE} for r in rules.soft_issues
                  if not r.startswith("Requires ")]  # YOE gets its own scaled penalty below
-    if yoe is not None and prefs.max_yoe is not None and yoe > prefs.max_yoe:
-        penalties.append({"reason": f"Requires {yoe:g}+ years (max {prefs.max_yoe:g})",
-                          "points": min(PENALTY_YOE_CAP, PENALTY_YOE_PER_YEAR * (yoe - prefs.max_yoe))})
+    if yoe is not None and yoe > y.match_max:
+        penalties.append({"reason": f"Requires {yoe:g}+ years (match window 0–{y.match_max:g})",
+                          "points": min(PENALTY_YOE_CAP, PENALTY_YOE_PER_YEAR * (yoe - y.match_max))})
     flags = job.get("flags") or {}
     auth = prefs.work_authorization
     if auth.needs_sponsorship and flags.get("sponsorship", {}).get("value") == "No sponsorship":
@@ -188,6 +206,9 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     else:
         base = qual if qual is not None else (pref if pref is not None else 0.0)
     overall = max(0.0, min(100.0, base - sum(p["points"] for p in penalties)))
+    label = label_for(overall, prefs)
+    if rules.stretch_reasons and label == "Strong":   # senior / 6-year roles are Stretch at best
+        label = "Stretch"
 
     def dump(parts):
         return {k: {"score": None if p.score is None else round(p.score, 1), "weight": p.weight, "detail": p.detail}
@@ -198,6 +219,7 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         "qualification": {"score": None if qual is None else round(qual, 1), "weight": wq, "parts": dump(qual_parts)},
         "preference": {"score": None if pref is None else round(pref, 1), "weight": wp, "parts": dump(pref_parts)},
         "penalties": penalties,
+        "stretch_reasons": rules.stretch_reasons,
         "uncertain": qual_missing + pref_missing,
         "semantic_sections": sem.sections,
         "evidence": [{"jd": e.jd_line, "resume": e.resume_line, "section": e.section, "similarity": e.similarity}
@@ -211,5 +233,5 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         expl = f"{skills_detail}. Closest resume evidence: “{sem.evidence[0].resume_line}”"
     else:
         expl = skills_detail
-    return ScoreResult(round(overall, 1), qual, pref, label_for(overall, prefs), breakdown, expl, gaps,
+    return ScoreResult(round(overall, 1), qual, pref, label, breakdown, expl, gaps,
                        matched, missing_req)

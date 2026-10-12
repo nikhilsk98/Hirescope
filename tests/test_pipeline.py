@@ -5,7 +5,7 @@ import re
 import httpx
 import pytest
 
-from jobsearch.adapters.base import SourceError
+from jobsearch.adapters.base import FetchContext, SourceError
 from jobsearch.adapters.greenhouse import GreenhouseAdapter
 from jobsearch.config import Company
 from jobsearch.output.dashboard import local_day, write_data_js
@@ -29,8 +29,10 @@ def gh_handler(payloads: dict, calls: list | None = None):
 
 def test_greenhouse_adapter_parses_jobs(greenhouse_payload):
     client = mock_client(gh_handler({"democo": greenhouse_payload}))
-    jobs = GreenhouseAdapter(client).fetch(Company(name="DemoCo", source="greenhouse", board="democo"))
+    jobs = GreenhouseAdapter(client).fetch(Company(name="DemoCo", source="greenhouse", board="democo"),
+                                           FetchContext()).jobs
     assert [j.job_id for j in jobs] == ["1001", "1002", "1003"]
+    assert jobs[0].canonical_key == "greenhouse:1001"
     j = jobs[0]
     assert j.apply_url == "https://example.com/demo/1001"
     assert "- Experience with Python, Go and SQL" in j.description
@@ -40,7 +42,7 @@ def test_greenhouse_adapter_parses_jobs(greenhouse_payload):
 def test_greenhouse_bad_shape_is_source_error():
     client = mock_client(lambda r: httpx.Response(200, json={"unexpected": True}))
     with pytest.raises(SourceError):
-        GreenhouseAdapter(client).fetch(Company(name="X", source="greenhouse", board="x"))
+        GreenhouseAdapter(client).fetch(Company(name="X", source="greenhouse", board="x"), FetchContext())
 
 
 def test_retries_then_succeeds(greenhouse_payload):
@@ -49,7 +51,8 @@ def test_retries_then_succeeds(greenhouse_payload):
     def handler(request):
         attempts.append(1)
         return httpx.Response(503) if len(attempts) < 3 else httpx.Response(200, json=greenhouse_payload)
-    jobs = GreenhouseAdapter(mock_client(handler)).fetch(Company(name="DemoCo", source="greenhouse", board="democo"))
+    jobs = GreenhouseAdapter(mock_client(handler)).fetch(Company(name="DemoCo", source="greenhouse", board="democo"),
+                                                         FetchContext()).jobs
     assert len(attempts) == 3 and len(jobs) == 3
 
 
@@ -57,7 +60,7 @@ def test_404_not_retried():
     calls = []
     client = mock_client(gh_handler({}, calls))
     with pytest.raises(SourceError):
-        GreenhouseAdapter(client).fetch(Company(name="X", source="greenhouse", board="x"))
+        GreenhouseAdapter(client).fetch(Company(name="X", source="greenhouse", board="x"), FetchContext())
     assert len(calls) == 1
 
 
@@ -75,8 +78,11 @@ def test_end_to_end_and_error_isolation(conn, cfg, resume, embedder, greenhouse_
     ng = rows["1001"]
     assert not ng["filtered"] and ng["label"] in ("Strong", "Stretch", "Weak")
     assert ng["grad_years"] == [2026, 2027] and ng["salary_min"] == 120000
-    assert ng["location"] == "Boston, MA · New York, NY"
-    assert rows["1002"]["filtered"] and "senior" in rows["1002"]["filter_reasons"][0]
+    assert ng["location"] == "Boston, MA · New York, NY" and ng["location_us"] == 1
+    assert ng["track"] == "full_time" and ng["level"] == "entry"
+    # senior asking <= 5 years: kept, but capped at Stretch (Candidate focus)
+    assert not rows["1002"]["filtered"] and rows["1002"]["label"] in ("Stretch", "Weak")
+    assert rows["1002"]["breakdown"]["stretch_reasons"]
     assert rows["1002"]["flags"]["sponsorship"]["value"] == "No sponsorship"
     assert rows["1003"]["filtered"]
     st = {r["company"]: r["status"] for r in conn.execute("SELECT company, status FROM source_status")}

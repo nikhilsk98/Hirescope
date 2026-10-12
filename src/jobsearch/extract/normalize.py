@@ -6,10 +6,6 @@ from dataclasses import dataclass
 
 from ..config import TitleRules
 
-SENIORITY_WORDS = ["intern", "junior", "senior", "staff", "principal", "lead", "manager",
-                   "director", "head", "architect", "vp", "distinguished", "fellow"]
-
-
 def _words(text: str) -> str:
     text = text.lower().replace("&", " and ")
     text = re.sub(r"[^a-z0-9+#./\- ]", " ", text)
@@ -27,19 +23,6 @@ def normalize_title(title: str, rules: TitleRules) -> str:
 
 def has_word(text: str, word: str) -> bool:
     return re.search(rf"(?<![a-z0-9]){re.escape(word.lower())}(?![a-z0-9])", text) is not None
-
-
-def seniority(norm_title: str, rules: TitleRules) -> str:
-    """Best-effort seniority from the normalized title; 'unknown' when nothing indicates it."""
-    for w in SENIORITY_WORDS:
-        if has_word(norm_title, w):
-            return w
-    for n in rules.excluded_level_numerals:
-        if has_word(norm_title, n):
-            return f"level {n}"
-    if has_word(norm_title, "new graduate") or has_word(norm_title, "entry level"):
-        return "entry"
-    return "unknown"
 
 
 def employment_type_from_title(norm_title: str, rules: TitleRules) -> str | None:

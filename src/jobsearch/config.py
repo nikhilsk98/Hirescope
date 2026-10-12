@@ -44,7 +44,7 @@ class Rules(BaseModel):
     title: RuleMode = "hard"
     seniority: RuleMode = "hard"
     location: RuleMode = "hard"
-    yoe: RuleMode = "soft"
+    yoe: RuleMode = "hard"          # applies to yoe.filter_min_yoe+ ; the stretch band is always soft
     employment_type: RuleMode = "soft"
     posting_age: RuleMode = "soft"
 
@@ -54,7 +54,7 @@ class Weights(BaseModel):
     preference: float = 0.35
     qualification_parts: dict[str, float] = {"skills": 0.4, "semantic": 0.4, "level": 0.2}
     preference_parts: dict[str, float] = {
-        "location": 0.35, "company_tier": 0.25, "freshness": 0.2,
+        "location": 0.3, "company_tier": 0.25, "freshness": 0.25,
         "employment_type": 0.1, "salary": 0.1,
     }
 
@@ -64,30 +64,63 @@ class Thresholds(BaseModel):
     stretch: float = 50
 
 
+class CoopTrack(BaseModel):
+    enabled: bool = True
+    start_window: tuple[str, str] = ("2026-12", "2027-03")   # YYYY-MM inclusive
+    boost_terms: list[str] = ["Spring 2027", "Winter 2027", "January 2027", "Jan 2027"]
+    filter_summer_only: bool = True
+
+
+class FullTimeTrack(BaseModel):
+    enabled: bool = True
+    start_from: str = "2027-05"
+    boost_terms: list[str] = ["Class of 2027", "2027 start", "New Grad 2027", "2027 New Grad"]
+
+
+class Tracks(BaseModel):
+    coop_intern: CoopTrack = CoopTrack()
+    full_time: FullTimeTrack = FullTimeTrack()
+
+
+class LevelPrefs(BaseModel):
+    include: list[str] = ["intern", "entry", "mid", "unknown"]
+    stretch: list[str] = ["senior"]            # kept, label capped at Stretch
+    exclude: list[str] = ["staff_plus", "manager"]
+
+
+class YoePrefs(BaseModel):
+    match_max: float = 5          # 0..match_max years -> full match
+    stretch_max: float = 6        # (match_max, stretch_max] -> Stretch
+    filter_min: float = 7         # >= filter_min -> filtered (rules.yoe: hard)
+
+
 class Preferences(BaseModel):
-    target_titles: list[str]
-    related_titles: list[str] = []
-    excluded_title_words: list[str] = []
-    experience_level: str = "entry"
-    max_yoe: float | None = None
-    employment_types: list[str] = []
+    target_titles: list[str] = []   # added to title_rules.yaml core_titles
+    related_titles: list[str] = []  # added to title_rules.yaml related_titles
+    excluded_title_words: list[str] = ["staff", "principal", "distinguished", "director", "manager",
+                                       "engineering manager", "architect", "head of"]
+    levels: LevelPrefs = LevelPrefs()
+    yoe: YoePrefs = YoePrefs()
+    years_experience: float | None = None    # your own, from the resume; informational
     graduation_date: str | None = None
-    start_date: str | None = None
-    locations: list[str] = []
+    tracks: Tracks = Tracks()
+    country: str = "US"
+    preferred_locations: list[str] = []       # soft boost; any US location / Remote-US still matches
     work_modes: list[str] = ["remote", "hybrid", "onsite"]
-    remote_countries: list[str] = ["United States", "US", "USA"]
     domains: list[str] = []
     salary: Salary = Salary()
     work_authorization: WorkAuth = WorkAuth()
     company_tiers: CompanyTiers = CompanyTiers()
-    max_posting_age_days: int | None = None
+    max_posting_age_days: int | None = 60
     rules: Rules = Rules()
     weights: Weights = Weights()
     thresholds: Thresholds = Thresholds()
-    top_n: int = 200
+    top_n: int = 1500
     timezone: str = "America/New_York"
+    my_companies_csv: str = "inputs/my_companies.csv"
+    statuses_import_dir: str = "~/Downloads"
 
-    @field_validator("graduation_date", "start_date", mode="before")
+    @field_validator("graduation_date", mode="before")
     @classmethod
     def _date_to_str(cls, v):
         # YAML may parse 2027-05 as a string but 2027-05-01 as a date.
@@ -96,15 +129,22 @@ class Preferences(BaseModel):
 
 class Company(BaseModel):
     name: str
-    source: str
-    board: str | None = None
+    source: str                       # adapter: greenhouse | lever | ashby | workday | smartrecruiters | ...
+    board: str | None = None          # ATS board token / company identifier / feed URL
+    host: str | None = None           # workday: tenant host, e.g. nvidia.wd5.myworkdayjobs.com
+    site: str | None = None           # workday: career site, e.g. NVIDIAExternalCareerSite
     tier: int = 3
     careers_url: str | None = None
+    verified: str | None = None       # date the endpoint was verified live
+    origin: str = "seed"              # seed | my_companies | feed
+    notes: str | None = None
 
 
 class TitleRules(BaseModel):
     abbreviations: dict[str, str] = {}
-    excluded_level_numerals: list[str] = []
+    core_titles: list[str] = []
+    related_titles: list[str] = []
+    coop_role_words: list[str] = []
     fuzzy_threshold: int = 90
     employment_type_words: dict[str, list[str]] = {}
 

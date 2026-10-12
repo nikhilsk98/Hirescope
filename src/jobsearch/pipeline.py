@@ -1,28 +1,44 @@
-"""Fetch -> extract -> store -> filter/score. Each source is isolated: one failure never stops the run."""
+"""Plan -> fetch (parallel) -> extract -> store -> filter/score.
+
+Each company/source is isolated: one failure never stops the run. Fetches run in a thread pool;
+all database writes happen on the calling thread as results arrive.
+"""
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import sqlite3
-from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import paths
-from .adapters.base import HttpClient, RawJob
-from .adapters.registry import get_adapter
+from .adapters.base import FetchContext, FetchResult, HttpClient, RawJob
+from .adapters.detect import Detector
+from .adapters.registry import ADAPTERS, get_adapter
 from .config import Company, Config
 from .extract.flags import extract_flags
-from .extract.normalize import (clean_location, employment_type_from_title, normalize_title, parse_salary, seniority,
-                                work_mode)
+from .extract.levels import map_level
+from .extract.locations import normalize_location
+from .extract.normalize import employment_type_from_title, normalize_title, parse_salary, work_mode
 from .extract.requirements import parse_degree, parse_grad_years, parse_yoe, split_requirements
 from .extract.resume import Resume
 from .extract.skills import extract_skills
-from .match.rules import apply_rules
+from .extract.track import classify_track, normalize_employment_type, parse_terms
+from .match.rules import apply_rules, quick_relevant
 from .match.score import score_job
 from .match.semantic import Embedder, jd_chunks, semantic_match
 from .storage import db
+from .watchlist import WatchItem
 
 log = logging.getLogger(__name__)
+
+TIER_INTERVAL_HOURS = {1: 0, 2: 20, 3: 70}       # tier 1 every run, tier 2 daily, tier 3 every 3 days
+TIER_MAX_PAGES = {1: 100, 2: 25, 3: 10}
+DIRECTORY_KEY = "ats_directory:simplify"
+WORKERS = 8
 
 
 @dataclass
@@ -30,29 +46,47 @@ class SourceOutcome:
     company: str
     source: str
     ok: bool
+    status: str = "failed"          # ok | failed | manual | skipped
+    origin: str = "seed"            # seed | my_companies | feed
+    tier: int | None = None
     jobs: int = 0
     new: int = 0
     updated: int = 0
     closed: int = 0
+    unchanged: bool = False
+    partial: str | None = None
+    detected_via: str | None = None
+    url: str | None = None
     error: str | None = None
+    notes: list[str] = field(default_factory=list)
 
 
 @dataclass
 class RunSummary:
     outcomes: list[SourceOutcome] = field(default_factory=list)
+    skipped: list[SourceOutcome] = field(default_factory=list)
     scored: int = 0
     filtered: int = 0
     strong: int = 0
     new_strong: list[str] = field(default_factory=list)
+    by_track: dict[str, dict] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         ok = [o for o in self.outcomes if o.ok]
-        failed = [o for o in self.outcomes if not o.ok]
+        failed = [o for o in self.outcomes if o.status == "failed"]
+        manual = [o for o in self.outcomes if o.status == "manual"]
+        partial = [o for o in ok if o.partial]
         return {
             "sources_checked": len(self.outcomes),
             "sources_ok": len(ok),
             "sources_failed": len(failed),
-            "failures": [{"company": o.company, "source": o.source, "error": o.error} for o in failed],
+            "sources_manual": len(manual),
+            "sources_partial": len(partial),
+            "sources_skipped": len(self.skipped),
+            "failures": [{"company": o.company, "source": o.source, "error": o.error, "origin": o.origin}
+                         for o in failed],
+            "manual": [{"company": o.company, "url": o.url, "error": o.error} for o in manual],
+            "partial": [{"company": o.company, "source": o.source, "why": o.partial} for o in partial],
             "jobs_found": sum(o.jobs for o in ok),
             "new": sum(o.new for o in ok),
             "updated": sum(o.updated for o in ok),
@@ -61,7 +95,9 @@ class RunSummary:
             "filtered": self.filtered,
             "strong": self.strong,
             "new_strong": self.new_strong,
-            "complete": not failed,
+            "by_track": self.by_track,
+            "complete": not failed and not manual,
+            "per_source": [{k: v for k, v in asdict(o).items() if k != "notes"} for o in self.outcomes],
         }
 
 
@@ -69,7 +105,7 @@ def jd_hash(text: str) -> str:
     return hashlib.sha256(" ".join(text.split()).encode()).hexdigest()[:20]
 
 
-def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None) -> db.JobRecord:
+def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None, official: bool = True) -> db.JobRecord:
     rules = cfg.title_rules
     norm = normalize_title(raw.title, rules)
     text = raw.description or ""
@@ -78,17 +114,24 @@ def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None) -> db.JobRecord:
     sal = parse_salary(text)
     h = jd_hash(text)
     jd_path = None
-    if jd_dir is not None:
+    if jd_dir is not None and text:
         jd_dir.mkdir(parents=True, exist_ok=True)
-        p = jd_dir / f"{raw.source}_{db.company_key(raw.company).replace(' ', '-')}_{raw.job_id}.txt"
+        safe_id = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in raw.job_id)[:80]
+        p = jd_dir / f"{raw.source}_{db.company_key(raw.company).replace(' ', '-').replace('/', '-')}_{safe_id}.txt"
         p.write_text(text, encoding="utf-8")
         jd_path = str(p)
+    loc = normalize_location(raw.location)
+    et = normalize_employment_type(raw.employment_type) or employment_type_from_title(norm, rules)
+    track = classify_track(raw.title, raw.employment_type, text, raw.track_hint)
+    level = map_level(norm, raw.company, yoe.min)
+    terms = list(dict.fromkeys([*raw.terms, *parse_terms(f"{raw.title}\n{text[:4000]}")]))
+    y = parse_yoe(reqs.preferred)
     return db.JobRecord(
         company=raw.company, title=raw.title, normalized_title=norm, job_id=raw.job_id, source=raw.source,
-        source_url=raw.source_url, apply_url=raw.apply_url, location=clean_location(raw.location),
+        source_url=raw.source_url, apply_url=raw.apply_url, location=loc.display if loc.places else None,
         work_mode=work_mode(raw.location, text),
-        employment_type=raw.employment_type or employment_type_from_title(norm, rules),
-        seniority=seniority(norm, rules),
+        employment_type=et,
+        seniority=level.level,
         posted_date=raw.posted_date.isoformat() if raw.posted_date else None,
         salary_min=sal.min, salary_max=sal.max, salary_currency=sal.currency,
         jd_path=jd_path, jd_hash=h,
@@ -98,74 +141,296 @@ def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None) -> db.JobRecord:
         degree=parse_degree("\n".join(reqs.minimum) or text),
         grad_years=parse_grad_years(f"{raw.title}\n{text}"),
         flags=extract_flags(text),
-        extra={**raw.extra, **({"yoe_preferred": y.min, "yoe_preferred_evidence": y.evidence}
-                               if (y := parse_yoe(reqs.preferred)).min is not None else {})},
+        extra={**raw.extra, **({"yoe_preferred": y.min, "yoe_preferred_evidence": y.evidence} if y.min is not None
+                               else {}), **({"has_jd": False} if not text else {})},
+        track=track.track, track_evidence=track.evidence, track_confidence=track.confidence,
+        level=level.level, level_evidence=level.evidence, terms=terms,
+        canonical_key=raw.canonical_key, location_us=loc.us, remote_us=loc.remote_us,
+        source_official=official,
     )
 
 
-def ingest_company(conn: sqlite3.Connection, client: HttpClient, company: Company, cfg: Config,
-                   jd_dir: Path | None) -> SourceOutcome:
-    out = SourceOutcome(company.name, company.source, ok=False)
-    try:
-        adapter = get_adapter(company.source, client)
-        raws = adapter.fetch(company)
-    except Exception as e:  # noqa: BLE001 - isolate every source failure
-        out.error = f"{type(e).__name__}: {e}"
-        log.error("source failed: %s/%s: %s", company.source, company.name, out.error)
-        db.set_source_status(conn, company.name, company.source, "failed", out.error, None)
+# --- planning ------------------------------------------------------------------------------------
+@dataclass
+class Planned:
+    company: Company | None        # None -> needs detection (My Companies)
+    watch: WatchItem | None = None
+    reason: str = ""
+
+
+def tier_of(company: Company, cfg: Config) -> int:
+    return cfg.prefs.company_tiers.tier_of(company.name) or company.tier
+
+
+def due(conn, company: Company, label: str, tier: int, now: datetime) -> bool:
+    hours = TIER_INTERVAL_HOURS.get(tier, 70)
+    if hours == 0:
+        return True
+    last = db.last_ok(conn, company.name, label)
+    return not last or now - datetime.fromisoformat(last) >= timedelta(hours=hours)
+
+
+def plan(conn, cfg: Config, watch: list[WatchItem], *, only_company: str | None = None,
+         only_source: str | None = None, force_all: bool = False, now: datetime | None = None
+         ) -> tuple[list[Planned], list[SourceOutcome]]:
+    now = now or datetime.now(timezone.utc)
+    seeds = [c for c in cfg.companies if not cfg.prefs.company_tiers.is_excluded(c.name)]
+    watch_keys = {w.company.casefold() for w in watch}
+    planned: list[Planned] = []
+    skipped: list[SourceOutcome] = []
+    if only_company:
+        key = only_company.casefold()
+        planned += [Planned(None, w, "My Companies") for w in watch if w.company.casefold() == key]
+        if not planned:
+            planned += [Planned(c, None, "requested") for c in seeds if c.name.casefold() == key]
+        if not planned:  # not configured anywhere: try detection by name
+            planned.append(Planned(None, WatchItem(only_company), "ad hoc"))
+        return planned, skipped
+    for w in watch:
+        planned.append(Planned(None, w, "My Companies: every run"))
+    for c in seeds:
+        if c.name.casefold() in watch_keys:
+            continue  # covered by My Companies
+        if only_source and c.source != only_source:
+            continue
+        adapter = ADAPTERS.get(c.source)
+        label = adapter(None).source_label(c) if adapter else c.source  # type: ignore[arg-type]
+        t = tier_of(c, cfg)
+        if force_all or only_source or due(conn, c, label, t, now):
+            planned.append(Planned(c, None, f"tier {t}"))
+        else:
+            skipped.append(SourceOutcome(c.name, c.source, False, status="skipped", origin=c.origin, tier=t,
+                                         notes=[f"tier {t}: not due (checked every {TIER_INTERVAL_HOURS[t]}h)"]))
+    if only_source:
+        planned = [p for p in planned if p.company is not None or p.watch is not None]
+    return planned, skipped
+
+
+# --- fetching ------------------------------------------------------------------------------------
+@dataclass
+class Fetched:
+    planned: Planned
+    company: Company | None
+    detected_via: str | None
+    result: FetchResult | None
+    error: str | None
+    label: str | None = None
+    official: bool = True
+    multi: bool = False
+
+
+def _context(conn, cfg: Config, company: Company, label: str, multi: bool, tier: int, pages_cache: dict,
+             validators: dict) -> FetchContext:
+    full = tier == 1 or company.origin == "my_companies"
+    return FetchContext(
+        full=full,
+        max_pages=TIER_MAX_PAGES.get(tier, 10),
+        want=lambda title, loc: quick_relevant(title, loc, cfg.prefs, cfg.title_rules),
+        known=db.known_listings(conn, label, None if multi else company.name),
+        validators=validators,
+        pages=pages_cache,
+        max_details=400 if full else 150,
+    )
+
+
+def _fetch(client: HttpClient, company: Company, ctx: FetchContext) -> FetchResult:
+    return get_adapter(company.source, client).fetch(company, ctx)
+
+
+def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[Company] | None,
+        client: HttpClient, embedder: Embedder, jd_dir: Path | None = paths.JD_DIR, *,
+        watch: list[WatchItem] | None = None, only_company: str | None = None, only_source: str | None = None,
+        force_all: bool = False, workers: int = WORKERS) -> RunSummary:
+    """companies=None -> use cfg.companies with tier scheduling; a list -> check exactly those."""
+    summary = RunSummary()
+    watch = watch or []
+    if companies is not None:
+        planned = [Planned(c, None, "explicit") for c in companies]
+        skipped: list[SourceOutcome] = []
+    else:
+        planned, skipped = plan(conn, cfg, watch, only_company=only_company, only_source=only_source,
+                                force_all=force_all)
+    summary.skipped = skipped
+
+    directory = {}
+    if row := db.get_page(conn, DIRECTORY_KEY):
+        directory = json.loads(row["payload"] or "{}")
+    detector = Detector(client, cfg.companies, directory)
+    pages_cache = {r["url"]: {"lastmod": r["lastmod"], "payload": r["payload"]}
+                   for r in conn.execute("SELECT url, lastmod, payload FROM page_cache WHERE url NOT LIKE 'ats_directory:%'")}
+
+    # Resolve My Companies (detection may need network; cached detections are instant).
+    jobs_to_run: list[tuple[Planned, Company, str | None]] = []
+    for p in planned:
+        if p.company is not None:
+            jobs_to_run.append((p, p.company, None))
+            continue
+        w = p.watch
+        assert w is not None
+        det = detector.detect(w.company, w.careers_url, db.get_company_source(conn, w.company))
+        if det.company is None:
+            summary.outcomes.append(SourceOutcome(w.company, "none", False, status="manual", origin="my_companies",
+                                                  tier=1, detected_via="manual", url=w.careers_url, error=det.detail))
+            db.set_source_status(conn, w.company, "none", "manual", det.detail, None, origin="my_companies", tier=1,
+                                 url=w.careers_url, detected_via="manual")
+            continue
+        if det.via != "cache":
+            c = det.company
+            db.set_company_source(conn, w.company, c.source, det.via, c.board, c.host, c.site, w.careers_url)
+        jobs_to_run.append((p, det.company, det.via))
+    conn.commit()
+
+    def work(item: tuple[Planned, Company, str | None]) -> Fetched:
+        p, company, via = item
+        adapter_cls = ADAPTERS.get(company.source)
+        if adapter_cls is None:
+            return Fetched(p, company, via, None, f"unknown source adapter '{company.source}'")
+        adapter = adapter_cls(client)
+        label = adapter.source_label(company)
+        multi = adapter.capabilities.multi_company
+        ctx = contexts[(company.name, company.source)]
+        try:
+            res = adapter.fetch(company, ctx)
+            return Fetched(p, company, via, res, None, label, adapter.capabilities.official, multi)
+        except Exception as e:  # noqa: BLE001 - isolate every source failure
+            if via == "cache" and p.watch is not None:  # cached detection failed: re-detect once now
+                det = detector.detect(p.watch.company, p.watch.careers_url, None)
+                if det.company is not None and (det.company.source, det.company.board) != (company.source, company.board):
+                    try:
+                        a2 = get_adapter(det.company.source, client)
+                        res = a2.fetch(det.company, contexts.get((det.company.name, det.company.source), ctx))
+                        return Fetched(p, det.company, f"re-detected: {det.via}", res, None,
+                                       a2.source_label(det.company), a2.capabilities.official,
+                                       a2.capabilities.multi_company)
+                    except Exception as e2:  # noqa: BLE001
+                        e = e2
+            return Fetched(p, company, via, None, f"{type(e).__name__}: {e}", label, True, multi)
+
+    contexts: dict[tuple[str, str], FetchContext] = {}
+    validators = {r[0]: {"etag": r[1], "last_modified": r[2]}
+                  for r in conn.execute("SELECT url, etag, last_modified FROM http_cache")}
+    for p, company, via in jobs_to_run:
+        cls = ADAPTERS.get(company.source)
+        if cls is None:
+            continue
+        a = cls(client)
+        t = 1 if company.origin == "my_companies" else tier_of(company, cfg)
+        contexts[(company.name, company.source)] = _context(conn, cfg, company, a.source_label(company),
+                                                           a.capabilities.multi_company, t, pages_cache, validators)
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = [pool.submit(work, item) for item in jobs_to_run]
+        for fut in as_completed(futures):
+            f = fut.result()
+            summary.outcomes.append(_store(conn, cfg, f, jd_dir))
+            conn.commit()
+
+    score_all(conn, cfg, resume, embedder, summary)
+    return summary
+
+
+def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
+    company = f.company
+    assert company is not None
+    origin = f.planned.watch and "my_companies" or company.origin
+    tier = 1 if origin == "my_companies" else tier_of(company, cfg)
+    label = f.label or company.source
+    name = f.planned.watch.company if f.planned.watch else company.name
+    out = SourceOutcome(name, label, False, origin=origin, tier=tier, detected_via=f.detected_via,
+                        url=company.careers_url or company.board)
+    extra = {"origin": origin, "tier": tier, "url": out.url, "detected_via": f.detected_via}
+    if f.result is None:
+        out.error = f.error
+        log.error("source failed: %s/%s: %s", label, name, out.error)
+        if f.planned.watch is not None:
+            db.bump_company_source_failure(conn, name)
+        db.set_source_status(conn, name, label, "failed", out.error, None, **extra)
         return out
 
+    res = f.result
     now = db.utcnow()
-    seen: set[str] = set()
-    for raw in raws:
+    out.notes = res.notes
+    if res.validators:
+        for url, v in res.validators.items():
+            if v.get("etag") or v.get("last_modified"):
+                db.set_http_cache(conn, url, v.get("etag"), v.get("last_modified"))
+    for url, pg in (res.pages or {}).items():
+        db.set_page(conn, url, pg.get("lastmod"), pg.get("payload"))
+    if res.directory:
+        db.set_page(conn, DIRECTORY_KEY, now, json.dumps(res.directory))
+
+    scope = None if f.multi else name
+    if res.unchanged:
+        out.unchanged = True
+        out.jobs = db.touch_all(conn, label, scope, now)
+        out.ok, out.status = True, "ok"
+        db.set_source_status(conn, name, label, "ok", None, out.jobs, now, partial=None, **extra)
+        log.info("source ok: %s/%s: unchanged (304), %d listings", label, name, out.jobs)
+        return out
+
+    seen: set[str] = set(res.seen_ids or ())
+    for raw in res.jobs:
+        if f.planned.watch is not None and not f.multi:
+            raw.company = name  # use the watchlist's spelling
         try:
-            rec = to_record(raw, cfg, jd_dir)
+            if raw.description is None:
+                hit = db.touch_job(conn, label, raw.company, raw.job_id, now)
+                if hit is None:   # unknown after all: store without a JD
+                    raw.description = ""
+                else:
+                    seen.add(raw.job_id)
+                    out.updated += hit[1] == "updated"
+                    continue
+            rec = to_record(raw, cfg, jd_dir, f.official)
             _, status = db.upsert_job(conn, rec, now)
         except Exception as e:  # noqa: BLE001 - one bad posting must not sink the company
-            log.warning("skipping %s/%s job %s: %s", company.source, company.name, raw.job_id, e)
+            log.warning("skipping %s/%s job %s: %s", label, name, raw.job_id, e)
             continue
         seen.add(raw.job_id)
         out.new += status == "new"
         out.updated += status == "updated"
-    out.closed = db.mark_missing(conn, company.source, company.name, seen, now)
-    out.ok, out.jobs = True, len(seen)
-    db.set_source_status(conn, company.name, company.source, "ok", None, len(seen), now)
-    log.info("source ok: %s/%s: %d jobs (%d new, %d updated, %d closed)",
-             company.source, company.name, out.jobs, out.new, out.updated, out.closed)
+    out.partial = res.partial
+    if res.partial:
+        out.notes = [*out.notes, "closed-job detection skipped (listing incomplete)"]
+    else:
+        out.closed = db.mark_missing(conn, label, scope, seen, now)
+    out.ok, out.status, out.jobs = True, "ok", len(seen)
+    db.set_source_status(conn, name, label, "ok", "; ".join(out.notes) or None, len(seen), now,
+                         partial=res.partial, **extra)
+    log.info("source ok: %s/%s: %d jobs (%d new, %d updated, %d closed)%s", label, name, out.jobs, out.new,
+             out.updated, out.closed, f" PARTIAL: {res.partial}" if res.partial else "")
     return out
 
 
+# --- scoring -------------------------------------------------------------------------------------
 def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: Embedder,
               summary: RunSummary) -> None:
     by_name = {db.company_key(c.name): c for c in cfg.companies}
     resume_lines = {s: resume.bullets(s) for s in ("experience", "projects", "coursework")}
+    tracks: dict[str, dict] = {}
     for job in db.open_jobs(conn):
         rules = apply_rules(job, cfg.prefs, cfg.title_rules)
+        t = tracks.setdefault(rules.track, {"open": 0, "visible": 0, "strong": 0, "stretch": 0, "weak": 0,
+                                            "filtered": 0})
+        t["open"] += 1
         if rules.hidden:
             db.save_scores(conn, job["id"], filtered=1, filter_reasons=rules.reasons, score=None,
                            qual_score=None, pref_score=None, label=None, breakdown=None,
                            explanation=None, gaps=None)
             summary.filtered += 1
+            t["filtered"] += 1
             continue
-        sem = semantic_match(embedder, resume_lines, jd_chunks(
-            Path(job["jd_path"]).read_text(encoding="utf-8") if job.get("jd_path") and Path(job["jd_path"]).exists() else "",
-            job.get("min_reqs") or [], job.get("pref_reqs") or []))
+        jd = Path(job["jd_path"]).read_text(encoding="utf-8") if job.get("jd_path") and Path(job["jd_path"]).exists() else ""
+        sem = semantic_match(embedder, resume_lines, jd_chunks(jd, job.get("min_reqs") or [], job.get("pref_reqs") or []))
         res = score_job(job, resume, cfg.prefs, rules, sem, cfg.synonyms, by_name.get(job["company_key"]))
         db.save_scores(conn, job["id"], filtered=0, filter_reasons=rules.soft_issues, score=res.overall,
                        qual_score=res.qualification, pref_score=res.preference, label=res.label,
                        breakdown=res.breakdown, explanation=res.explanation, gaps=res.gaps)
         summary.scored += 1
+        t["visible"] += 1
+        t[res.label.lower()] += 1
         if res.label == "Strong":
             summary.strong += 1
             if job["job_status"] == "new":
                 summary.new_strong.append(f"{job['company']}: {job['title']}")
-
-
-def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[Company],
-        client: HttpClient, embedder: Embedder, jd_dir: Path | None = paths.JD_DIR) -> RunSummary:
-    summary = RunSummary()
-    for company in companies:
-        summary.outcomes.append(ingest_company(conn, client, company, cfg, jd_dir))
-        conn.commit()
-    score_all(conn, cfg, resume, embedder, summary)
-    return summary
+    summary.by_track = tracks

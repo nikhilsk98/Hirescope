@@ -1,0 +1,7 @@
+company,careers_url,notes
+# Copy to inputs/my_companies.csv (gitignored). careers_url and notes are optional.
+# Every company here is checked on every run. The job system is detected automatically.
+Stripe,,detected from the company name
+Ramp,https://jobs.ashbyhq.com/ramp,an ATS board URL works directly
+NVIDIA,https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite,Workday needs the career-site URL
+Example Custom Co,https://careers.example.com,"custom page: read via schema.org JobPosting, else 'Manual check needed'"

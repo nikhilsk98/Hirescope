@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote_plus
@@ -44,6 +45,13 @@ def build_entry(job: dict, tz: str, resume_hash: str, tier: int | None, full: bo
         "filtered": bool(job.get("filtered")),
         "filter_reasons": job.get("filter_reasons") or [],
         "flags": {k: v.get("value") for k, v in (job.get("flags") or {}).items()},
+        "track": job.get("track_override") or job.get("track") or "full_time",
+        "track_auto": job.get("track"),
+        "track_evidence": job.get("track_evidence"),
+        "level": job.get("level") or "unknown",
+        "terms": job.get("terms") or [],
+        "link_status": job.get("link_status"),
+        "my_company": False,
     }
     if full:
         jd = Path(job["jd_path"]).read_text(encoding="utf-8") if job.get("jd_path") and Path(job["jd_path"]).exists() else ""
@@ -54,6 +62,9 @@ def build_entry(job: dict, tz: str, resume_hash: str, tier: int | None, full: bo
             "explanation": job.get("explanation"),
             "gaps": job.get("gaps") or [],
             "flag_evidence": {k: v.get("evidence") for k, v in (job.get("flags") or {}).items()},
+            "level_evidence": job.get("level_evidence"),
+            "has_jd": (job.get("extra") or {}).get("has_jd", True),
+            "sources": job.get("_sources") or [job["source"]],
             "min_reqs": job.get("min_reqs") or [],
             "pref_reqs": job.get("pref_reqs") or [],
             "skills": job.get("skills") or [],
@@ -69,15 +80,58 @@ def build_entry(job: dict, tz: str, resume_hash: str, tier: int | None, full: bo
     return e
 
 
+def coverage_rows(conn, summary, watch) -> list[dict]:
+    """One row per company/source: status (ok / failed / manual / skipped), source, last checked, open roles."""
+    watch_keys = {w.company.casefold() for w in watch}
+    open_counts = {(r[0], r[1]): r[2] for r in conn.execute(
+        "SELECT s.company_key, s.source, COUNT(DISTINCT s.job_pk) FROM job_sources s JOIN jobs j ON j.id = s.job_pk "
+        "WHERE j.job_status != 'closed' AND s.miss_count = 0 GROUP BY s.company_key, s.source")}
+    this_run = {(o.company.casefold(), o.source): o for o in [*summary.outcomes, *summary.skipped]}
+    rows = []
+    for r in conn.execute("SELECT * FROM source_status ORDER BY company"):
+        r = dict(r)
+        o = this_run.get((r["company"].casefold(), r["source"]))
+        multi = r["source"].startswith("simplify")
+        rows.append({
+            "company": r["company"], "source": r["source"],
+            "status": o.status if o else ("skipped" if r["status"] == "ok" else r["status"]),
+            "last_status": r["status"], "last_checked": r["last_checked"], "last_ok": r.get("last_ok"),
+            "error": r["error"] if r["status"] != "ok" else None, "notes": r["error"] if r["status"] == "ok" else None,
+            "partial": r.get("partial"), "detected_via": r.get("detected_via"), "tier": r.get("tier"),
+            "url": r.get("url"), "origin": r.get("origin") or "seed",
+            "my_company": r["company"].casefold() in watch_keys,
+            "jobs_listed": r["job_count"],
+            "open_roles": (sum(v for (ck, src), v in open_counts.items() if src == r["source"]) if multi
+                           else open_counts.get((r["company_key"], r["source"]), 0)),
+            "checked_this_run": bool(o and o.status != "skipped"),
+        })
+    return rows
+
+
 def write_data_js(path: Path, jobs: list[dict], meta: dict, tz: str, resume_hash: str, top_n: int,
-                  tier_of) -> dict:
-    """jobs: decoded open job rows (scored). Visible jobs get full detail; filtered ones a summary."""
+                  tier_of, my_companies: set[str] | None = None, max_filtered: int = 4000) -> dict:
+    """jobs: decoded open job rows (scored). Visible jobs get full detail; filtered ones a summary.
+
+    The Filtered tab lists software-relevant filtered jobs first (title matched but another rule failed),
+    then the rest, up to max_filtered; counts per reason cover all of them.
+    """
+    mine = {c.casefold() for c in (my_companies or set())}
     visible = sorted((j for j in jobs if not j.get("filtered")), key=lambda j: -(j.get("score") or 0))[:top_n]
     filtered = [j for j in jobs if j.get("filtered")]
+    reason_counts: dict[str, int] = {}
+    for j in filtered:
+        key = re.sub(r"[:(].*$", "", (j.get("filter_reasons") or ["?"])[0]).strip()
+        reason_counts[key] = reason_counts.get(key, 0) + 1
+    filtered.sort(key=lambda j: (any(r.startswith("Title does not match") for r in j.get("filter_reasons") or []),
+                                 -(datetime.fromisoformat(j["first_seen"]).timestamp())))
+    shown_filtered = filtered[:max_filtered]
     entries = [build_entry(j, tz, resume_hash, tier_of(j), True) for j in visible]
-    entries += [build_entry(j, tz, resume_hash, tier_of(j), False) for j in filtered]
+    entries += [build_entry(j, tz, resume_hash, tier_of(j), False) for j in shown_filtered]
+    for e in entries:
+        e["my_company"] = e["company"].casefold() in mine
     meta = {**meta, "disclaimer": DISCLAIMER, "timezone": tz, "visible_count": len(visible),
-            "filtered_count": len(filtered)}
+            "filtered_count": len(filtered), "filtered_listed": len(shown_filtered),
+            "filtered_reasons": dict(sorted(reason_counts.items(), key=lambda kv: -kv[1]))}
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".js.tmp")
     tmp.write_text(
@@ -87,4 +141,4 @@ def write_data_js(path: Path, jobs: list[dict], meta: dict, tz: str, resume_hash
         encoding="utf-8",
     )
     tmp.replace(path)
-    return {"visible": len(visible), "filtered": len(filtered)}
+    return {"visible": len(visible), "filtered": len(filtered), "filtered_listed": len(shown_filtered)}
