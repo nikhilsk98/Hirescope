@@ -19,7 +19,10 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from rapidfuzz import fuzz
+
 from ..config import Company
+from ..output.h1b import norm_name
 from .base import HttpClient
 from .jsonld import HTML_ACCEPT, jobpostings_in_html
 
@@ -108,10 +111,16 @@ class Detector:
                                 ("lever", f"https://api.lever.co/v0/postings/{slug}?mode=json&limit=1"),
                                 ("ashby", f"https://api.ashbyhq.com/posting-api/job-board/{slug}")):
                 try:
-                    self.http.get(url)
-                    return {"source": source, "board": slug}
+                    data = self.http.get_json(url)
                 except Exception:  # noqa: BLE001 - 404 = not this ATS
                     continue
+                if source == "greenhouse":
+                    # a slug can belong to another company ("thrive"): check the board's own company name
+                    owner = next((j.get("company_name") for j in data.get("jobs", []) if j.get("company_name")), None)
+                    if owner and fuzz.token_sort_ratio(norm_name(owner), norm_name(name)) < 85:
+                        log.info("probe %s/%s belongs to %r, not %r: skipped", source, slug, owner, name)
+                        continue
+                return {"source": source, "board": slug}
             try:
                 d = self.http.get_json(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=1")
                 if d.get("totalFound"):
@@ -120,15 +129,30 @@ class Detector:
                 pass
         return None
 
-    def detect(self, name: str, careers_url: str | None = None, cached: dict | None = None) -> Detection:
+    def _lookup(self, table: dict, name: str):
+        """Exact (casefolded) match, then legal-suffix-insensitive match ("Akamai" ~ "Akamai Technologies")."""
+        if hit := table.get(name.casefold()):
+            return hit
+        n = norm_name(name)
+        if not n:
+            return None
+        for k, v in table.items():
+            if norm_name(k) == n:
+                return v
+        return None
+
+    def detect(self, name: str, careers_url: str | None = None, cached: dict | None = None,
+               manual_reason: str | None = None) -> Detection:
+        if manual_reason:
+            return Detection(None, "manual", manual_reason)
         if cached and cached.get("fail_count", 0) < 2:
             return Detection(self._make(name, cached, careers_url), "cache", cached.get("detected_via", ""))
         if fields := from_url(careers_url):
             return Detection(self._make(name, fields, careers_url), "careers_url")
-        if seed := self.seed.get(name.casefold()):
+        if seed := self._lookup(self.seed, name):
             return Detection(seed.model_copy(update={"origin": "my_companies", "tier": 1,
                                                      "careers_url": careers_url or seed.careers_url}), "seed list")
-        if fields := self.directory.get(name.casefold()):
+        if fields := self._lookup(self.directory, name):
             return Detection(self._make(name, fields, careers_url), "simplify directory")
         html = None
         if careers_url:

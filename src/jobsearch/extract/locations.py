@@ -19,6 +19,7 @@ class LocationConfig:
     states: dict[str, str]          # abbr -> name
     us_cities: tuple[str, ...]
     non_us: tuple[str, ...]
+    metros: dict[str, tuple[str, ...]]
 
 
 @lru_cache(maxsize=4)
@@ -31,6 +32,7 @@ def load_location_config(path: Path = paths.CONFIG / "locations.yaml") -> Locati
         states={k.upper(): v for k, v in (raw.get("us_states") or {}).items()},
         us_cities=tuple(s.lower() for s in raw.get("us_cities") or []),
         non_us=tuple(s.lower() for s in raw.get("non_us") or []),
+        metros={k.lower(): tuple(c.lower() for c in v or []) for k, v in (raw.get("metros") or {}).items()},
     )
 
 
@@ -136,3 +138,23 @@ def normalize_location(text: str | None, cfg: LocationConfig | None = None) -> L
     if not text or not text.strip():
         return LocationInfo()
     return LocationInfo(list(_normalize_cached(text, cfg)))
+
+
+@lru_cache(maxsize=64)
+def _metro_re(names: tuple[str, ...]) -> re.Pattern:
+    body = "|".join(re.escape(n) for n in sorted(set(names), key=len, reverse=True)) or "(?!)"
+    return re.compile(rf"(?<![a-z])(?:{body})(?![a-z])", re.I)
+
+
+def preferred_match(location: str | None, preferred: list[str], cfg: LocationConfig | None = None) -> str | None:
+    """The preferred location (metro name or plain place) a job's US location falls in, or None.
+    Metro names expand to their cities (config/locations.yaml -> metros); other entries match as place names."""
+    if not location or not preferred:
+        return None
+    cfg = cfg or load_location_config()
+    us_parts = " · ".join(p.text for p in normalize_location(location, cfg).places if p.country == "US") or location
+    for pref in preferred:
+        names = cfg.metros.get(pref.lower(), (pref.lower(),))
+        if _metro_re(tuple(names)).search(us_parts):
+            return pref
+    return None

@@ -468,3 +468,38 @@ def test_query_based_source_never_closes_relevant_job_on_a_guess(conn, cfg, resu
     for _ in range(2):
         run(conn, cfg, resume, [co], mock_client(router({})), embedder, tmp_path, workers=1)
     assert not any(j["job_id"] == "software-engineer-i_jr1" for j in db.open_jobs(conn))
+
+
+def test_watchlist_brand_resolution_and_merging(tmp_path):
+    from jobsearch.watchlist import resolve
+    aliases = tmp_path / "aliases.yaml"
+    aliases.write_text("aliases:\n  \"ITA Software LLC\": Google\n  \"N-able Technologies, Inc.\": N-able\n"
+                       "manual:\n  \"GetGo Investment LLC\": \"unknown\"\nlegal_suffixes: [inc, llc, corporation]\n")
+    items = parse_watchlist("company,careers_url,notes\n\"Toast, Inc.\",,Boston\n\"N-able, Inc.\",,a\n"
+                            "\"N-able Technologies, Inc.\",https://x.example/careers,b\nITA Software LLC,,c\nGoogle,,d\n"
+                            "GetGo Investment LLC,,e\n\"Sapient Corporation / Publicis Sapient\",,f\nImmersive (formerly Immersive Labs),,g\n")
+    out = {w.company: w for w in resolve(items, aliases)}
+    assert set(out) == {"Toast", "N-able", "Google", "GetGo Investment LLC", "Publicis Sapient", "Immersive"}
+    assert out["N-able"].names == ["N-able, Inc.", "N-able Technologies, Inc."] and out["N-able"].careers_url
+    assert out["Google"].notes == "c; d"
+    assert out["GetGo Investment LLC"].manual_reason == "unknown"
+
+
+def test_manual_names_never_probed(cfg):
+    h = router({})
+    d = Detector(mock_client(h), [], {})
+    r = d.detect("GetGo Investment LLC", None, None, manual_reason="Could not identify")
+    assert r.company is None and r.via == "manual" and not h.calls
+
+
+def test_name_probe_rejects_board_owned_by_another_company():
+    h = router({("GET", "boards-api.greenhouse.io/v1/boards/thrive/jobs"): {"jobs": [{"company_name": "Thrive Market"}]},
+                ("GET", "boards-api.greenhouse.io/v1/boards/acme/jobs"): {"jobs": [{"company_name": "Acme, Inc."}]}})
+    d = Detector(mock_client(h), [], {})
+    assert d.detect("Thrive").company is None or d.detect("Thrive").company.board != "thrive"
+    assert d.detect("Acme").company.board == "acme"
+
+
+def test_seed_lookup_ignores_legal_suffixes():
+    d = Detector(mock_client(router({})), [Company(name="Akamai Technologies", source="workday", host="h", board="b", site="s")], {})
+    assert d.detect("Akamai").company.source == "workday"

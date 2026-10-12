@@ -8,7 +8,7 @@ Every candidate is verified LIVE before inclusion (Greenhouse/Lever/Ashby: 200 f
 Workday: 200 + total from the cxs endpoint; SmartRecruiters: totalFound > 0). Unverified candidates are
 written to config/companies_unverified.yaml with the reason, never into the main list.
 
-Usage: PYTHONPATH=src .venv/bin/python scripts/build_seed_companies.py [--limit 300]
+Usage: ~/.venvs/hirescope/bin/python scripts/build_seed_companies.py [--limit 300]
 """
 from __future__ import annotations
 

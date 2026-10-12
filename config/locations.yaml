@@ -25,6 +25,21 @@ aliases:
   south sf: South San Francisco, CA
   ssf: South San Francisco, CA
 
+# Metro areas usable in preferences.yaml -> preferred_locations. A job matches a metro when any of its US
+# locations contains one of these place names (case-insensitive, whole words).
+metros:
+  Boston: [boston, greater boston, cambridge, somerville, waltham, burlington, lexington, bedford, woburn, quincy,
+    newton, needham, needham heights, watertown, medford, brighton, charlestown, chelsea, everett, malden, natick,
+    framingham, marlborough, westborough, andover, wilmington, billerica, chelmsford, lowell, westford, canton,
+    dedham, braintree, norwood, foxborough, wellesley, brookline, arlington ma, boston metro]
+  Atlanta: [atlanta, alpharetta, marietta, sandy springs, duluth ga, roswell, kennesaw, decatur ga, norcross,
+    peachtree corners, dunwoody, smyrna]
+  Seattle: [seattle, bellevue, redmond, kirkland, bothell, renton, issaquah, tacoma, everett wa, lynnwood, tukwila]
+  SF Bay Area: [san francisco, sf bay area, bay area, south san francisco, oakland, berkeley, emeryville, san mateo,
+    burlingame, foster city, redwood city, menlo park, palo alto, mountain view, sunnyvale, santa clara, cupertino,
+    san jose, milpitas, fremont, los gatos, campbell, san carlos, belmont, brisbane, daly city, pleasanton,
+    san ramon, walnut creek, hayward, newark ca, livermore]
+
 # Phrases that mean "remote, open to the United States".
 remote_us:
   - remote - us

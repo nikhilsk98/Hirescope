@@ -143,3 +143,15 @@ def test_level_regressions(cfg, title, company, level):
 ])
 def test_location_regressions(text, us):
     assert normalize_location(text).us is us
+
+
+def test_preferred_metros():
+    from jobsearch.extract.locations import preferred_match
+    prefs = ["Boston", "Atlanta", "Seattle", "SF Bay Area"]
+    assert preferred_match("Cambridge, MA", prefs) == "Boston"
+    assert preferred_match("Waltham, Massachusetts", prefs) == "Boston"
+    assert preferred_match("Bellevue, WA · Austin, TX", prefs) == "Seattle"
+    assert preferred_match("Sunnyvale, CA", prefs) == "SF Bay Area"
+    assert preferred_match("Alpharetta, GA", prefs) == "Atlanta"
+    assert preferred_match("Austin, TX", prefs) is None
+    assert preferred_match("Cambridge, UK · Austin, TX", prefs) is None      # only US places count

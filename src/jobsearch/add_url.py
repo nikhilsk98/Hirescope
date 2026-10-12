@@ -26,6 +26,7 @@ from .match.semantic import Embedder
 from .pipeline import RunSummary, score_all, to_record
 from .storage import db
 from .watchlist import load_watchlist
+from .watchlist import resolve as resolve_watchlist
 
 log = logging.getLogger("jobsearch.add_url")
 SOURCE = "added_url"
@@ -124,7 +125,8 @@ def main(argv=None) -> int:
     prev = json.loads(last[0]) if last else {}
     cov = (json.loads(open(paths.DASHBOARD / "data.js").read().split("window.META = ", 1)[1].split(";\n", 1)[0])
            .get("coverage", []) if (paths.DASHBOARD / "data.js").exists() else [])
-    publish(conn, cfg, resume, prev, cov, load_watchlist(paths.ROOT / cfg.prefs.my_companies_csv), log_file)
+    publish(conn, cfg, resume, prev, cov, resolve_watchlist(load_watchlist(paths.ROOT / cfg.prefs.my_companies_csv),
+                                                 paths.CONFIG / "company_aliases.yaml"), log_file)
     conn.close()
     state = "Filtered: " + "; ".join(row["filter_reasons"] or []) if row["filtered"] else \
         f"score {row['score']} ({row['label']})"

@@ -38,7 +38,7 @@ from .watchlist import WatchItem
 log = logging.getLogger(__name__)
 
 # Bump when extraction logic changes; stored jobs are then re-extracted from their saved title/location/JD.
-EXTRACT_VERSION = "2026-10-12.8"   # .8: keyword implications, title rule additions
+EXTRACT_VERSION = "2026-10-12.11"  # .11: J-1-only sponsorship statements
 EXTRACT_CONFIGS = ("title_rules.yaml", "levels.yaml", "locations.yaml", "skills_synonyms.yaml", "ats_keywords.yaml")
 TIER_INTERVAL_HOURS = {1: 0, 2: 20, 3: 70}       # tier 1 every run, tier 2 daily, tier 3 every 3 days
 TIER_MAX_PAGES = {1: 100, 2: 25, 3: 10}
@@ -238,8 +238,8 @@ def due(conn, company: Company, label: str, tier: int, now: datetime) -> bool:
 
 
 def plan(conn, cfg: Config, watch: list[WatchItem], *, only_company: str | None = None,
-         only_source: str | None = None, force_all: bool = False, now: datetime | None = None
-         ) -> tuple[list[Planned], list[SourceOutcome]]:
+         only_source: str | None = None, force_all: bool = False, now: datetime | None = None,
+         watchlist_only: bool = False) -> tuple[list[Planned], list[SourceOutcome]]:
     now = now or datetime.now(timezone.utc)
     seeds = [c for c in cfg.companies if not cfg.prefs.company_tiers.is_excluded(c.name)]
     watch_keys = {w.company.casefold() for w in watch}
@@ -255,6 +255,8 @@ def plan(conn, cfg: Config, watch: list[WatchItem], *, only_company: str | None 
         return planned, skipped
     for w in watch:
         planned.append(Planned(None, w, "My Companies: every run"))
+    if watchlist_only:
+        return planned, skipped
     for c in seeds:
         if c.name.casefold() in watch_keys:
             continue  # covered by My Companies
@@ -308,7 +310,7 @@ def _fetch(client: HttpClient, company: Company, ctx: FetchContext) -> FetchResu
 def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[Company] | None,
         client: HttpClient, embedder: Embedder, jd_dir: Path | None = paths.JD_DIR, *,
         watch: list[WatchItem] | None = None, only_company: str | None = None, only_source: str | None = None,
-        force_all: bool = False, workers: int = WORKERS) -> RunSummary:
+        force_all: bool = False, workers: int = WORKERS, watchlist_only: bool = False) -> RunSummary:
     """companies=None -> use cfg.companies with tier scheduling; a list -> check exactly those."""
     summary = RunSummary()
     watch = watch or []
@@ -317,7 +319,7 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
         skipped: list[SourceOutcome] = []
     else:
         planned, skipped = plan(conn, cfg, watch, only_company=only_company, only_source=only_source,
-                                force_all=force_all)
+                                force_all=force_all, watchlist_only=watchlist_only)
     summary.skipped = skipped
 
     directory = {}
@@ -335,7 +337,7 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
             continue
         w = p.watch
         assert w is not None
-        det = detector.detect(w.company, w.careers_url, db.get_company_source(conn, w.company))
+        det = detector.detect(w.company, w.careers_url, db.get_company_source(conn, w.company), w.manual_reason)
         origin = "ad_hoc" if p.reason == "ad hoc" else "my_companies"
         if det.company is None:
             summary.outcomes.append(SourceOutcome(w.company, "none", False, status="manual", origin=origin,

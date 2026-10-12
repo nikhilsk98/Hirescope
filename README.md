@@ -10,7 +10,7 @@ per-job "job package" export. The core pipeline makes **zero LLM calls** and sen
 ## Setup
 
 ```sh
-./scripts/setup.sh                       # venv (.venv), dependencies, PYTHONPATH hook
+./scripts/setup.sh                       # venv at ~/.venvs/hirescope, dependencies, editable install
 cp inputs/preferences.example.yaml inputs/preferences.yaml      # then edit
 cp inputs/master_resume.example.md inputs/master_resume.md      # then replace with YOUR resume
 ```
@@ -19,15 +19,16 @@ cp inputs/master_resume.example.md inputs/master_resume.md      # then replace w
 Keep its `## Experience / ## Projects / ## Coursework / ## Education / ## Skills` headings, `### ` entry headings
 and `- ` bullets.
 
-> **Why no `pip install -e .`?** On this Mac, new `.pth` files in the venv get the `hidden` file flag, and
-> Python 3.12 skips hidden `.pth` files, so the editable install silently stops working. `setup.sh` instead adds
-> `src/` to `PYTHONPATH` in `.venv/bin/activate`, and `scripts/run.sh` sets it itself.
+> **Why is the venv outside the repo?** This repo lives in `~/Documents`, which iCloud Drive syncs. Inside a
+> synced folder, macOS flags new `.pth` files as hidden and Python 3.12 skips hidden `.pth` files, so an editable
+> install silently stops working (and every installed file gets uploaded). The venv defaults to
+> `~/.venvs/hirescope`; set `JOBSEARCH_VENV` to put it elsewhere.
 
 ## Usage
 
 ```sh
 ./scripts/run.sh                         # full run, writes dashboard/data.js
-source .venv/bin/activate && python -m jobsearch.run --verbose     # same thing
+source ~/.venvs/hirescope/bin/activate && python -m jobsearch.run --verbose     # same thing
 python -m jobsearch.run --company "Figma" --verbose               # one company
 python -m jobsearch.run --source greenhouse --dry-run             # fetch + score, write nothing
 python -m jobsearch.run --all                                     # ignore tier schedules this run
@@ -250,13 +251,13 @@ LinkedIn search) open in your browser as normal.
 ## Tests
 
 ```sh
-PYTHONPATH=src .venv/bin/python -m pytest -q
+~/.venvs/hirescope/bin/python -m pytest -q
 ```
 All test data is mock data labeled DEMO (`tests/fixtures/`). Tests need no network and no embedding model.
 
 ## Troubleshooting
 
-- `No module named 'jobsearch'`: use `scripts/run.sh`, or `source .venv/bin/activate` (which sets `PYTHONPATH`).
+- `No module named 'jobsearch'`: use `scripts/run.sh`, or re-run `scripts/setup.sh` (editable install into `~/.venvs/hirescope`).
 - **Repo inside iCloud Drive** (Desktop & Documents sync): iCloud uploads and slows every file the pipeline
   writes, and a live SQLite database can be corrupted by sync. `setup.sh` detects this and makes `data/` a
   symlink to `data.nosync/`, which iCloud never syncs. Or set `JOBSEARCH_DATA_DIR=/some/local/path`.

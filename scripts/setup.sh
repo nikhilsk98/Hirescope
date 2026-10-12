@@ -17,17 +17,15 @@ if in_icloud && [[ ! -L data ]]; then
   ln -s data.nosync data
 fi
 
-[[ -d .venv ]] || "$PY" -m venv .venv
-.venv/bin/pip install -q --upgrade pip
-.venv/bin/pip install -q -r requirements.txt
-
-# macOS may flag .pth files as hidden, and Python 3.12 skips hidden .pth files, so an
-# editable install is unreliable. Put src/ on PYTHONPATH from the venv's activate script instead.
-if ! grep -q "jobsearch PYTHONPATH" .venv/bin/activate; then
-  printf '\n# jobsearch PYTHONPATH\nexport PYTHONPATH="%s/src${PYTHONPATH:+:$PYTHONPATH}"\n' "$ROOT" >> .venv/bin/activate
-fi
+# The venv lives outside the repo (default ~/.venvs/hirescope): a venv inside an iCloud-synced folder gets its
+# .pth files flagged hidden (Python 3.12 then skips them) and every file synced. Override with JOBSEARCH_VENV.
+VENV="${JOBSEARCH_VENV:-$HOME/.venvs/hirescope}"
+[[ -d "$VENV" ]] || { mkdir -p "$(dirname "$VENV")"; "$PY" -m venv "$VENV"; }
+"$VENV/bin/pip" install -q --upgrade pip
+"$VENV/bin/pip" install -q -r requirements.txt
+"$VENV/bin/pip" install -q -e .        # `python -m jobsearch.run` works from anywhere with this venv
 
 for f in preferences.yaml master_resume.md; do
   [[ -f "inputs/$f" ]] || echo "TODO: create inputs/$f (start from inputs/${f%.*}.example.${f##*.})"
 done
-echo "Setup done. Next: source .venv/bin/activate && python -m jobsearch.run --verbose"
+echo "Setup done. Next: source $VENV/bin/activate && python -m jobsearch.run --verbose   (or ./scripts/run.sh)"

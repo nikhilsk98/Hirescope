@@ -153,6 +153,7 @@ def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime 
             fail("posting_age", f"Posted {age} days ago (max {prefs.max_posting_age_days})")
 
     _two_track(job, prefs, res, fail)
+    _work_authorization(job, prefs, res, fail)
 
     s = prefs.salary
     if s.mode == "hard" and s.min and job.get("salary_max") and job.get("salary_currency") in (None, s.currency) \
@@ -230,6 +231,31 @@ def _two_track(job: dict, prefs: Preferences, res: RuleResult, fail) -> None:
             res.boosts.append(("new_grad", "New Grad / early-career role (top priority)"))
     if job.get("eligibility_note"):
         res.signals["check_eligibility"] = job["eligibility_note"]
+
+
+def _work_authorization(job: dict, prefs: Preferences, res: RuleResult, fail) -> None:
+    """Only what the JD explicitly states (flags default to 'Not stated'; silence never filters anything).
+
+    Full-time: no sponsorship (if you need it), US citizens / US persons only (if you aren't one), or security
+    clearance required -> filtered with the quote. Co-op/Intern: citizens / US persons only or clearance required
+    -> filtered; "no sponsorship" alone is kept with a "Check eligibility (CPT/OPT)" flag, since co-ops and
+    internships are often allowed on CPT.
+    """
+    auth = prefs.work_authorization
+    flags = job.get("flags") or {}
+    spons = flags.get("sponsorship") or {}
+    cit = flags.get("citizenship") or {}
+    clr = flags.get("clearance") or {}
+    q = lambda f: f" — “{f.get('evidence')}”" if f.get("evidence") else ""  # noqa: E731
+    if auth.us_citizen is False and cit.get("value", "").startswith(("US citizenship required", "US person required")):
+        fail("work_authorization", f"{cit['value']}{q(cit)}")
+    if auth.us_citizen is False and clr.get("value") == "Clearance required":
+        fail("work_authorization", f"Security clearance required{q(clr)}")
+    if auth.needs_sponsorship and spons.get("value") == "No sponsorship":
+        if res.track == COOP:
+            res.signals["check_cpt_opt"] = spons.get("evidence") or "States no visa sponsorship"
+        else:
+            fail("work_authorization", f"States no visa sponsorship{q(spons)}")
 
 
 def quick_relevant(title: str, location: str | None, prefs: Preferences, rules: TitleRules) -> bool:
