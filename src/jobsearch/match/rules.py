@@ -6,6 +6,7 @@ staff+/manager excluded, senior kept as Stretch when it asks <= yoe.match_max ye
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -13,10 +14,15 @@ from rapidfuzz import fuzz
 
 from ..config import Preferences, TitleRules
 from ..extract.normalize import has_word, normalize_title
+from ..extract.dates import Window
 from ..extract.track import COOP, FULL_TIME, UNCLEAR
 
 # phrases that contain level-like words but are not levels
 NON_LEVEL_PHRASES = ("member of technical staff",)
+GRAD_SLACK_MONTHS = 2
+_NEW_GRAD = re.compile(r"\b(new grad(uate)?s?|university grad(uate)?|college grad(uate)?|early career|entry[- ]level|"
+                       r"class of 20\d\d|graduate (software|engineer|developer|program|programme)|rotational|"
+                       r"recent grad(uate)?s?)\b", re.I)
 
 
 @dataclass
@@ -72,6 +78,8 @@ class RuleResult:
     title: TitleMatch | None = None
     location_ok: bool | None = None
     track: str = FULL_TIME
+    boosts: list[tuple[str, str]] = field(default_factory=list)   # (kind, reason): new_grad | term | grad_match
+    signals: dict = field(default_factory=dict)                     # new_grad, check_eligibility, start, grad
 
 
 def effective_track(job: dict) -> str:
@@ -111,6 +119,9 @@ def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime 
             res.stretch_reasons.append("Senior title" + ("" if yoe is not None else " (years not stated)"))
 
     res.title = match_title(norm, res.track, prefs, rules)
+    if res.title.kind == "none" and (sem := job.get("_semantic_title")):
+        res.title = TitleMatch("semantic", sem["profile"], sem["similarity"] * 100)
+        res.signals["meaning_match"] = sem
     if res.title.kind == "none":
         fail("title", "Title does not match core, related, or co-op/intern software titles")
 
@@ -134,10 +145,14 @@ def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime 
         fail("employment_type", f"Employment type is {et}")
 
     posted = job.get("posted_date")
-    if prefs.max_posting_age_days and posted:
+    if posted:
         age = (now - datetime.fromisoformat(posted)).days
-        if age > prefs.max_posting_age_days:
+        if age > prefs.ghost.stale_days:
+            fail("stale_posting", f"Posted {age} days ago — likely stale (filtered after {prefs.ghost.stale_days} days)")
+        elif prefs.max_posting_age_days and age > prefs.max_posting_age_days:
             fail("posting_age", f"Posted {age} days ago (max {prefs.max_posting_age_days})")
+
+    _two_track(job, prefs, res, fail)
 
     s = prefs.salary
     if s.mode == "hard" and s.min and job.get("salary_max") and job.get("salary_currency") in (None, s.currency) \
@@ -146,6 +161,75 @@ def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime 
 
     res.hidden = bool(res.reasons)
     return res
+
+
+def _fmt_window(w: dict) -> str:
+    a, b = w["start"], w["end"]
+    if a <= "2000-12":
+        return f"by {b}"
+    if b >= "2099-01":
+        return f"{a} or later"
+    return a if a == b else f"{a} – {b}"
+
+
+def _two_track(job: dict, prefs: Preferences, res: RuleResult, fail) -> None:
+    """Spring 2027 co-op/intern and May 2027 full-time rules: summer-only filter, start windows, graduation
+    windows, New Grad and eligibility signals. Unstated dates are uncertain, never a rejection."""
+    t = prefs.tracks
+    title = job.get("title") or job.get("normalized_title") or ""
+    terms = job.get("terms") or []
+    evid = " ".join([title, *terms, *(w.get("evidence") or "" for w in (job.get("start_windows") or [])),
+                     *(w.get("evidence") or "" for w in (job.get("grad_windows") or []))]).lower()
+
+    # graduation window (both tracks)
+    my_grad = (prefs.graduation_date or "")[:7] or None
+    gws = job.get("grad_windows") or []
+    if gws and my_grad:
+        hits = [w for w in gws if Window(w["start"], w["end"], "").contains(my_grad, GRAD_SLACK_MONTHS)]
+        if hits:
+            res.signals["grad"] = {"status": "match", "evidence": hits[0].get("evidence")}
+            res.boosts.append(("grad_match", f"Graduation window {_fmt_window(hits[0])} includes yours ({my_grad})"))
+        else:
+            w = gws[0]
+            res.signals["grad"] = {"status": "mismatch", "evidence": w.get("evidence")}
+            fail("grad_window", f"Requires graduation {_fmt_window(w)}; yours is {my_grad} — “{w.get('evidence')}”")
+    else:
+        res.signals["grad"] = {"status": "not stated"}
+
+    sws = job.get("start_windows") or []
+    if res.track == COOP:
+        if t.coop_intern.filter_summer_only and job.get("summer_only"):
+            fail("summer_only", "Summer-only internship (your full-time track starts "
+                                f"{t.full_time.start_from}; summer-only is filtered in preferences)")
+        lo, hi = t.coop_intern.start_window
+        if sws:
+            ok = [w for w in sws if lo <= w["start"][:7] <= hi]
+            if ok:
+                res.signals["start"] = {"status": "in window", "evidence": ok[0].get("evidence")}
+            else:
+                res.signals["start"] = {"status": "outside window", "evidence": sws[0].get("evidence")}
+                fail("start_window", f"Starts {_fmt_window(sws[0])}, outside your co-op window {lo} – {hi}")
+        else:
+            res.signals["start"] = {"status": "not stated"}
+        if any(term.lower() in evid for term in t.coop_intern.boost_terms):
+            res.boosts.append(("term", "States a Spring 2027 / January 2027 term"))
+    elif res.track == FULL_TIME:
+        start_from = t.full_time.start_from
+        if sws:
+            if all(w["end"][:7] < start_from for w in sws):
+                res.signals["start"] = {"status": "too early", "evidence": sws[0].get("evidence")}
+                fail("start_window", f"Starts {_fmt_window(sws[0])}, before your {start_from} start")
+            else:
+                res.signals["start"] = {"status": "ok", "evidence": sws[0].get("evidence")}
+        else:
+            res.signals["start"] = {"status": "not stated"}
+        if any(term.lower() in evid for term in t.full_time.boost_terms):
+            res.boosts.append(("term", "States Class of 2027 / 2027 start"))
+        if _NEW_GRAD.search(title) or job.get("source") == "simplify_newgrad":
+            res.signals["new_grad"] = True
+            res.boosts.append(("new_grad", "New Grad / early-career role (top priority)"))
+    if job.get("eligibility_note"):
+        res.signals["check_eligibility"] = job["eligibility_note"]
 
 
 def quick_relevant(title: str, location: str | None, prefs: Preferences, rules: TitleRules) -> bool:

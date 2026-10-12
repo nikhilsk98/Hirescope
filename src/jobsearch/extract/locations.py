@@ -94,6 +94,9 @@ def _classify(part: str, cfg: LocationConfig) -> Place:
     if pat["remote_us"].search(low):
         return Place("Remote (US)", "US", True)
 
+    # "CA-QC-Longueuil" / "CAN-ON-Toronto": Canada (country code + province), not California
+    if re.match(r"^(CA|CAN|Canada)\s*[-–,]\s*(QC|ON|BC|AB|MB|NS|NB|NL|PE|SK|YT|NT|NU)\b", raw, re.I):
+        return Place(raw, "non-US", remote)
     # "US, CA, Santa Clara" / "USA - CA - Santa Clara" / "US-WA-Seattle" (Amazon, Workday)
     toks = [t.strip() for t in re.split(r"\s*[,\-–]\s*", raw) if t.strip()]
     if toks and toks[0].lower() in cfg.us_names and len(toks) >= 2:

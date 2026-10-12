@@ -75,13 +75,29 @@ rules:
   yoe: hard               # applies to yoe.filter_min+
   employment_type: soft   # contract / part-time / temporary
   posting_age: soft
+  summer_only: hard       # co-op track: summer-only internships (see tracks.coop_intern.filter_summer_only)
+  grad_window: hard       # a stated graduation window ("Class of 2026") that excludes your graduation date
+  start_window: soft      # a stated start date outside the track's window
+  stale_posting: hard     # posted more than ghost.stale_days ago (likely a stale or evergreen listing)
 
 # --- Scoring -----------------------------------------------------------
 weights:
   qualification: 0.65
   preference: 0.35
   qualification_parts: {skills: 0.4, semantic: 0.4, level: 0.2}
-  preference_parts: {location: 0.3, company_tier: 0.25, freshness: 0.25, employment_type: 0.1, salary: 0.1}
+  preference_parts: {location: 0.35, company_tier: 0.35, employment_type: 0.15, salary: 0.15}
+
+# --- Freshness (an additive, capped bonus; never lifts a job past a hard filter) ----------------
+freshness: {boost_24h: 8, boost_72h: 4, decay_days: 21, cap: 10, coop_multiplier: 1.5}
+# --- Priority boosts (total capped) -------------------------------------------------------------
+boosts: {new_grad: 8, term: 4, grad_match: 3, cap: 12}
+# --- Ghost-job signals --------------------------------------------------------------------------
+ghost: {age_days: 90, stale_days: 365, age_penalty: 5, repost_penalty: 4, evergreen_penalty: 4}
+# --- Meaning-based pre-filter (local embeddings rescue relevant jobs with unusual titles) -------
+prefilter: {enabled: true, threshold: 0.52, margin: 0.05}
+# --- Optional: H-1B sponsorship history (USCIS Employer Data Hub CSV you download yourself) -----
+# Company history only, never job-level eligibility. Off by default.
+sponsorship_history: {enabled: false, file: inputs/h1b_employer_data.csv}
 thresholds:
   strong: 70
   stretch: 50

@@ -3,9 +3,9 @@
 A local, single-user job-search pipeline for macOS: discovery → dedupe → scoring → static HTML dashboard →
 per-job "job package" export. The core pipeline makes **zero LLM calls** and sends no personal data anywhere.
 
-> Status: **Phase 2**. Two tracks (Co-op/Intern and Full-time), 300 verified seed companies on Greenhouse /
-> Lever / Ashby / Workday / SmartRecruiters, Amazon, Netflix, SimplifyJobs lists, the My Companies watchlist
-> with ATS auto-detection, Add job by URL, cross-source dedupe, coverage reporting and dead-link checks.
+> Status: **Phase 3**. Two tracks (Spring 2027 co-op/intern + May 2027 full-time) with their own rules and dashboard
+> workspaces, 300 verified seed companies + Amazon, Netflix and SimplifyJobs, the My Companies watchlist, ATS keyword
+> capture, freshness priority, meaning-based pre-filter, skill-gap trends, Apply Today, More like this, deadlines.
 
 ## Setup
 
@@ -103,6 +103,54 @@ company with status (OK / Failed / Manual check / Not due), source, how it was d
 and open roles. Partial listings (page caps) are labeled and never close jobs. Apply links of visible jobs
 are checked (rate-limited, cached 24h); broken ones get a badge instead of being hidden.
 
+## Dashboard
+
+`dashboard/index.html` (double-click; `file://`, no server, no network calls).
+- **Co-op / Internships** and **Full-time** tabs at the top are separate workspaces (own view, filters, sort,
+  search, Apply Today, stats); `#coop` / `#fulltime` are bookmarkable. Unclear jobs show in both with a "?" badge
+  and **Move to Co-op / Move to Full-time** (saved in the browser and included in Export statuses).
+- Sidebar views: Last 24h (default when it has jobs), Apply Today, All Jobs, My Companies, Shortlisted, Closing Soon,
+  Skill Gaps, Missed Matches (weekly false-negative review), Filtered Out (with reasons), Coverage.
+- Cards (score ring, label, badges, ATS meter) or a sortable table; Comfortable / Compact density.
+- Filter chips (company, tier, label, level, work mode, location, status, flags, posted within, min score);
+  sort by Newest posted, Best JD match, Overall, ATS coverage, Deadline, Company (secondary: newest posted).
+- Detail panel: Overview, Requirements (✓ / ✗ / ? per line), Keywords, Score breakdown, Full JD (keywords
+  highlighted, Jump to requirements), Similar jobs; actions Generate Resume, Open Application, Shortlist, Skip with
+  reason, status, LinkedIn search, Levels.fyi / Glassdoor / eng-blog links.
+- Keys: `j`/`k`, `Enter`, `s` shortlist, `x` skip, `o` open, `g` package, `/` search, `1`/`2` tabs, `?` help.
+- Statuses save instantly in the browser; **Export statuses** downloads `jobsearch-statuses.json` (import into the
+  pipeline is Phase 4).
+- Data: `dashboard/data.js` holds compact summaries; per-job details load on demand from `dashboard/details/`.
+
+## Two-track rules
+
+| | Co-op / Intern | Full-time |
+|---|---|---|
+| Titles | intern/co-op titles with a software word (`coop_role_words`) | core + related titles (`title_rules.yaml`), plus meaning-based rescues |
+| Start | stated start must fall in Dec 2026 – Mar 2027 (`tracks.coop_intern.start_window`), else a soft penalty; unknown = uncertain | stated start before May 2027 is a soft penalty |
+| Filtered | summer-only internships (`filter_summer_only`) | — |
+| Boosts | Spring 2027 / Jan 2027 terms; extra freshness urgency (×1.5) | New Grad / University Grad / Class of 2027 (badge + boost), 2027-start terms |
+| Both | graduation windows ("graduating between…", "Class of 2026") must include your date (±2 months) or the job is filtered with the quote; "no more than 1 year of experience" lines are kept with a **Check eligibility** flag; levels: entry and mid match, senior ≤ 5 years is Stretch, 7+ years / staff+ / managers filtered |
+
+**Freshness** is an additive bonus (`freshness:` in preferences): biggest in the first 24h, smaller to 72h, then
+decaying; capped so a fresh Weak job can never outrank a clearly stronger one by more than the cap. Missing posting
+dates use the discovery time only for jobs that appeared after the source's first scan, labeled "Discovered …
+(posting date unknown)"; otherwise there is no bonus. **Ghost-job signals** (old postings, reposts, talent-pool
+wording) give a penalty and a badge.
+
+**Meaning-based pre-filter**: jobs hidden only by the title rule whose titles look technical are compared (local
+embeddings) with a target-role profile and contrast profiles (hardware, mechanical, chip design, sales, …); close
+matches are kept with a "Meaning match" badge. Tune `prefilter.threshold` / `margin`.
+
+**ATS keywords**: extracted with the JD's exact wording (`config/ats_keywords.yaml` + `skills_synonyms.yaml`, both
+directions), tagged required / preferred / mentioned, weighted by section and frequency, compared with your resume as
+matched / synonym / missing with the resume line as evidence. Coverage measures keyword overlap, not your chance of
+passing an ATS; missing keywords are gaps, never suggestions to add something you don't have.
+
+**Optional sponsorship history** (`sponsorship_history.enabled`, off by default): put a USCIS H-1B Employer Data
+Hub CSV you downloaded at `inputs/h1b_employer_data.csv`; matched companies show past approvals as company history,
+never as job-level eligibility.
+
 ## How scoring works
 
 1. **Hard filters** (`preferences.yaml → rules`): title must match a target/related title (as a phrase, or fuzzy
@@ -127,14 +175,14 @@ top 8 JD lines' best resume match. This is a heuristic.
 Flags (sponsorship, citizenship, clearance) are set only when the JD states them explicitly, and the dashboard
 quotes the sentence. Otherwise they read "Not stated".
 
-## Job package format (v1, stable contract for the future resume builder)
+## Job package format (v2, stable contract for the future resume builder)
 
 The **Generate Resume** button downloads `Company_Role_JobID.md`, copies it to the clipboard, and sets the job's
 status to "package exported". Format:
 
 ```markdown
 ---
-package_format: 1
+package_format: 2
 company: ...
 title: ...
 job_id: '...'
@@ -151,6 +199,7 @@ label: Strong
 ## Minimum requirements
 ## Preferred requirements
 ## Skills required
+## ATS keywords
 ## My matching evidence
 ## Gaps
 ## Flags
@@ -158,7 +207,9 @@ label: Strong
 
 The front-matter keys and section names/order are fixed (`output/packages.py`: `FRONT_MATTER_KEYS`,
 `SECTIONS`). JD lines that look like Markdown headings are escaped (`\## ...`) so they can't be mistaken for
-sections. `parse_package()` is the reference parser.
+sections. `parse_package()` is the reference parser. v2 added **ATS keywords**: a `Coverage: N% (required a/b)` line,
+then one line per keyword: `JD exact term | required|preferred|mentioned | matched|synonym|missing | weight w
+[| resume says X] [| evidence (section): resume line]`.
 
 ## Data & storage
 

@@ -139,6 +139,7 @@ def test_level_regressions(cfg, title, company, level):
 @pytest.mark.parametrize("text,us", [
     ("CT - Hartford", True), ("3325 Fort George G. Meade MD", True), ("Warsaw - Poland · Digital", False),
     ("Office - Bulgaria - Sofia", False), ("South SF", True), ("Remote (Any State", True), ("Lviv", False),
+    ("CA-QC-LONGUEUIL-MD ~ 1000 Blvd Marie-Victorin", False), ("CAN-ON-Toronto", False), ("CA - Hartford", True),
 ])
 def test_location_regressions(text, us):
     assert normalize_location(text).us is us

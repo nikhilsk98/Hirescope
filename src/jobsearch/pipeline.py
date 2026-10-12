@@ -19,6 +19,7 @@ from .adapters.base import FetchContext, FetchResult, HttpClient, RawJob
 from .adapters.detect import Detector
 from .adapters.registry import ADAPTERS, get_adapter
 from .config import Company, Config
+from .extract.dates import experience_restriction, parse_deadline, parse_grad_windows, parse_start_windows, summer_only
 from .extract.flags import extract_flags
 from .extract.levels import map_level
 from .extract.locations import normalize_location
@@ -37,8 +38,8 @@ from .watchlist import WatchItem
 log = logging.getLogger(__name__)
 
 # Bump when extraction logic changes; stored jobs are then re-extracted from their saved title/location/JD.
-EXTRACT_VERSION = "2026-10-12.5"   # .5: Markdown headings in JSON-LD descriptions
-EXTRACT_CONFIGS = ("title_rules.yaml", "levels.yaml", "locations.yaml", "skills_synonyms.yaml")
+EXTRACT_VERSION = "2026-10-12.8"   # .8: keyword implications, title rule additions
+EXTRACT_CONFIGS = ("title_rules.yaml", "levels.yaml", "locations.yaml", "skills_synonyms.yaml", "ats_keywords.yaml")
 TIER_INTERVAL_HOURS = {1: 0, 2: 20, 3: 70}       # tier 1 every run, tier 2 daily, tier 3 every 3 days
 TIER_MAX_PAGES = {1: 100, 2: 25, 3: 10}
 DIRECTORY_KEY = "ats_directory:simplify"
@@ -77,6 +78,7 @@ class RunSummary:
     scored: int = 0
     filtered: int = 0
     strong: int = 0
+    rescued: int = 0
     new_strong: list[str] = field(default_factory=list)
     by_track: dict[str, dict] = field(default_factory=dict)
 
@@ -103,6 +105,7 @@ class RunSummary:
             "scored": self.scored,
             "filtered": self.filtered,
             "strong": self.strong,
+            "rescued_by_meaning": self.rescued,
             "new_strong": self.new_strong,
             "by_track": self.by_track,
             "complete": not failed and not manual,
@@ -134,6 +137,7 @@ def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None, official: bool = Tr
     track = classify_track(raw.title, raw.employment_type, text, raw.track_hint)
     level = map_level(norm, raw.company, yoe.min)
     terms = list(dict.fromkeys([*raw.terms, *parse_terms(f"{raw.title}\n{text[:4000]}")]))
+    deadline, deadline_ev = parse_deadline(text, raw.extra.get("deadline"))
     y = parse_yoe(reqs.preferred)
     return db.JobRecord(
         company=raw.company, title=raw.title, normalized_title=norm, job_id=raw.job_id, source=raw.source,
@@ -157,6 +161,11 @@ def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None, official: bool = Tr
         level=level.level, level_evidence=level.evidence, terms=terms,
         canonical_key=raw.canonical_key, location_us=loc.us, remote_us=loc.remote_us,
         source_official=official,
+        grad_windows=[w.as_dict() for w in parse_grad_windows(f"{raw.title}\n{text}")],
+        start_windows=[w.as_dict() for w in parse_start_windows(text, terms)],
+        summer_only=track.track == "coop_intern" and summer_only(terms, raw.title, text),
+        eligibility_note=experience_restriction(text),
+        deadline=deadline, deadline_evidence=deadline_ev,
     )
 
 
@@ -488,29 +497,77 @@ def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
 
 
 # --- scoring -------------------------------------------------------------------------------------
+def _jd(job: dict) -> str:
+    p = job.get("jd_path")
+    return Path(p).read_text(encoding="utf-8") if p and Path(p).exists() else ""
+
+
 def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: Embedder,
               summary: RunSummary) -> None:
+    from .extract.keywords import compare, extract_keywords, resume_terms, vocab_for
+    from .match.prefilter import candidate, job_text, rescue
+
+    prefs = cfg.prefs
+    now = datetime.now(timezone.utc)
     by_name = {db.company_key(c.name): c for c in cfg.companies}
     resume_lines = {s: resume.bullets(s) for s in ("experience", "projects", "coursework")}
+    jobs = db.open_jobs(conn)
+
+    # first_seen may stand in for a missing posting date only for jobs that appeared after the source's first scan
+    first_scan: dict[tuple, str] = {}
+    for j in jobs:
+        k = (j["company_key"], j["source"])
+        first_scan[k] = min(first_scan.get(k, j["first_seen"]), j["first_seen"])
+
+    results = {j["id"]: apply_rules(j, prefs, cfg.title_rules, now) for j in jobs}
+
+    # meaning-based pre-filter: rescue relevant jobs with unusual titles
+    rescued = 0
+    if prefs.prefilter.enabled:
+        cands = [j for j in jobs if results[j["id"]].hidden and candidate(j, results[j["id"]].reasons)]
+        hits = rescue(embedder, [(j["id"], job_text(j, _jd(j))) for j in cands], prefs.prefilter.threshold,
+                      prefs.prefilter.margin, extra_profile=resume.bullets("summary")[:3])
+        for j in cands:
+            if r := hits.get(j["id"]):
+                j["_semantic_title"] = {"similarity": r.similarity, "profile": r.profile}
+                results[j["id"]] = apply_rules(j, prefs, cfg.title_rules, now)
+                rescued += not results[j["id"]].hidden
+    summary.rescued = rescued
+
+    vocab = vocab_for(cfg.synonyms)
+    rt = resume_terms(resume)
+    kw_fp = hashlib.sha256((resume.version_hash + extraction_fingerprint()).encode()).hexdigest()[:12]
     tracks: dict[str, dict] = {}
-    for job in db.open_jobs(conn):
-        rules = apply_rules(job, cfg.prefs, cfg.title_rules)
+    for job in jobs:
+        rules = results[job["id"]]
         t = tracks.setdefault(rules.track, {"open": 0, "visible": 0, "strong": 0, "stretch": 0, "weak": 0,
                                             "filtered": 0})
         t["open"] += 1
         if rules.hidden:
             db.save_scores(conn, job["id"], filtered=1, filter_reasons=rules.reasons, score=None,
                            qual_score=None, pref_score=None, label=None, breakdown=None,
-                           explanation=None, gaps=None)
+                           explanation=None, gaps=None, signals=rules.signals or None)
             summary.filtered += 1
             t["filtered"] += 1
             continue
-        jd = Path(job["jd_path"]).read_text(encoding="utf-8") if job.get("jd_path") and Path(job["jd_path"]).exists() else ""
+        jd = _jd(job)
         sem = semantic_match(embedder, resume_lines, jd_chunks(jd, job.get("min_reqs") or [], job.get("pref_reqs") or []))
-        res = score_job(job, resume, cfg.prefs, rules, sem, cfg.synonyms, by_name.get(job["company_key"]))
+        discovered_ok = job["first_seen"] > _shift(first_scan[(job["company_key"], job["source"])], hours=1)
+        res = score_job(job, resume, prefs, rules, sem, cfg.synonyms, by_name.get(job["company_key"]), now,
+                        discovered_ok=discovered_ok, jd_text=jd)
+        key = f"{job.get('jd_hash')}:{kw_fp}"
+        extra_fields = {}
+        if job.get("keywords_key") != key:
+            rep = compare(extract_keywords(jd, job.get("min_reqs") or [], job.get("pref_reqs") or [], vocab,
+                                           job["company"]), rt, vocab)
+            extra_fields = {"keywords": rep.as_dict(), "keywords_key": key, "ats_coverage": rep.coverage}
+        signals = {**rules.signals, "ghost": res.breakdown.get("ghost") or [],
+                   "fresh_hours": res.breakdown["freshness"]["age_hours"],
+                   "discovered_proxy": not job.get("posted_date") and discovered_ok}
         db.save_scores(conn, job["id"], filtered=0, filter_reasons=rules.soft_issues, score=res.overall,
                        qual_score=res.qualification, pref_score=res.preference, label=res.label,
-                       breakdown=res.breakdown, explanation=res.explanation, gaps=res.gaps)
+                       breakdown=res.breakdown, explanation=res.explanation, gaps=res.gaps, signals=signals,
+                       **extra_fields)
         summary.scored += 1
         t["visible"] += 1
         t[res.label.lower()] += 1
@@ -519,3 +576,20 @@ def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: E
             if job["job_status"] == "new":
                 summary.new_strong.append(f"{job['company']}: {job['title']}")
     summary.by_track = tracks
+    conn.commit()
+
+
+def _shift(iso: str, hours: float) -> str:
+    return (datetime.fromisoformat(iso) + timedelta(hours=hours)).isoformat(timespec="seconds")
+
+
+def compute_similar(conn, embedder: Embedder, jobs: list[dict], k: int = 5) -> int:
+    """'More like this' for the jobs shown on the dashboard (same track, local embeddings)."""
+    from .match.prefilter import similar_jobs
+    items = [(j["id"], j.get("track_override") or j.get("track") or "full_time",
+              f"{j['title']}. {' '.join((j.get('min_reqs') or [])[:3])}") for j in jobs]
+    sims = similar_jobs(embedder, items, k)
+    for pk, ids in sims.items():
+        db.save_scores(conn, pk, similar=ids)
+    conn.commit()
+    return len(sims)

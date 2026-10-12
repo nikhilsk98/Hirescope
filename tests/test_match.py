@@ -1,5 +1,5 @@
 """Two-track hard filters, title/level/YOE rules, semantic matching, score components and labels. (DEMO data)"""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -200,12 +200,24 @@ def test_red_flag_penalties_only_when_relevant(cfg, resume):
     assert hit.overall < base.overall and any("sponsorship" in g for g in hit.gaps)
 
 
-def test_freshness_and_unknown_posting_date(cfg, resume):
-    fresh = score(cfg, resume, job())
-    old = score(cfg, resume, job(posted_date="2026-08-20T00:00:00+00:00"))
-    unknown = score(cfg, resume, job(posted_date=None))
-    pf = lambda r: r.breakdown["preference"]["parts"]["freshness"]["score"]  # noqa: E731
-    assert pf(fresh) == 100 and pf(old) < 50 and pf(unknown) is None
+def test_freshness_is_a_capped_bonus(cfg, resume):
+    now = NOW
+    f = lambda **kw: score(cfg, resume, job(**kw)).breakdown["freshness"]["points"]  # noqa: E731
+    assert f(posted_date=(now - timedelta(hours=5)).isoformat()) == 8          # last 24h: biggest boost
+    assert f(posted_date=(now - timedelta(hours=50)).isoformat()) == 4         # 24-72h
+    assert 0 < f(posted_date=(now - timedelta(days=10)).isoformat()) < 4       # decaying
+    assert f(posted_date=(now - timedelta(days=40)).isoformat()) == 0
+    assert f(posted_date=None) == 0                                            # unknown: no bonus, no penalty
+    coop = f(posted_date=(now - timedelta(hours=5)).isoformat(), track="coop_intern",
+             normalized_title="software engineer intern")
+    assert coop == 10                                                          # 8 * 1.5 = 12, capped at 10
+
+
+def test_fresh_weak_cannot_jump_far_ahead(cfg, resume):
+    strong = score(cfg, resume, job(posted_date=(NOW - timedelta(days=30)).isoformat()))
+    weak = score(cfg, resume, job(posted_date=(NOW - timedelta(hours=1)).isoformat(), min_reqs=["Rust", "Scala", "Kafka"],
+                                  skills=["Rust", "Scala", "Kafka"]))
+    assert weak.overall - strong.overall <= cfg.prefs.freshness.cap
 
 
 def test_labels(cfg):

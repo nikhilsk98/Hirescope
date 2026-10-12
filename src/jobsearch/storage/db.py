@@ -175,6 +175,20 @@ MIGRATIONS: list[str] = [
     """
     CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
     """,
+    # 5: Phase 3 - two-track dates, eligibility, deadlines, ATS keywords, similar jobs
+    """
+    ALTER TABLE jobs ADD COLUMN grad_windows TEXT;
+    ALTER TABLE jobs ADD COLUMN start_windows TEXT;
+    ALTER TABLE jobs ADD COLUMN summer_only INTEGER;
+    ALTER TABLE jobs ADD COLUMN eligibility_note TEXT;
+    ALTER TABLE jobs ADD COLUMN deadline TEXT;
+    ALTER TABLE jobs ADD COLUMN deadline_evidence TEXT;
+    ALTER TABLE jobs ADD COLUMN keywords TEXT;
+    ALTER TABLE jobs ADD COLUMN keywords_key TEXT;
+    ALTER TABLE jobs ADD COLUMN ats_coverage REAL;
+    ALTER TABLE jobs ADD COLUMN signals TEXT;
+    ALTER TABLE jobs ADD COLUMN similar TEXT;
+    """,
 ]
 
 
@@ -246,10 +260,17 @@ class JobRecord:
     location_us: bool | None = None
     remote_us: bool | None = None
     source_official: bool = True
+    grad_windows: list[dict] = field(default_factory=list)
+    start_windows: list[dict] = field(default_factory=list)
+    summer_only: bool = False
+    eligibility_note: str | None = None
+    deadline: str | None = None
+    deadline_evidence: str | None = None
 
 
 _JSON_FIELDS = {"min_reqs", "pref_reqs", "skills", "grad_years", "flags", "extra",
-                "breakdown", "gaps", "filter_reasons", "terms"}
+                "breakdown", "gaps", "filter_reasons", "terms", "grad_windows", "start_windows", "keywords",
+                "signals", "similar"}
 _EXTRACTED = [f for f in JobRecord.__dataclass_fields__ if f not in ("company", "job_id", "source")]
 # when an official source takes over from an aggregator, these identify the posting too
 _IDENTITY = ["job_id", "source"]
