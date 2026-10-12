@@ -19,7 +19,7 @@ abbreviations:
 excluded_level_numerals: [iii, iv, v, "3", "4", "5"]
 
 # rapidfuzz token_set_ratio threshold (0-100) for a title to count as matching
-fuzzy_threshold: 85
+fuzzy_threshold: 90
 
 # Words that indicate employment type when present in the title.
 employment_type_words:
