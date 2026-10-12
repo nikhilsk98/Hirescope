@@ -88,7 +88,7 @@ def coverage_rows(conn, summary, watch) -> list[dict]:
         "WHERE j.job_status != 'closed' AND s.miss_count = 0 GROUP BY s.company_key, s.source")}
     this_run = {(o.company.casefold(), o.source): o for o in [*summary.outcomes, *summary.skipped]}
     rows = []
-    for r in conn.execute("SELECT * FROM source_status ORDER BY company"):
+    for r in conn.execute("SELECT * FROM source_status WHERE COALESCE(origin, '') != 'ad_hoc' ORDER BY company"):
         r = dict(r)
         o = this_run.get((r["company"].casefold(), r["source"]))
         multi = r["source"].startswith("simplify")

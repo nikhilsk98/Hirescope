@@ -26,6 +26,7 @@ from .extract.normalize import employment_type_from_title, normalize_title, pars
 from .extract.requirements import parse_degree, parse_grad_years, parse_yoe, split_requirements
 from .extract.resume import Resume
 from .extract.skills import extract_skills
+from .extract.text import normalize_bullets
 from .extract.track import classify_track, normalize_employment_type, parse_terms
 from .match.rules import apply_rules, quick_relevant
 from .match.score import score_job
@@ -36,7 +37,7 @@ from .watchlist import WatchItem
 log = logging.getLogger(__name__)
 
 # Bump when extraction logic changes; stored jobs are then re-extracted from their saved title/location/JD.
-EXTRACT_VERSION = "2026-10-12.2"
+EXTRACT_VERSION = "2026-10-12.5"   # .5: Markdown headings in JSON-LD descriptions
 EXTRACT_CONFIGS = ("title_rules.yaml", "levels.yaml", "locations.yaml", "skills_synonyms.yaml")
 TIER_INTERVAL_HOURS = {1: 0, 2: 20, 3: 70}       # tier 1 every run, tier 2 daily, tier 3 every 3 days
 TIER_MAX_PAGES = {1: 100, 2: 25, 3: 10}
@@ -116,7 +117,7 @@ def jd_hash(text: str) -> str:
 def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None, official: bool = True) -> db.JobRecord:
     rules = cfg.title_rules
     norm = normalize_title(raw.title, rules)
-    text = raw.description or ""
+    text = normalize_bullets(raw.description or "")
     reqs = split_requirements(text)
     yoe = parse_yoe(reqs.minimum or text)
     sal = parse_salary(text)

@@ -158,12 +158,14 @@
       const link = safeUrl(r.url);
       tb.append(el("tr", null,
         el("td", null, r.company, r.my_company ? el("span", { class: "badge", text: "My Company" }) : null, r.tier ? el("span", { class: "muted", text: ` · tier ${r.tier}` }) : null),
-        el("td", null, st, r.partial ? el("div", { class: "muted", text: `partial: ${r.partial}` }) : null),
+        el("td", null, st),
         el("td", { text: r.source }),
         el("td", { text: r.detected_via || (r.origin === "seed" ? "seed list" : r.origin || "") }),
         el("td", { text: r.last_checked ? fmtTime(r.last_checked) : "—" }),
         el("td", { text: r.open_roles ?? "—" }),
-        el("td", null, r.error ? el("div", { class: "err", text: r.error }) : null, r.notes ? el("div", { class: "muted", text: r.notes }) : null,
+        el("td", null, r.error ? el("div", { class: "err", text: r.error }) : null,
+          r.partial ? el("div", { class: "muted", text: `Partial listing: ${r.partial}` }) : null,
+          r.notes ? el("div", { class: "muted", text: r.notes }) : null,
           link ? el("a", { href: link, target: "_blank", rel: "noopener noreferrer", text: r.status === "manual" ? "Check manually" : "link" }) : null),
       ));
     }

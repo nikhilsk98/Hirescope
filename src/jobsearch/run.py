@@ -146,11 +146,13 @@ def main(argv=None) -> int:
         client.close()
     s = summary.as_dict()
     s["links"] = links
+    s["scope"] = "rescore" if args.rescore else ("partial" if (args.company or args.source) else "full")
     db.finish_run(conn, run_id, s)
 
     if args.rescore:  # keep the last real run's summary in the header
         last = conn.execute("SELECT summary FROM runs WHERE summary IS NOT NULL AND dry_run=0 AND "
-                            "json_extract(summary, '$.sources_checked') > 0 ORDER BY id DESC LIMIT 1").fetchone()
+                            "(json_extract(summary, '$.scope') = 'full' OR (json_extract(summary, '$.scope') IS NULL "
+                            "AND json_extract(summary, '$.sources_checked') > 1)) ORDER BY id DESC LIMIT 1").fetchone()
         if last:
             s = {**json.loads(last[0]), "scored": s["scored"], "filtered": s["filtered"], "strong": s["strong"],
                  "by_track": s["by_track"], "rescored_at": db.utcnow()}

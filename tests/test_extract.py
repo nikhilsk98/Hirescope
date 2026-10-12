@@ -134,3 +134,30 @@ def test_resume_parsing(resume):
     assert "CI/CD" in resume.skills  # evidenced by "GitHub Actions" in a bullet, not listed
     assert resume.skill_evidence["Kubernetes"].startswith("Containerized")
     assert len(resume.version_hash) == 16
+
+
+def test_unicode_bullets_are_requirements():
+    from jobsearch.extract.text import normalize_bullets
+    text = normalize_bullets("Basic Qualifications\n• 3+ years of software engineering experience\n• Python\n"
+                             "Preferred Qualifications\n* Kafka\n1. AWS")
+    r = split_requirements(text)
+    assert r.minimum == ["3+ years of software engineering experience", "Python"] and r.preferred == ["Kafka", "AWS"]
+
+
+@pytest.mark.parametrize("min_head,pref_head", [
+    ("What We Value", "Technologies We Use"),
+    ("What we need to see", "Ways to stand out from the crowd"),
+    ("You might thrive in this role if you", "What will give you a competitive edge (preferred qualifications)"),
+])
+def test_more_requirement_headings(min_head, pref_head):
+    text = f"Core Responsibilities\n- Build things\n{min_head}\n- Python\n{pref_head}\n- Kafka\nWhat we offer\n- Lunch"
+    r = split_requirements(text)
+    assert r.minimum == ["Python"] and r.preferred == ["Kafka"]
+
+
+def test_markdown_jd_headings():
+    from jobsearch.extract.text import normalize_bullets
+    text = normalize_bullets("# In this role, you will:\n* Build\n# To succeed in this role, you will need:\n* Python\n"
+                             "##\n# Nice to have:\n* Kafka")
+    r = split_requirements(text)
+    assert r.minimum == ["Python"] and r.preferred == ["Kafka"]
