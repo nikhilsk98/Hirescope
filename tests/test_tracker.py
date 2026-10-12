@@ -394,3 +394,12 @@ console.log(JSON.stringify({{a, created, bad, merged}}));""")
     assert m["stage"] == "interviewing" and m["notes"] == "" and len(m["events"]) == 4
     # the merged application is what the pipeline then imports
     assert A.furthest(m) == "interview" and A.first_response(m) == ("oa", date(2026, 10, 3))
+
+
+def test_future_timestamps_capped_at_export_time_and_reimport_is_noop(conn):
+    _job(conn)
+    payload = _export(statuses={"DemoCo::greenhouse::1": {"status": "shortlisted", "updated_at": "2099-01-01T00:00:00Z"}})
+    assert statuses.merge(conn, payload, None).statuses_applied == 1
+    at = conn.execute("SELECT user_status_at FROM jobs").fetchone()[0]
+    assert at == "2026-10-12T15:00:00+00:00"          # the export's own time, not 2099
+    assert statuses.merge(conn, payload, None).statuses_applied == 0

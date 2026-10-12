@@ -192,6 +192,7 @@ MIGRATIONS: list[str] = [
     # 6: Phase 4 - My Applications (merged from dashboard exports), track-override timestamps
     """
     ALTER TABLE jobs ADD COLUMN track_override_at TEXT;
+    ALTER TABLE jobs ADD COLUMN user_notes TEXT;
     CREATE TABLE applications (
         id TEXT PRIMARY KEY,
         job_key TEXT,

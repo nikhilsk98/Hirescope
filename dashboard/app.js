@@ -7,8 +7,8 @@
   const JOBS = Array.isArray(window.JOBS) ? window.JOBS : [];
   const META = window.META || {};
   const BY_ID = new Map(JOBS.map((j) => [j.id, j]));
-  const K = { statuses: "jobsearch.statuses.v1", overrides: "jobsearch.trackOverrides.v1", theme: "jobsearch.theme",
-              ui: "jobsearch.ui.v2", exported: "jobsearch.lastExport", tip: "jobsearch.tipDismissed" };
+  const K = { statuses: "jobsearch.statuses.v1", overrides: "jobsearch.trackOverrides.v1", theme: "jobsearch.theme", apps: "jobsearch.applications.v1",
+              ui: "jobsearch.ui.v2", exported: "jobsearch.lastExport", tip: "jobsearch.tipDismissed.v2" };
   const STATUSES = ["", "interested", "shortlisted", "package exported", "applied", "interviewing", "offer", "rejected", "skipped"];
   const SKIP_REASONS = ["not interested in role", "location", "too senior", "too junior", "missing skills", "company",
                         "compensation", "visa/sponsorship", "start date", "duplicate", "other"];
@@ -52,20 +52,46 @@
   const daysUntil = (d) => Math.round((new Date(d + "T12:00:00") - new Date((META.today || new Date().toISOString().slice(0, 10)) + "T12:00:00")) / 864e5);
 
   // ---------- state ----------
+  // statuses: {jobKey: {status, skip_reason, notes, history, updated_at, ...}}; overrides: {jobKey: {track, updated_at}};
+  // apps: {id: application} (see core.js). All three save to localStorage instantly and go out with Export statuses.
+  const C = window.HSCore;
   let statuses = store.get(K.statuses, {});
-  const overrides = store.get(K.overrides, {});
-  const ui = Object.assign({ track: "full_time", both: false, mode: "cards", compact: false, perTrack: {} }, store.get(K.ui, {}));
-  const tstate = () => (ui.perTrack[ui.track] = ui.perTrack[ui.track] || { view: null, sort: "overall", filters: {}, q: "" });
+  const overrides = {};
+  for (const [k, v] of Object.entries(store.get(K.overrides, {}))) overrides[k] = typeof v === "string" ? { track: v, updated_at: "1970-01-01T00:00:00Z" } : v;
+  let apps = store.get(K.apps, {});
+  const ui = Object.assign({ track: "full_time", both: false, mode: "cards", compact: false, perTrack: {}, appTab: "board" }, store.get(K.ui, {}));
+  const tstate = () => (ui.perTrack[ui.track] = ui.perTrack[ui.track] || { view: null, sort: "overall", filters: {}, q: "", modes: {} });
   const saveUI = () => store.set(K.ui, ui);
   const keyOf = (j) => `${j.company}::${j.source}::${j.job_id}`;
   const statusOf = (j) => (statuses[keyOf(j)] || {}).status || "";
-  const trackOf = (j) => overrides[keyOf(j)] || j.track;
+  const trackOf = (j) => ((overrides[keyOf(j)] || {}).track) || j.track;
+  const saveOverrides = () => store.set(K.overrides, overrides);
+  const saveApps = () => store.set(K.apps, apps);
+  const liveApps = () => Object.values(apps).filter((a) => !a.deleted);
+  const appForJob = (j) => liveApps().find((a) => a.job_key === keyOf(j)) || null;
+  const today = () => META.today || new Date().toISOString().slice(0, 10);
+  const appsCfg = Object.assign({ follow_up_days: [7, 10], ghosted_after_days: 30, same_company_window_days: 30 }, META.applications_cfg || {});
 
+  // SQLite's copy (sync.js, written by each run) fills in anything this browser doesn't have; newer always wins
+  (function mergeSync() {
+    const S = window.SYNC; if (!S) return;
+    let changed = false;
+    for (const [k, v] of Object.entries(S.statuses || {})) if (!statuses[k] || String(v.updated_at) > String(statuses[k].updated_at || "")) { statuses[k] = Object.assign({}, statuses[k] || {}, v); changed = true; }
+    for (const [k, v] of Object.entries(S.track_overrides || {})) if (!overrides[k] || String(v.updated_at) > String(overrides[k].updated_at || "")) { overrides[k] = v; changed = true; }
+    for (const a of S.applications || []) { const m = C.mergeApp(apps[a.id], a); if (JSON.stringify(m) !== JSON.stringify(apps[a.id])) { apps[a.id] = m; changed = true; } }
+    if (changed) { store.set(K.statuses, statuses); saveOverrides(); saveApps(); }
+  })();
+
+  const STAGE_STATUS = { applied: "applied", oa: "applied", interviewing: "interviewing", offer: "offer", rejected: "rejected", ghosted: "applied", withdrawn: "applied" };
   function setStatus(j, patch) {
     const k = keyOf(j);
-    const before = statuses[k] ? { ...statuses[k] } : null;
-    statuses[k] = Object.assign({ company: j.company, title: j.title, job_id: j.job_id, source: j.source }, statuses[k] || {}, patch,
-      { updated_at: new Date().toISOString() });
+    const before = statuses[k] ? JSON.parse(JSON.stringify(statuses[k])) : null;
+    const prev = statuses[k] || {};
+    const at = new Date().toISOString();
+    const history = [...(prev.history || [])];
+    if ("status" in patch && patch.status !== prev.status) history.push({ status: patch.status || "(cleared)", at, reason: patch.skip_reason || null });
+    statuses[k] = Object.assign({ company: j.company, title: j.title, job_id: j.job_id, source: j.source }, prev, patch,
+      { history: history.slice(-30), updated_at: at });
     store.set(K.statuses, statuses);
     renderBanners();
     return () => { if (before) statuses[k] = before; else delete statuses[k]; store.set(K.statuses, statuses); renderBanners(); renderAll(true); if (pJob) renderActions(); };
@@ -126,12 +152,16 @@
     { id: "apply", label: "Apply Today", ic: "★", jobs: () => applyQueue() },
     { id: "all", label: "All Jobs", ic: "▤", jobs: () => visibleJobs() },
     { id: "mine", label: "My Companies", ic: "♥", jobs: () => visibleJobs().filter((j) => j.my_company) },
-    { id: "shortlisted", label: "Shortlisted", ic: "✓", group: "Mine", jobs: () => JOBS.filter((j) => inTrack(j) && statusOf(j) === "shortlisted") },
+    { id: "applications", label: "My Applications", ic: "▦", group: "Mine", special: true, count: () => appsInTrack().length },
+    { id: "shortlisted", label: "Shortlisted", ic: "✓", jobs: () => JOBS.filter((j) => inTrack(j) && statusOf(j) === "shortlisted") },
+    { id: "followups", label: "Follow-ups Due", ic: "↻", special: true, count: () => new Set([...followupsDue(), ...ghostsDue()].map((a) => a.id)).size },
     { id: "closing", label: "Closing Soon", ic: "⏳", jobs: () => visibleJobs().filter((j) => j.deadline && daysUntil(j.deadline) >= 0 && daysUntil(j.deadline) <= 7) },
     { id: "skillgaps", label: "Skill Gaps", ic: "◔", group: "Insights", special: true, count: () => ((META.skill_gaps || {})[`${ui.track}:30`] || { skills: [] }).skills.length },
+    { id: "stats", label: "Stats", ic: "▥", special: true, count: () => appsInTrack().length },
     { id: "missed", label: "Missed Matches", ic: "◎", jobs: () => (META.missed || []).map((id) => BY_ID.get(id)).filter((j) => j && inTrack(j)) },
     { id: "filtered", label: "Filtered Out", ic: "⊘", jobs: () => JOBS.filter((j) => j.filtered && inTrack(j)) },
     { id: "coverage", label: "Coverage", ic: "◍", group: "System", special: true, count: () => (META.coverage || []).length },
+    { id: "runlog", label: "Run Log", ic: "≡", special: true, count: () => (META.runs || []).length },
   ];
   const viewById = (id) => VIEWS.find((v) => v.id === id) || VIEWS[2];
   const defaultView = () => (viewById("last24").jobs().length ? "last24" : "all");
@@ -149,10 +179,13 @@
     closing: ["Closing soon", "flag"], ghost: ["Ghost risk", "warn"], newgrad: ["New Grad", "info"], eligibility: ["Check eligibility", "warn"],
     broken: ["Broken link", "flag"], nojd: ["No JD", ""], meaning: ["Meaning match", "info"], mine: ["My Company", "info"],
   };
+  const REF = META.referrals || {};
   const RED = { sponsorship: "No sponsorship", citizenship: "US citizenship required", clearance: "Clearance required" };
   function flagNames(j) {
     const out = Object.entries(RED).filter(([k, v]) => (j.flags || {})[k] === v).map(([, v]) => v);
-    for (const b of j.badges || []) if (["ghost", "eligibility", "broken", "closing", "nojd", "newgrad", "meaning"].includes(b)) out.push(BADGE[b][0]);
+    for (const b of j.badges || []) if (["ghost", "eligibility", "broken", "closing", "nojd", "newgrad", "meaning", "reopened"].includes(b)) out.push(BADGE[b][0]);
+    if ((REF[j.company] || {}).count) out.push("Referral");
+    if (appForJob(j)) out.push("Applied (in My Applications)");
     return out;
   }
   const FILTERS = [
@@ -174,6 +207,10 @@
     return list.filter((j) => {
       for (const f of FILTERS) { const v = st.filters[f.id]; if (v && v.length && !f.test(j, v)) return false; }
       if (ui.day && j.day !== ui.day) return false;
+      if (st.salary > 0) {
+        if (j.salary && (!j.salary.currency || j.salary.currency === "USD")) { if (j.salary.max < st.salary) return false; }
+        else if (st.salaryKnown) return false;
+      }
       if (q) {
         const hay = `${j.title} ${j.company} ${j.location} ${(j.terms || []).join(" ")} ${(j.ats && j.ats.top || []).join(" ")} ${(j.reasons || []).join(" ")}`.toLowerCase();
         if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
@@ -216,12 +253,23 @@
     dp.addEventListener("change", () => { ui.day = dp.value || null; saveUI(); renderAll(); });
     const L = META.learned || {};
     const box = $("#learned"); box.textContent = "";
-    box.append(el("h4", { text: "Learned adjustments" }), L.adjustments && L.adjustments.length
-      ? el("ul", { class: "list-plain" }, L.adjustments.map((a) => el("li", { text: a }))) : el("div", { text: L.status || "None yet." }));
+    box.append(...[el("h4", { text: "Learned adjustments" }), el("div", { text: L.status || "None yet." }),
+      L.adjustments && L.adjustments.length ? el("ul", { class: "list-plain", style: "margin-top:6px" }, L.adjustments.map((a) => el("li", { text: a }))) : null,
+      Object.keys(L.ignored || {}).length ? el("div", { style: "margin-top:6px", text: `Skips that teach nothing (not about the job itself): ${Object.entries(L.ignored).map(([k, n]) => `${k} ×${n}`).join(", ")}` }) : null,
+      ...(L.suggestions || []).map((x) => el("div", { class: "banner warn", style: "margin-top:6px", text: x }))].filter(Boolean));
   }
+  // unsynced = changed in this browser after the last export and after SQLite's copy (sync.js) of the same item
+  const SYNC_AT = (() => {
+    const S = window.SYNC || {}; const m = { s: {}, o: {}, a: {} };
+    for (const [k, v] of Object.entries(S.statuses || {})) m.s[k] = v.updated_at || "";
+    for (const [k, v] of Object.entries(S.track_overrides || {})) m.o[k] = v.updated_at || "";
+    for (const a of S.applications || []) m.a[a.id] = a.updated_at || "";
+    return m;
+  })();
   function unsynced() {
-    const last = store.get(K.exported, null);
-    return Object.values(statuses).some((s) => !last || (s.updated_at || "") > last) || (Object.keys(overrides).length > 0 && !last);
+    const last = store.get(K.exported, null) || "";
+    const newer = (map) => ([k, x]) => { const t = String(x.updated_at || ""); return t > last && t > (map[k] || ""); };
+    return Object.entries(statuses).some(newer(SYNC_AT.s)) || Object.entries(overrides).some(newer(SYNC_AT.o)) || Object.entries(apps).some(newer(SYNC_AT.a));
   }
   function renderBanners() {
     const box = $("#banners"); box.textContent = "";
@@ -239,10 +287,13 @@
     if (/example/i.test(META.resume_path || "")) box.append(el("div", { class: "banner warn", text: `Scored against ${META.resume_path} (DEMO resume).` }));
     if (unsynced()) box.append(el("div", { class: "banner info" }, el("span", { text: "Unsynced changes — your statuses live only in this browser until you export them." }),
       el("button", { class: "btn small x", type: "button", onclick: exportStatuses }, "Export statuses")));
+    const reo = JOBS.filter((j) => (j.badges || []).includes("reopened") && ["shortlisted", "interested", "package exported"].includes(statusOf(j)));
+    if (reo.length) box.append(el("div", { class: "banner warn" }, el("div", null, el("b", { text: `Reopened: ${reo.length} job${reo.length > 1 ? "s" : ""} you shortlisted came back. ` }),
+      reo.slice(0, 4).map((j, i) => [i ? " · " : "", el("a", { href: "#", onclick: (e) => { e.preventDefault(); openPanel(j.id); }, text: `${j.company} — ${j.title}` })]))));
     if (!store.get(K.tip, false)) {
       box.append(el("div", { class: "banner info" },
-        el("div", null, el("b", { text: "Tip: " }), "Co-op / Internships and Full-time are separate workspaces (keys 1 / 2). Open a job (Enter), shortlist (s), skip (x), next (j / k), shortcuts (?). ",
-          "Statuses save here instantly; Export statuses hands them to the pipeline."),
+        el("div", null, el("b", { text: "Welcome. " }), "Co-op / Internships and Full-time are separate workspaces (keys 1 / 2). Open a job (Enter), shortlist (s), skip (x), mark applied (a), next (j / k), ⌘K to jump anywhere, ? for all shortcuts. ",
+          "Applications live in My Applications. Everything saves in this browser instantly; Export statuses hands it to the pipeline, which keeps it in SQLite and learns from your shortlists and skips."),
         el("button", { class: "btn small ghost x", type: "button", "aria-label": "Dismiss tip", onclick: () => { store.set(K.tip, true); renderBanners(); } }, "✕")));
     }
   }
@@ -254,7 +305,7 @@
       ["New today", vis.filter((j) => j.day === latest).length, () => { ui.day = latest || null; saveUI(); setView("all"); }],
       ["Strong matches", vis.filter((j) => j.label === "Strong").length, () => { tstate().filters = { label: ["Strong"] }; setView("all"); }],
       ["Apply today", applyQueue().length, () => setView("apply")],
-      ["Follow-ups due", "—", null, "Follow-up reminders arrive with My Applications (Phase 4)"],
+      ["Follow-ups due", followupsDue().length, () => setView("followups"), `Applications still at "Applied" ${appsCfg.follow_up_days[0]}+ days after applying or your last follow-up`],
       ["Closing soon", viewById("closing").jobs().length, () => setView("closing")],
     ];
     for (const [l, n, fn, title] of tiles) {
@@ -300,9 +351,34 @@
         sel.length ? `${f.label}: ${sel.length > 2 ? sel.length + " selected" : sel.join(", ")}` : `${f.label} ▾`));
       box.append(wrap);
     }
-    if (FILTERS.some((f) => (st.filters[f.id] || []).length) || st.q || ui.day) {
-      box.append(el("button", { class: "btn small ghost", type: "button", onclick: () => { st.filters = {}; st.q = ""; $("#q").value = ""; ui.day = null; $("#day-picker").value = ""; saveUI(); renderAll(); } }, "Clear all"));
+    box.append(salaryChip(base));
+    if (FILTERS.some((f) => (st.filters[f.id] || []).length) || st.q || ui.day || st.salary) {
+      box.append(el("button", { class: "btn small ghost", type: "button", onclick: () => { st.filters = {}; st.q = ""; st.salary = 0; st.salaryKnown = false; $("#q").value = ""; ui.day = null; $("#day-picker").value = ""; saveUI(); renderAll(); } }, "Clear all"));
     }
+  }
+  const money = (n) => `$${Math.round(n / 1000)}k`;
+  function salaryChip(base) {
+    const st = tstate();
+    const wrap = el("div", { class: "filter-wrap" });
+    const known = base.filter((j) => j.salary && (!j.salary.currency || j.salary.currency === "USD"));
+    const btn = el("button", { class: "filter-chip" + (st.salary ? " active" : ""), type: "button", "aria-haspopup": "true",
+      onclick: (e) => {
+        e.stopPropagation(); const was = openPop && openPop.dataset.f === "salary"; closePop(); if (was) return;
+        const pop = el("div", { class: "popover salary-pop", role: "dialog", "aria-label": "Salary" }); pop.dataset.f = "salary";
+        const out = el("output", { text: st.salary ? `at least ${money(st.salary)}` : "any" });
+        const range = el("input", { type: "range", min: 0, max: 300000, step: 10000, value: st.salary || 0, "aria-label": "Minimum salary (top of range)" });
+        const chk = el("input", { type: "checkbox", checked: !!st.salaryKnown });
+        const apply = () => { st.salary = Number(range.value); st.salaryKnown = chk.checked; saveUI(); renderCounts(); renderList(true); btn.classList.toggle("active", !!st.salary);
+          const w = [...document.querySelectorAll("#filters .filter-wrap")][FILTERS.length]; if (w && !w.contains(pop)) { w.append(pop); openPop = pop; } };
+        range.addEventListener("input", () => { out.textContent = Number(range.value) ? `at least ${money(Number(range.value))}` : "any"; });
+        range.addEventListener("change", apply); chk.addEventListener("change", apply);
+        pop.append(el("div", { class: "muted", style: "font-size:12px;margin-bottom:6px", text: `Top of the posted range (USD). ${known.length.toLocaleString()} of ${base.length.toLocaleString()} jobs state a salary.` }),
+          range, el("div", { style: "font-size:13px;margin:4px 0 8px" }, "Salary ", out),
+          el("label", null, chk, "Hide jobs that don't state a salary"));
+        wrap.append(pop); openPop = pop;
+      } }, st.salary ? `Salary ≥ ${money(st.salary)}` : "Salary ▾");
+    wrap.append(btn);
+    return wrap;
   }
   function openPopover(wrap, f, base) {
     const st = tstate();
@@ -353,6 +429,7 @@
     if (j.label) out.push(el("span", { class: `chip ${j.label}`, text: j.label }));
     for (const b of j.badges || []) if (BADGE[b]) out.push(el("span", { class: `chip ${BADGE[b][1]}`, text: BADGE[b][0] }));
     for (const [, v] of Object.entries(RED).filter(([k, v]) => (j.flags || {})[k] === v)) out.push(el("span", { class: "chip flag", text: v }));
+    const ref = REF[j.company]; if (ref && ref.count) out.push(el("span", { class: "chip info", title: `You know ${ref.count} ${ref.count > 1 ? "people" : "person"} here (LinkedIn connections export)`, text: `Referral · ${ref.count}` }));
     const st = statusOf(j); if (st) out.push(el("span", { class: "chip", text: `● ${st}` }));
     return out;
   }
@@ -360,7 +437,9 @@
   function card(j) {
     const c = el("article", { class: `card ${trackOf(j)}`, tabindex: "0", "data-id": j.id, "aria-label": `${j.title} at ${j.company}, score ${j.score == null ? "none" : Math.round(j.score)}`,
       onclick: () => openPanel(j.id), onkeydown: (e) => { if (e.key === "Enter") { e.stopPropagation(); openPanel(j.id); } } },
-      el("div", { class: "avatar", style: `background:${avatarColor(j.company)}`, "aria-hidden": "true", text: (j.company.match(/[A-Za-z0-9]/) || ["?"])[0].toUpperCase() }),
+      el("div", { class: "avatar-wrap" },
+        el("div", { class: "avatar", style: `background:${avatarColor(j.company)}`, "aria-hidden": "true", text: (j.company.match(/[A-Za-z0-9]/) || ["?"])[0].toUpperCase() }),
+        selBox(j)),
       el("div", { class: "card-body" },
         el("div", { class: "card-title", text: j.title }),
         el("div", { class: "card-sub", text: `${j.company}${j.tier ? ` · tier ${j.tier}` : ""} · ${j.location} · ${j.work_mode}` }),
@@ -373,9 +452,52 @@
           j.filtered ? el("span", { class: "err", text: (j.reasons || []).join("; ") }) : atsMeter(j))),
       el("div", { class: "card-side" }, j.filtered ? el("span", { class: "chip", text: "Filtered" }) : ring(j.score, j.label)));
     if (selectedId === j.id) c.classList.add("selected");
+    if (picked.has(j.id)) c.classList.add("picked");
     return c;
   }
+  // bulk selection
+  const picked = new Set();
+  function selBox(j) {
+    const cb = el("input", { type: "checkbox", class: "pick", "aria-label": `Select ${j.title} at ${j.company}`, checked: picked.has(j.id),
+      onclick: (e) => e.stopPropagation(), onkeydown: (e) => e.stopPropagation() });
+    cb.addEventListener("change", () => togglePick(j.id, cb.checked));
+    return cb;
+  }
+  function togglePick(id, on) {
+    if (on ?? !picked.has(id)) picked.add(id); else picked.delete(id);
+    for (const n of document.querySelectorAll(`#list [data-id="${id}"]`)) { n.classList.toggle("picked", picked.has(id)); const cb = n.querySelector("input.pick"); if (cb) cb.checked = picked.has(id); }
+    document.body.classList.toggle("picking", picked.size > 0);
+    renderBulkbar();
+  }
+  function renderBulkbar() {
+    const bar = $("#bulkbar"); bar.textContent = ""; bar.hidden = picked.size === 0;
+    if (!picked.size) return;
+    const jobs = [...picked].map((id) => BY_ID.get(id)).filter(Boolean);
+    const reason = el("select", { "aria-label": "Skip selected with reason" }, el("option", { value: "", text: "Skip selected…" }), SKIP_REASONS.map((r) => el("option", { value: r, text: r })));
+    reason.addEventListener("change", () => { if (reason.value) bulk(jobs, { status: "skipped", skip_reason: reason.value }, `Skipped ${jobs.length} (${reason.value})`); });
+    bar.append(el("b", { text: `${jobs.length} selected` }),
+      el("button", { class: "btn small", type: "button", onclick: () => bulk(jobs, { status: "shortlisted" }, `Shortlisted ${jobs.length}`) }, "Shortlist"), reason,
+      el("button", { class: "btn small", type: "button", onclick: () => exportJobsCsv(jobs) }, "Export CSV"),
+      el("button", { class: "btn small ghost", type: "button", onclick: () => { current.forEach((j) => picked.add(j.id)); renderList(true); renderBulkbar(); } }, `Select all ${current.length.toLocaleString()}`),
+      el("span", { class: "spacer" }),
+      el("button", { class: "btn small ghost", type: "button", onclick: clearPicks }, "Clear"));
+  }
+  function clearPicks() { picked.clear(); document.body.classList.remove("picking"); renderList(true); renderBulkbar(); }
+  function bulk(jobs, patch, msg) {
+    const undos = jobs.map((j) => setStatus(j, patch));
+    toast(msg, () => undos.reverse().forEach((u) => u()));
+    picked.clear(); document.body.classList.remove("picking"); renderAll(true); renderBulkbar();
+  }
+  const csvCell = (v) => { let x = v == null ? "" : String(v); if (/^[=+\-@]/.test(x)) x = "'" + x; return /[",\r\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+  function exportJobsCsv(jobs) {
+    const cols = ["company", "title", "track", "label", "score", "ats", "level", "location", "work_mode", "posted", "deadline", "status", "apply_url"];
+    const rows = [cols.join(",")].concat(jobs.map((j) => [j.company, j.title, TRACKS[trackOf(j)], j.label || "", j.score == null ? "" : Math.round(j.score),
+      j.ats ? Math.round(j.ats.c) : "", j.level, j.location, j.work_mode, j.posted || "", j.deadline || "", statusOf(j), j.apply_url || ""].map(csvCell).join(",")));
+    download(`hirescope-jobs-${today()}.csv`, rows.join("\r\n") + "\r\n", "text/csv;charset=utf-8");
+    toast(`Exported ${jobs.length} jobs`);
+  }
   const COLS = [
+    ["", (j) => selBox(j), null, "pickcol"],
     ["Score", (j) => (j.score == null ? "—" : Math.round(j.score)), "overall", "num"],
     ["Role", (j) => el("div", null, el("div", { class: "title", text: j.title }), el("div", { class: "muted", text: j.company })), "company", "role"],
     ["Track", (j) => el("span", { class: `chip ${trackOf(j)}`, text: TRACKS[trackOf(j)] }), null],
@@ -390,29 +512,35 @@
   ];
   function table(list) {
     const st = tstate();
-    const head = el("tr", null, COLS.map(([h, , sk]) => el("th", { scope: "col", "aria-sort": sk && st.sort === sk ? "descending" : null, title: sk ? "Sort" : null,
+    const head = el("tr", null, COLS.map(([h, , sk]) => el("th", { scope: "col", "aria-sort": sk && st.sort === sk ? "descending" : null, title: sk ? "Sort" : null, "aria-label": h || "Select",
       onclick: () => { if (sk) { st.sort = sk; saveUI(); renderList(); } } }, h, sk && st.sort === sk ? " ↓" : "")));
     const body = el("tbody");
-    for (const j of list) body.append(el("tr", { class: selectedId === j.id ? "selected" : "", "data-id": j.id, onclick: () => openPanel(j.id) },
+    for (const j of list) body.append(el("tr", { class: (selectedId === j.id ? "selected" : "") + (picked.has(j.id) ? " picked" : ""), "data-id": j.id, onclick: () => openPanel(j.id) },
       COLS.map(([, f, , cls]) => el("td", { class: cls || "" }, f(j)))));
     return el("div", { class: "table-wrap" }, el("table", { class: "grid" }, el("thead", null, head), body));
   }
 
   let current = []; let shown = 0; let selectedId = null; let observer = null;
   function setView(id) { tstate().view = id; saveUI(); closePop(); renderAll(); }
+  const modeOf = (vid) => (tstate().modes || {})[vid] || ui.mode || "cards";
+  const SPECIAL = { coverage: () => renderCoverage, skillgaps: () => renderSkillGaps, applications: () => renderApplications,
+    followups: () => renderFollowups, stats: () => renderStatsView, runlog: () => renderRunLog };
   function renderList(keepScroll) {
     const st = tstate();
     const v = viewById(st.view || defaultView());
     $("#view-title").textContent = v.label;
     $("#sort").value = st.sort;
     $("#list").classList.toggle("compact", ui.compact);
-    $("#mode-toggle").textContent = ui.mode === "cards" ? "Table" : "Cards";
+    $("#mode-toggle").textContent = modeOf(v.id) === "cards" ? "Table" : "Cards";
     $("#density").setAttribute("aria-pressed", String(ui.compact));
     const box = $("#list"); box.textContent = "";
     if (observer) observer.disconnect();
-    if (v.id === "coverage" || v.id === "skillgaps") {
+    writeHash();
+    const special = SPECIAL[v.id];
+    for (const n of ["#sort", "#mode-toggle", "#density"]) $(n).hidden = !!special;
+    if (special) {
       $("#filters").hidden = true; $("#count").textContent = "";
-      (v.id === "coverage" ? renderCoverage : renderSkillGaps)(box); return;
+      special()(box); if (!keepScroll) window.scrollTo({ top: 0 }); return;
     }
     $("#filters").hidden = false;
     const base = v.jobs();
@@ -434,7 +562,7 @@
         el("button", { class: "btn small", type: "button", onclick: () => { st.filters = {}; st.q = ""; $("#q").value = ""; ui.day = null; saveUI(); setView("all"); } }, "Show all jobs"))));
       return;
     }
-    if (ui.mode === "table") {
+    if (modeOf(v.id) === "table") {
       box.append(table(current.slice(0, 600)));
       if (current.length > 600) box.append(el("p", { class: "muted", text: `Showing the first 600 of ${current.length.toLocaleString()} — narrow the filters to see the rest.` }));
       return;
@@ -497,11 +625,388 @@
       el("thead", null, el("tr", null, ["Company", "Status", "Source", "Detected via", "Last checked", "Open roles", "Notes"].map((h) => el("th", { text: h })))), tb)));
   }
 
+  // ---------- My Applications ----------
+  const KEY_MAP = new Map(JOBS.map((j) => [keyOf(j), j]));
+  const appsInTrack = () => liveApps().filter((a) => ui.both || a.track === ui.track);
+  const fuOf = (a) => C.followUp(a, today(), appsCfg.follow_up_days);
+  const followupsDue = () => appsInTrack().filter((a) => { const f = fuOf(a); return f && f.state !== "upcoming"; });
+  const ghostsDue = () => appsInTrack().filter((a) => C.ghostSuggestion(a, today(), appsCfg.ghosted_after_days));
+  const daysSince = (d) => { const x = C.day(d); return x == null ? null : C.day(today()) - x; };
+  const STAGE_LABEL = C.STAGE_LABELS;
+  const OPEN_STAGES = ["applied", "oa", "interviewing", "offer"];
+  const CLOSED_STAGES = ["rejected", "ghosted", "withdrawn"];
+  function postingState(a) {
+    if (!a.job_key) return null;
+    if (KEY_MAP.has(a.job_key)) return "open";
+    const s = ((window.SYNC || {}).job_state || {})[a.job_key];
+    return s ? (s[0] === "closed" ? "closed" : "open") : null;
+  }
+  function syncJobStatus(a) {
+    if (!a.job_key) return;
+    const want = a.deleted ? null : STAGE_STATUS[a.stage];
+    const j = KEY_MAP.get(a.job_key);
+    if (j) { if (want && statusOf(j) !== want) setStatus(j, { status: want }); return; }
+    const cur = statuses[a.job_key];
+    if (want && cur && cur.status !== want) { statuses[a.job_key] = Object.assign({}, cur, { status: want, updated_at: new Date().toISOString() }); store.set(K.statuses, statuses); }
+  }
+  function saveApp(next, msg) {
+    const before = apps[next.id] ? JSON.parse(JSON.stringify(apps[next.id])) : null;
+    const beforeStatus = next.job_key && statuses[next.job_key] ? JSON.parse(JSON.stringify(statuses[next.job_key])) : null;
+    apps[next.id] = next; saveApps(); syncJobStatus(next);
+    renderBanners(); renderAll(true); if (dApp && dApp === next.id) renderDrawer();
+    if (msg) toast(msg, () => {
+      if (before) apps[next.id] = before; else delete apps[next.id];
+      if (next.job_key) { if (beforeStatus) statuses[next.job_key] = beforeStatus; else delete statuses[next.job_key]; store.set(K.statuses, statuses); }
+      saveApps(); renderBanners(); renderAll(true); if (dApp) renderDrawer();
+    });
+  }
+  function moveTo(a, to) {
+    if (!a || a.stage === to) return;
+    saveApp(C.moveStage(a, to), `${a.company}: ${STAGE_LABEL[a.stage]} → ${STAGE_LABEL[to]}`);
+  }
+  const STAGE_ORDER = [...OPEN_STAGES, ...CLOSED_STAGES];
+  function shiftStage(a, dir) {
+    const i = STAGE_ORDER.indexOf(a.stage); const to = STAGE_ORDER[Math.max(0, Math.min(STAGE_ORDER.length - 1, i + dir))];
+    if (to === a.stage) return;
+    moveTo(a, to);
+    setTimeout(() => { const n = document.querySelector(`[data-app="${a.id}"]`); if (n) n.focus(); }, 0);
+  }
+
+  function confirmDialog(title, lines, yes) {
+    return new Promise((resolve) => {
+      const d = $("#confirm"); $("#confirm-title").textContent = title;
+      const body = $("#confirm-body"); body.textContent = ""; body.append(el("ul", { class: "list-plain" }, lines.map((l) => el("li", { text: l }))));
+      $("#confirm-yes").textContent = yes || "Continue";
+      const done = (v) => { d.close(); $("#confirm-yes").onclick = null; $("#confirm-no").onclick = null; resolve(v); };
+      $("#confirm-yes").onclick = () => done(true); $("#confirm-no").onclick = () => done(false);
+      d.oncancel = () => resolve(false);
+      d.showModal(); $("#confirm-no").focus();
+    });
+  }
+
+  async function markApplied(j) {
+    const existing = appForJob(j);
+    if (existing) { openDrawer(existing.id); toast("Already in My Applications"); return; }
+    const warns = C.duplicateWarnings(j.company, j.title, keyOf(j), liveApps(), today(), appsCfg.same_company_window_days);
+    if (warns.length && !(await confirmDialog("Possible duplicate application", warns.map((w) => w.message), "Mark applied anyway"))) return;
+    const d = await loadDetail(j);
+    const st = statuses[keyOf(j)] || {};
+    const t = trackOf(j) === "unclear" ? ui.track : trackOf(j);
+    const a = C.newApp({ job_key: keyOf(j), company: j.company, title: j.title, track: t, link: safeUrl(j.apply_url) || "", source: "HireScope",
+      package: st.package || "", jd: (d && d.jd) || "", job: { source: j.source, tier: j.tier, label: j.label, score: j.score == null ? null : Math.round(j.score), level: j.level, job_id: j.job_id } });
+    const undoStatus = setStatus(j, { status: "applied" });
+    apps[a.id] = a; saveApps();
+    toast(`Marked applied: ${j.company} (date editable in My Applications)`, () => { delete apps[a.id]; saveApps(); undoStatus(); });
+    renderAll(true); if (pJob) renderActions();
+  }
+
+  // ----- page -----
+  function renderApplications(box) {
+    const list = appsInTrack();
+    const seg = el("div", { class: "seg", role: "tablist", "aria-label": "My Applications view" },
+      [["board", "Board"], ["table", "Table"], ["stats", "Stats"]].map(([id, label]) => el("button", { type: "button", role: "tab", "aria-selected": String(ui.appTab === id), "aria-pressed": String(ui.appTab === id),
+        onclick: () => { ui.appTab = id; saveUI(); renderList(true); } }, label)));
+    box.append(el("div", { class: "toolbar" }, seg,
+      el("span", { class: "muted", text: `${list.length} application${list.length === 1 ? "" : "s"} · ${ui.both ? "both tracks" : TRACKS[ui.track]}` }),
+      el("span", { class: "spacer" }),
+      el("button", { class: "btn small", type: "button", onclick: () => openAddApp() }, "+ Add application"),
+      el("button", { class: "btn small", type: "button", onclick: () => { download(`my-applications-${today()}.csv`, C.toCsv(list, today(), appsCfg.follow_up_days), "text/csv;charset=utf-8"); toast(`Exported ${list.length} applications`); } }, "Export CSV")));
+    if (!list.length && ui.appTab !== "stats") {
+      box.append(el("div", { class: "empty" }, el("b", { text: `No ${ui.both ? "" : TRACKS[ui.track] + " "}applications yet.` }),
+        el("div", { style: "margin-top:6px", text: "Press a (or Mark Applied) on any job, or add one you applied to elsewhere." }),
+        el("div", { style: "margin-top:10px" }, el("button", { class: "btn small primary", type: "button", onclick: () => openAddApp() }, "+ Add application"))));
+      return;
+    }
+    const hs = ui.appTab !== "stats" ? helperStrip(list) : null; if (hs) box.append(hs);
+    ({ board: appBoard, table: appTable, stats: appStats })[ui.appTab](box, list);
+  }
+  function helperStrip(list) {
+    const fu = list.filter((a) => { const f = fuOf(a); return f && f.state !== "upcoming"; });
+    const gh = list.filter((a) => C.ghostSuggestion(a, today(), appsCfg.ghosted_after_days));
+    const t0 = C.day(today());
+    const up = list.filter((a) => a.next_step_date && C.day(a.next_step_date) >= t0 && C.day(a.next_step_date) - t0 <= 14 && OPEN_STAGES.includes(a.stage))
+      .sort((x, y) => x.next_step_date.localeCompare(y.next_step_date));
+    if (!fu.length && !gh.length && !up.length) return null;
+    const item = (a, text) => el("li", null, el("a", { href: "#", onclick: (e) => { e.preventDefault(); openDrawer(a.id); }, text: `${a.company} — ${a.title}` }), el("span", { class: "muted", text: ` · ${text}` }));
+    return el("div", { class: "helpers" },
+      up.length ? el("div", { class: "side-card" }, el("h4", { text: `Upcoming steps (${up.length})` }), el("ul", { class: "list-plain" }, up.slice(0, 6).map((a) => item(a, `${a.next_step || "Next step"} · ${fmtDate(a.next_step_date)} (${C.day(a.next_step_date) - t0 === 0 ? "today" : `in ${C.day(a.next_step_date) - t0}d`})`)))) : null,
+      fu.length ? el("div", { class: "side-card" }, el("h4", { text: `Follow-ups due (${fu.length})` }), el("ul", { class: "list-plain" }, fu.slice(0, 6).map((a) => item(a, `${fuOf(a).state} · ${fuOf(a).days} days since ${a.followed_up ? "your follow-up" : "applying"}`)))) : null,
+      gh.length ? el("div", { class: "side-card" }, el("h4", { text: `Ghosted? (${gh.length})` }), el("ul", { class: "list-plain" }, gh.slice(0, 6).map((a) => item(a, `no update in ${C.day(today()) - C.lastActivity(a)} days — you decide`)))) : null);
+  }
+  function appChips(a, compact) {
+    const out = [el("span", { class: `chip ${a.track}`, text: TRACKS[a.track] || a.track })];
+    const ds = daysSince(a.applied_date);
+    if (ds != null && !compact) out.push(el("span", { class: "chip", title: `Applied ${a.applied_date}`, text: ds === 0 ? "today" : `${ds}d ago` }));
+    const f = fuOf(a);
+    if (f && f.state !== "upcoming") out.push(el("span", { class: `chip ${f.state === "overdue" ? "flag" : "warn"}`, title: `Follow-up window ${appsCfg.follow_up_days.join("–")} days`, text: f.state === "overdue" ? "↻ Follow-up overdue" : "↻ Follow-up due" }));
+    if (C.ghostSuggestion(a, today(), appsCfg.ghosted_after_days)) out.push(el("span", { class: "chip warn", text: "Ghosted?" }));
+    if (a.referral || (REF[a.company] || {}).count) out.push(el("span", { class: "chip info", title: a.referral ? `Referral: ${a.referral}` : "You have connections here", text: a.referral ? "Referral" : `Know ${(REF[a.company] || {}).count}` }));
+    if (postingState(a) === "closed") out.push(el("span", { class: "chip flag", title: "The posting disappeared from its source; your saved JD copy is kept", text: "Posting closed" }));
+    return out;
+  }
+  function appCard(a) {
+    const c = el("div", { class: `app-card ${a.track}`, tabindex: "0", draggable: "true", role: "button", "data-app": a.id,
+      "aria-label": `${a.title} at ${a.company}, ${STAGE_LABEL[a.stage]}. Enter opens details; [ and ] move between stages.`,
+      onclick: () => openDrawer(a.id),
+      onkeydown: (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); openDrawer(a.id); }
+        else if (e.key === "[" || e.key === "]") { e.preventDefault(); e.stopPropagation(); shiftStage(a, e.key === "]" ? 1 : -1); }
+      },
+      ondragstart: (e) => { e.dataTransfer.setData("text/plain", a.id); e.dataTransfer.effectAllowed = "move"; c.classList.add("dragging"); },
+      ondragend: () => c.classList.remove("dragging") },
+      el("div", { class: "app-co", text: a.company }), el("div", { class: "app-role", text: a.title }),
+      el("div", { class: "card-badges" }, appChips(a)),
+      a.next_step || a.next_step_date ? el("div", { class: "app-next" }, el("b", { text: "Next: " }), a.next_step || "step", a.next_step_date ? ` · ${fmtDate(a.next_step_date)}` : "") : null);
+    return c;
+  }
+  function appBoard(box, list) {
+    const board = el("div", { class: "board", role: "list", "aria-label": "Applications by stage" });
+    for (const stg of STAGE_ORDER) {
+      const items = list.filter((a) => a.stage === stg).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)));
+      const col = el("section", { class: `col ${CLOSED_STAGES.includes(stg) ? "closed" : ""}`, role: "listitem", "aria-label": `${STAGE_LABEL[stg]}: ${items.length}`,
+        ondragover: (e) => { e.preventDefault(); col.classList.add("over"); }, ondragleave: () => col.classList.remove("over"),
+        ondrop: (e) => { e.preventDefault(); col.classList.remove("over"); moveTo(apps[e.dataTransfer.getData("text/plain")], stg); } },
+        el("h3", null, STAGE_LABEL[stg], el("span", { class: "n", text: items.length })),
+        items.length ? items.map(appCard) : el("div", { class: "col-empty", text: "Drop here" }));
+      board.append(col);
+    }
+    box.append(board, el("p", { class: "muted", style: "font-size:12px", text: "Drag cards between stages, or focus a card and press [ / ]. Every move is logged on the card's timeline." }));
+  }
+  const APP_COLS = [
+    ["Company", (a) => a.company, "company"], ["Role", (a) => a.title, "title"], ["Track", (a) => el("span", { class: `chip ${a.track}`, text: TRACKS[a.track] }), "track"],
+    ["Stage", (a) => STAGE_LABEL[a.stage], "stage"], ["Applied", (a) => a.applied_date || "", "applied_date"], ["Days", (a) => daysSince(a.applied_date) ?? "", "days"],
+    ["Next step", (a) => [a.next_step, a.next_step_date ? ` (${a.next_step_date})` : ""].join(""), "next_step_date"],
+    ["Follow-up", (a) => { const f = fuOf(a); return f ? `${f.state} · ${f.due}` : ""; }, "follow"], ["Source", (a) => a.source || "", "source"],
+    ["Flags", (a) => el("span", { class: "card-badges", style: "margin:0" }, appChips(a, true).slice(1)), null],
+  ];
+  function appTable(box, list) {
+    const q = el("input", { type: "search", placeholder: "Search applications…", "aria-label": "Search applications", value: ui.appQ || "" });
+    const stage = el("select", { "aria-label": "Stage filter" }, el("option", { value: "", text: "All stages" }), STAGE_ORDER.map((s2) => el("option", { value: s2, text: STAGE_LABEL[s2], selected: ui.appStage === s2 })));
+    const wrap = el("div");
+    const draw = () => {
+      wrap.textContent = "";
+      const words = (ui.appQ || "").toLowerCase().split(/\s+/).filter(Boolean);
+      let rows = list.filter((a) => (!ui.appStage || a.stage === ui.appStage) && words.every((w) => `${a.company} ${a.title} ${a.notes} ${a.contact} ${a.referral} ${a.source}`.toLowerCase().includes(w)));
+      const sk = ui.appSort || "applied_date"; const dir = ui.appDir || -1;
+      const val = (a) => (sk === "days" ? daysSince(a.applied_date) ?? -1 : sk === "stage" ? STAGE_ORDER.indexOf(a.stage) : sk === "follow" ? (fuOf(a) || {}).due || "9999" : String(a[sk] || ""));
+      rows = rows.sort((x, y) => { const p = val(x), r = val(y); return (p < r ? -1 : p > r ? 1 : 0) * dir; });
+      const head = el("tr", null, APP_COLS.map(([h, , k]) => el("th", { scope: "col", "aria-sort": k && sk === k ? (dir > 0 ? "ascending" : "descending") : null,
+        onclick: () => { if (!k) return; if (ui.appSort === k) ui.appDir = -(ui.appDir || -1); else { ui.appSort = k; ui.appDir = -1; } saveUI(); draw(); } }, h, k && sk === k ? (dir > 0 ? " ↑" : " ↓") : "")));
+      const body = el("tbody");
+      for (const a of rows) body.append(el("tr", { tabindex: "0", onclick: () => openDrawer(a.id), onkeydown: (e) => { if (e.key === "Enter") openDrawer(a.id); } }, APP_COLS.map(([, f, k]) => el("td", { class: ["applied_date", "days", "follow"].includes(k) ? "nowrap" : k === "title" ? "role" : "" }, f(a)))));
+      wrap.append(el("div", { class: "table-wrap" }, el("table", { class: "grid" }, el("thead", null, head), body)), el("p", { class: "muted", style: "font-size:12px", text: `${rows.length} of ${list.length}` }));
+    };
+    q.addEventListener("input", () => { ui.appQ = q.value; saveUI(); draw(); });
+    stage.addEventListener("change", () => { ui.appStage = stage.value; saveUI(); draw(); });
+    box.append(el("div", { class: "toolbar" }, q, stage), wrap); draw();
+  }
+
+  // ----- stats (inline SVG) -----
+  function weekChart(stats) {
+    const W = 560, H = 150, pad = 22, n = stats.per_week.length, max = Math.max(1, ...stats.per_week), bw = (W - pad * 2) / n;
+    const g = svg("svg", { viewBox: `0 0 ${W} ${H}`, class: "chart", role: "img", "aria-label": `Applications per week, last ${n} weeks: ${stats.per_week.join(", ")}` });
+    g.append(svg("line", { x1: pad, x2: W - pad, y1: H - pad, y2: H - pad, class: "axis" }));
+    stats.per_week.forEach((v, i) => {
+      const h = ((H - pad * 2) * v) / max, x = pad + i * bw + 3;
+      g.append(svg("rect", { x, y: H - pad - h, width: bw - 6, height: Math.max(h, v ? 2 : 0), rx: 3, class: "bar" }, svg("title", {}, `Week of ${C.iso(C.day(stats.week_start) + 7 * i)}: ${v}`)));
+      if (v) g.append(svg("text", { x: x + (bw - 6) / 2, y: H - pad - h - 4, "text-anchor": "middle", class: "lbl" }, String(v)));
+      if (i % 2 === 0) g.append(svg("text", { x: x + (bw - 6) / 2, y: H - 6, "text-anchor": "middle", class: "lbl" }, C.iso(C.day(stats.week_start) + 7 * i).slice(5).replace("-", "/")));
+    });
+    return g;
+  }
+  function funnel(list) {
+    const outs = list.map(C.furthest); const n = list.length || 1;
+    const steps = [["Applied", list.length], ["Online Assessment+", outs.filter((o) => ["OA", "interview", "offer"].includes(o)).length],
+      ["Interview+", outs.filter((o) => ["interview", "offer"].includes(o)).length], ["Offer", outs.filter((o) => o === "offer").length]];
+    return el("div", { class: "bars" }, steps.map(([k, v]) => [el("span", { class: "k", text: k }), el("div", { class: "hbar" }, el("span", { style: `width:${(100 * v) / n}%` })), el("span", { class: "v", text: v })]));
+  }
+  function breakdownTable(title, rows) {
+    return el("div", { class: "section" }, el("h3", { text: title }), el("div", { class: "table-wrap" }, el("table", { class: "grid" },
+      el("thead", null, el("tr", null, ["Group", "Applications", "Responses", "Response rate", "Interviews", "Offers"].map((h, i) => el("th", { class: i ? "num" : "", text: h })))),
+      el("tbody", null, rows.map((r) => el("tr", null, el("td", { text: r.group }), el("td", { class: "num", text: r.n }), el("td", { class: "num", text: r.responses }),
+        el("td", { class: "num", text: `${r.response_rate}%` }), el("td", { class: "num", text: r.interviews }), el("td", { class: "num", text: r.offers }))))))) ;
+  }
+  function appStats(box) {
+    const tracks = ui.both ? ["coop_intern", "full_time"] : [ui.track];
+    for (const t of tracks) {
+      const list = liveApps().filter((a) => a.track === t);
+      const s2 = C.trackStats(list, today(), 12);
+      const pct = (x) => (x == null ? "—" : `${x}%`);
+      const sec = el("div", { class: "section stats-block" }, el("h3", null, el("span", { class: `chip ${t}`, text: TRACKS[t] }), " "),
+        el("div", { class: "tiles mini" }, [["Applications", s2.total], ["Response rate", pct(s2.response_rate)], ["OA rate", pct(s2.oa_rate)], ["Interview rate", pct(s2.interview_rate)],
+          ["Offers", s2.offers], ["Median days to first response", s2.median_days_to_response == null ? "—" : s2.median_days_to_response]]
+          .map(([l, v]) => el("div", { class: "tile disabled", role: "group", "aria-label": `${l}: ${v}` }, el("span", { class: "n", text: String(v) }), el("span", { class: "l", text: l })))));
+      if (!list.length) { sec.append(el("p", { class: "muted", text: "No applications on this track yet." })); box.append(sec); continue; }
+      sec.append(el("div", { class: "stats-grid" },
+        el("div", { class: "side-card" }, el("h4", { text: "Applications per week" }), weekChart(s2)),
+        el("div", { class: "side-card" }, el("h4", { text: "Funnel (furthest stage reached)" }), funnel(list))));
+      sec.append(breakdownTable("By source", C.outcomeBreakdown(list, (a) => a.source || "Unknown")),
+        breakdownTable("By company tier", C.outcomeBreakdown(list, (a) => ((a.job || {}).tier ? `Tier ${a.job.tier}` : "Untiered / added manually"))),
+        breakdownTable("By score label", C.outcomeBreakdown(list, (a) => (a.job || {}).label || "Not scored (added manually)")),
+        breakdownTable("By level", C.outcomeBreakdown(list, (a) => (a.job || {}).level || "Unknown")));
+      box.append(sec);
+    }
+    box.append(el("p", { class: "muted", style: "font-size:12px", text: "A response is any move to Online Assessment, Interviewing, Offer or Rejected. Ghosted and Withdrawn count as no response. Stats are computed from your own log." }));
+  }
+  function renderStatsView(box) { ui.appTab = "stats"; renderApplications(box); }
+
+  // ----- follow-ups view -----
+  function renderFollowups(box) {
+    const fu = followupsDue(), gh = ghostsDue();
+    box.append(el("p", { class: "muted", style: "margin-top:0", text: `Applications still at “Applied” ${appsCfg.follow_up_days[0]}–${appsCfg.follow_up_days[1]} days after applying (or after your last follow-up). You send follow-ups yourself; HireScope never contacts anyone.` }));
+    const row = (a, extra) => el("div", { class: "fu-row" }, el("div", { style: "flex:1;min-width:0" }, el("b", { text: `${a.company} — ${a.title}` }),
+      el("div", { class: "card-badges" }, appChips(a))), extra, el("button", { class: "btn small ghost", type: "button", onclick: () => openDrawer(a.id) }, "Open"));
+    if (!fu.length && !gh.length) { box.append(el("div", { class: "empty" }, el("b", { text: "No follow-ups due." }), el("div", { text: liveApps().length ? "You're caught up." : "Applications you mark applied show up here when a follow-up is due." }))); return; }
+    if (fu.length) box.append(el("div", { class: "section" }, el("h3", { text: `Follow-ups due (${fu.length})` }), fu.map((a) => row(a,
+      el("button", { class: "btn small", type: "button", onclick: () => saveApp(C.logFollowUp(a, today()), `Logged a follow-up for ${a.company}`) }, "I followed up today")))));
+    if (gh.length) box.append(el("div", { class: "section" }, el("h3", { text: `No update in ${appsCfg.ghosted_after_days}+ days (${gh.length})` }),
+      el("p", { class: "muted", style: "margin:0 0 8px;font-size:12px", text: "Suggestions only — nothing is marked Ghosted unless you confirm." }),
+      gh.map((a) => row(a, el("span", { style: "display:flex;gap:6px" },
+        el("button", { class: "btn small", type: "button", onclick: () => moveTo(a, "ghosted") }, "Mark Ghosted"),
+        el("button", { class: "btn small ghost", type: "button", onclick: () => saveApp(C.edit(a, { events: [...(a.events || []), { at: new Date().toISOString(), kind: "note", from: null, to: null, note: "Still waiting (checked)" }] }), "Noted — reminder reset") }, "Still waiting"))))));
+  }
+
+  // ----- run log view -----
+  function renderRunLog(box) {
+    const s2 = META.summary || {}; const im = META.statuses_import || {};
+    box.append(el("div", { class: "section" }, el("h3", { text: "Last run" }), facts([
+      ["Finished", META.last_run ? fmtTime(META.last_run) : "never"],
+      ["Coverage", `${s2.sources_ok ?? 0} of ${s2.sources_checked ?? 0} companies/sources checked successfully · ${s2.sources_failed || 0} failed · ${s2.sources_manual || 0} manual · ${s2.sources_partial || 0} partial · ${s2.sources_skipped || 0} not due`],
+      ["Jobs", `${(s2.jobs_found || 0).toLocaleString()} found · ${s2.new || 0} new · ${s2.updated || 0} updated · ${s2.closed || 0} closed`],
+      ["Scored", `${(s2.scored || 0).toLocaleString()} visible · ${(s2.filtered || 0).toLocaleString()} filtered · ${s2.strong || 0} Strong`],
+      ["Statuses import", im.file ? `${im.file}${im.skipped_reason ? ` — ${im.skipped_reason}` : ` — ${im.statuses_applied || 0} statuses, ${(im.apps_new || 0) + (im.apps_updated || 0)} applications merged`}` : (im.skipped_reason || "not run")],
+      ["Log file", el("span", null, el("code", { class: "mono", text: META.log_path || "data/logs/jobsearch.log" }), " ",
+        el("button", { class: "btn small ghost", type: "button", onclick: async () => toast((await copyText(META.log_path || "")) ? "Path copied" : "Clipboard unavailable") }, "Copy path"))],
+    ])));
+    const runs = META.runs || [];
+    if (runs.length) box.append(el("div", { class: "section" }, el("h3", { text: "Recent runs" }), el("div", { class: "table-wrap" }, el("table", { class: "grid" },
+      el("thead", null, el("tr", null, ["Started", "Scope", "Checked", "OK", "Failed", "Found", "New", "Updated", "Closed", "Strong"].map((h) => el("th", { text: h })))),
+      el("tbody", null, runs.map((r) => el("tr", null, el("td", { class: "nowrap", text: fmtTime(r.started_at) }), el("td", { text: r.scope || "full" }),
+        ...[r.sources_checked, r.sources_ok, r.sources_failed, r.jobs_found, r.new, r.updated, r.closed, r.strong].map((v) => el("td", { class: "num", text: v == null ? "—" : v.toLocaleString() })))))))));
+  }
+
+  // ----- drawer -----
+  let dApp = null; let dLastFocus = null;
+  function openDrawer(id) {
+    if (!apps[id]) return;
+    if (pJob) closePanel();
+    if (!dApp) dLastFocus = document.activeElement;
+    dApp = id; renderDrawer();
+    $("#drawer").classList.add("open"); $("#drawer").setAttribute("aria-hidden", "false"); $("#scrim").classList.add("open");
+    setTimeout(() => $("#drawer").focus({ preventScroll: true }), 0);
+  }
+  function closeDrawer() {
+    $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); if (!pJob) $("#scrim").classList.remove("open"); dApp = null;
+    if (dLastFocus && dLastFocus.focus && document.contains(dLastFocus)) dLastFocus.focus({ preventScroll: true });
+  }
+  $("#d-close").addEventListener("click", closeDrawer);
+  function renderDrawer() {
+    const a = apps[dApp]; if (!a) { closeDrawer(); return; }
+    $("#d-title").textContent = a.title;
+    $("#d-sub").textContent = `${a.company} · applied ${a.applied_date ? fmtDate(a.applied_date) : "?"}${daysSince(a.applied_date) != null ? ` (${daysSince(a.applied_date)} days ago)` : ""}`;
+    const b = $("#d-badges"); b.textContent = ""; b.append(...appChips(a, true), el("span", { class: "chip", text: STAGE_LABEL[a.stage] }));
+    const bar = $("#d-stages"); bar.textContent = "";
+    for (const stg of STAGE_ORDER) bar.append(el("button", { type: "button", class: `stage-btn ${CLOSED_STAGES.includes(stg) ? "closed" : ""}`, "aria-pressed": String(a.stage === stg), onclick: () => moveTo(apps[dApp], stg) }, STAGE_LABEL[stg]));
+    const body = $("#d-body"); const keep = body.scrollTop; body.textContent = "";
+    const f = fuOf(a);
+    if (f && f.state !== "upcoming") body.append(el("div", { class: `banner ${f.state === "overdue" ? "err" : "warn"}`, style: "margin:0 0 12px" },
+      el("span", { text: `Follow-up ${f.state}: ${f.days} days since ${a.followed_up ? "your last follow-up" : "applying"}. You send it yourself.` }),
+      el("button", { class: "btn small x", type: "button", onclick: () => saveApp(C.logFollowUp(a, today()), "Logged a follow-up") }, "I followed up today")));
+    if (C.ghostSuggestion(a, today(), appsCfg.ghosted_after_days)) body.append(el("div", { class: "banner warn", style: "margin:0 0 12px" },
+      el("span", { text: `No update in ${C.day(today()) - C.lastActivity(a)} days. Mark it Ghosted? (Only if you agree.)` }),
+      el("button", { class: "btn small x", type: "button", onclick: () => moveTo(a, "ghosted") }, "Mark Ghosted")));
+    const warns = C.duplicateWarnings(a.company, a.title, a.job_key, liveApps(), today(), appsCfg.same_company_window_days, a.id);
+    if (warns.length) body.append(el("div", { class: "banner info", style: "margin:0 0 12px" }, el("ul", { style: "margin:0" }, warns.map((w) => el("li", { text: w.message })))));
+
+    const field = (label, key, type, attrs) => {
+      const input = type === "textarea" ? el("textarea", Object.assign({ rows: 4, "aria-label": label }, attrs || {})) : el("input", Object.assign({ type, "aria-label": label }, attrs || {}));
+      input.value = a[key] || "";
+      input.addEventListener("change", () => {
+        const v = input.value.trim(); const cur = apps[dApp]; if ((cur[key] || "") === v) return;
+        if (type === "url" && v && !safeUrl(v)) { toast("Links must start with http:// or https://"); input.value = cur[key] || ""; return; }
+        let next = C.edit(cur, { [key]: v });
+        if (key === "next_step" || key === "next_step_date") next = C.edit(next, { events: [...(next.events || []), { at: next.updated_at, kind: "note", from: null, to: null, note: `Next step: ${next.next_step || "—"}${next.next_step_date ? ` on ${next.next_step_date}` : ""}` }] });
+        if (key === "applied_date" && !/^\d{4}-\d{2}-\d{2}$/.test(v)) { toast("Applied date is required"); input.value = cur[key] || ""; return; }
+        saveApp(next, `Saved ${label.toLowerCase()}`);
+      });
+      return el("label", { class: type === "textarea" ? "full" : "" }, label, input);
+    };
+    const ref = REF[a.company];
+    const refList = ref && (ref.people || []).length ? el("datalist", { id: "ref-people" }, ref.people.map((p) => el("option", { value: p.name }))) : null;
+    body.append(el("div", { class: "section" }, el("h3", { text: "Details" }), el("div", { class: "form-grid" },
+      field("Applied on", "applied_date", "date"),
+      field("Next step", "next_step", "text", { placeholder: "e.g. OA due, recruiter screen", maxlength: 300 }), field("Next step date", "next_step_date", "date"),
+      field("Contact", "contact", "text", { placeholder: "Recruiter / hiring manager", maxlength: 300 }), field("Referral", "referral", "text", { placeholder: "Who referred you", maxlength: 300, list: refList ? "ref-people" : null }),
+      field("Application link", "link", "url", { placeholder: "https://…" }), field("Source", "source", "text", { maxlength: 200 }),
+      field("Job package used", "package", "text", { maxlength: 300, placeholder: "Company_Role_JobID.md" }),
+      field("Notes", "notes", "textarea", { maxlength: 20000 })), refList));
+    const trackSel = el("select", { "aria-label": "Track" }, ["coop_intern", "full_time"].map((t) => el("option", { value: t, text: TRACKS[t], selected: a.track === t })));
+    trackSel.addEventListener("change", () => saveApp(C.edit(apps[dApp], { track: trackSel.value }), `Moved to ${TRACKS[trackSel.value]}`));
+    body.querySelector(".form-grid").prepend(el("label", null, "Track", trackSel));
+    if (ref && (ref.count || ref.possible_count)) body.append(el("div", { class: "section" }, el("h3", { text: `You know ${ref.count} ${ref.count === 1 ? "person" : "people"} at ${a.company}` }), referralList(ref)));
+
+    const evs = [...(a.events || [])].sort((x, y) => String(y.at).localeCompare(String(x.at)));
+    const evText = (e) => e.kind === "created" ? `Added (${STAGE_LABEL[e.to] || "Applied"})` : e.kind === "stage" ? `${STAGE_LABEL[e.from] || e.from || "?"} → ${STAGE_LABEL[e.to] || e.to}` : e.note || e.kind;
+    body.append(el("div", { class: "section" }, el("h3", { text: "Timeline" }), el("ol", { class: "timeline" }, evs.map((e) => el("li", { class: e.kind },
+      el("span", { class: "when", text: fmtTime(e.at) }), el("span", { text: evText(e) }))))));
+
+    const jdBox = el("div", { class: "section" }, el("h3", { text: "Saved job description" }));
+    if (a.jd) jdBox.append(el("details", null, el("summary", { text: `Local copy (${a.jd.length.toLocaleString()} characters) — kept even if the posting is removed` }), el("div", { class: "jd-saved", text: a.jd })));
+    else {
+      const ta = el("textarea", { rows: 4, placeholder: "Paste the JD to keep a local copy", "aria-label": "Paste job description", maxlength: 200000 });
+      jdBox.append(el("p", { class: "muted", style: "margin:0 0 6px;font-size:12px", text: "No saved copy yet. The pipeline also keeps one from the job's stored JD after you export." }), ta,
+        el("button", { class: "btn small", type: "button", style: "margin-top:6px", onclick: () => { if (ta.value.trim()) saveApp(C.edit(apps[dApp], { jd: ta.value.trim() }), "JD saved"); } }, "Save JD copy"));
+    }
+    body.append(jdBox);
+    body.scrollTop = keep;
+
+    const act = $("#d-actions"); act.textContent = "";
+    if (safeUrl(a.link)) act.append(el("a", { class: "btn", href: a.link, target: "_blank", rel: "noopener noreferrer" }, "Open application link"));
+    const j = KEY_MAP.get(a.job_key);
+    if (j) act.append(el("button", { class: "btn", type: "button", onclick: () => { closeDrawer(); openPanel(j.id); } }, "Job details"));
+    act.append(el("span", { class: "spacer" }),
+      el("button", { class: "btn ghost", type: "button", onclick: () => { saveApp(C.edit(apps[dApp], { deleted: true }), `Removed ${a.company} application`); closeDrawer(); } }, "Remove"));
+  }
+  function referralList(ref) {
+    const li = (p) => el("li", null, el("b", { text: p.name }), p.position ? ` — ${p.position}` : "", p.company ? el("span", { class: "muted", text: ` (${p.company})` }) : "",
+      safeUrl(p.url) ? [" ", el("a", { href: p.url, target: "_blank", rel: "noopener noreferrer", text: "profile" })] : "");
+    return el("div", null, (ref.people || []).length ? el("ul", { class: "list-plain" }, ref.people.map(li)) : null,
+      (ref.possible || []).length ? el("div", { style: "margin-top:6px" }, el("div", { class: "muted", style: "font-size:12px", text: "Possibly related (company name only starts the same):" }), el("ul", { class: "list-plain" }, ref.possible.map(li))) : null,
+      el("p", { class: "muted", style: "margin:6px 0 0;font-size:12px", text: "From your LinkedIn connections export. HireScope never contacts anyone — reach out yourself if it makes sense." }));
+  }
+
+  // ----- add application -----
+  function openAddApp(prefill) {
+    const d = $("#add-app"); const f = $("#add-app-form");
+    f.reset(); f.elements.applied_date.value = today(); f.elements.track.value = ui.track;
+    for (const [k, v] of Object.entries(prefill || {})) if (f.elements[k]) f.elements[k].value = v;
+    const warnBox = $("#add-app-warn"); warnBox.textContent = "";
+    const check = () => {
+      warnBox.textContent = "";
+      const co = f.elements.company.value.trim(), ti = f.elements.title.value.trim(); if (!co || !ti) return;
+      const w = C.duplicateWarnings(co, ti, null, liveApps(), today(), appsCfg.same_company_window_days);
+      if (w.length) warnBox.append(el("div", { class: "banner warn" }, el("ul", { style: "margin:0" }, w.map((x) => el("li", { text: x.message })))));
+    };
+    f.elements.company.oninput = check; f.elements.title.oninput = check;
+    d.showModal(); f.elements.company.focus();
+  }
+  $("#add-app").addEventListener("close", () => {
+    const d = $("#add-app"); const f = $("#add-app-form");
+    if (d.returnValue !== "save") return;
+    const v = (k) => f.elements[k].value.trim();
+    if (!v("company") || !v("title")) return;
+    const link = safeUrl(v("link")) || "";
+    const a = C.newApp({ company: v("company"), title: v("title"), track: v("track"), applied_date: v("applied_date") || today(), link, source: v("source"), jd: v("jd"), notes: v("notes") });
+    saveApp(a, `Added ${a.company} — ${a.title}`);
+    if (!ui.both && a.track !== ui.track) toast(`Added to the ${TRACKS[a.track]} tab`);
+  });
+
   // ---------- detail panel ----------
-  const TABS = ["Overview", "Requirements", "Keywords", "Score", "Full JD", "Similar"];
+  const TABS = ["Overview", "Requirements", "Keywords", "Score", "Full JD", "Similar", "Notes & History"];
   let pTab = "Overview"; let pJob = null; let pDetail = null; let jdHighlight = null; let kwFilter = null; let lastFocus = null;
   function openPanel(id) {
     const j = BY_ID.get(id); if (!j) return;
+    if (dApp) closeDrawer();
     if (!pJob) lastFocus = document.activeElement;
     selectedId = id; pJob = j; pDetail = null; jdHighlight = null; kwFilter = null;
     for (const n of document.querySelectorAll(".card.selected, tr.selected")) n.classList.remove("selected");
@@ -521,14 +1026,14 @@
     $("#panel").classList.remove("open"); $("#panel").setAttribute("aria-hidden", "true"); $("#scrim").classList.remove("open"); pJob = null;
     if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
   }
-  $("#p-close").addEventListener("click", closePanel); $("#scrim").addEventListener("click", closePanel);
+  $("#p-close").addEventListener("click", closePanel); $("#scrim").addEventListener("click", () => { if (dApp) closeDrawer(); if (pJob) closePanel(); });
   function renderPanelBody(node) { const b = $("#p-body"); b.textContent = ""; b.append(node); b.scrollTop = 0; }
   function renderPanel() {
     const tabs = $("#p-tabs"); tabs.textContent = "";
-    const avail = pJob.filtered || !pDetail ? ["Overview"] : TABS;
+    const avail = pJob.filtered || !pDetail ? ["Overview", "Notes & History"] : TABS;
     if (!avail.includes(pTab)) pTab = "Overview";
     for (const t of avail) tabs.append(el("button", { class: "panel-tab", role: "tab", "aria-selected": String(t === pTab), type: "button", onclick: () => { pTab = t; renderPanel(); } }, t));
-    const fn = { Overview: overviewTab, Requirements: reqTab, Keywords: keywordsTab, Score: scoreTab, "Full JD": jdTab, Similar: similarTab }[pTab];
+    const fn = { Overview: overviewTab, Requirements: reqTab, Keywords: keywordsTab, Score: scoreTab, "Full JD": jdTab, Similar: similarTab, "Notes & History": notesTab }[pTab];
     renderPanelBody(fn(pJob, pDetail || {}));
   }
   const facts = (pairs) => el("dl", { class: "facts" }, pairs.filter(Boolean).map(([k, v]) => [el("dt", { text: k }), el("dd", null, v)]));
@@ -537,7 +1042,7 @@
     const out = el("div");
     if (j.filtered) {
       out.append(el("div", { class: "section" }, el("h3", { text: "Why this job is hidden" }), el("ul", { class: "list-plain" }, (j.reasons || []).map((r) => el("li", { text: r }))),
-        el("p", { class: "muted", text: "Hard filters live in inputs/preferences.yaml (rules: hard | soft) and config/title_rules.yaml. If this is a false negative, note it — feedback learning (Phase 4) will use your statuses." })));
+        el("p", { class: "muted", text: "Hard filters live in inputs/preferences.yaml (rules: hard | soft) and config/title_rules.yaml. If this is a false negative, shortlist it: feedback learning lists it under Learned adjustments as a rule to review (it never un-hides jobs on its own)." })));
       return out;
     }
     const sig = d.signals || {}; const bd = d.breakdown || {};
@@ -560,6 +1065,11 @@
     ])));
     out.append(el("div", { class: "section" }, el("h3", { text: "Flags (only when explicitly stated)" }), facts(["sponsorship", "citizenship", "clearance"].map((k) =>
       [k[0].toUpperCase() + k.slice(1), el("span", null, (j.flags || {})[k] || "Not stated", quote((d.flag_evidence || {})[k]))]))));
+    const app = appForJob(j);
+    if (app) out.append(el("div", { class: "banner info", style: "margin:0 0 16px" }, el("span", { text: `In My Applications: ${STAGE_LABEL[app.stage]} since ${fmtDate((app.events || []).slice(-1)[0] ? (app.events.slice(-1)[0].at || "").slice(0, 10) : app.applied_date)} · applied ${fmtDate(app.applied_date)}` }),
+      el("button", { class: "btn small x", type: "button", onclick: () => openDrawer(app.id) }, "Open application")));
+    const ref = REF[j.company];
+    if (ref && (ref.count || ref.possible_count)) out.append(el("div", { class: "section" }, el("h3", { text: ref.count ? `You know ${ref.count} ${ref.count === 1 ? "person" : "people"} at ${j.company}` : `Possible connections at ${j.company}` }), referralList(ref)));
     const h1 = (META.h1b || {})[j.company];
     if (h1) out.append(el("div", { class: "section" }, el("h3", { text: "Sponsorship history (company, not this job)" }),
       el("p", { style: "margin:0;font-size:12px" }, `USCIS H-1B approvals matched to “${h1.employer}”: `, Object.entries(h1.by_year).map(([y, n]) => `${y}: ${n.toLocaleString()}`).join(" · ")),
@@ -570,12 +1080,17 @@
     return out;
   }
   function trackControls(j) {
-    if (j.track_auto !== "unclear" && !overrides[keyOf(j)]) return null;
-    const set = (t) => { overrides[keyOf(j)] = t; store.set(K.overrides, overrides); toast(`Moved to ${TRACKS[t]}`, () => { delete overrides[keyOf(j)]; store.set(K.overrides, overrides); renderAll(true); openPanel(j.id); }); renderBanners(); renderAll(true); openPanel(j.id); };
+    const k = keyOf(j); const has = overrides[k] && overrides[k].track;
+    if (j.track_auto !== "unclear" && !has) return null;
+    const set = (t) => {   // a reset keeps a dated tombstone so an older export can't bring the override back
+      const before = overrides[k]; overrides[k] = { track: t, updated_at: new Date().toISOString() }; saveOverrides();
+      toast(t ? `Moved to ${TRACKS[t]}` : "Track reset", () => { if (before) overrides[k] = before; else delete overrides[k]; saveOverrides(); renderAll(true); openPanel(j.id); });
+      renderBanners(); renderAll(true); openPanel(j.id);
+    };
     return el("span", { style: "display:inline-flex;gap:6px;margin-left:6px" },
       el("button", { class: "btn small", type: "button", onclick: () => set("coop_intern") }, "Move to Co-op"),
       el("button", { class: "btn small", type: "button", onclick: () => set("full_time") }, "Move to Full-time"),
-      overrides[keyOf(j)] ? el("button", { class: "btn small ghost", type: "button", onclick: () => { delete overrides[keyOf(j)]; store.set(K.overrides, overrides); renderAll(true); openPanel(j.id); } }, "Reset") : null);
+      has ? el("button", { class: "btn small ghost", type: "button", onclick: () => set(null) }, "Reset") : null);
   }
   function reqTab(j, d) {
     const out = el("div");
@@ -698,6 +1213,23 @@
     out.append(el("div", { class: "list" }, sims.map(card)));
     return out;
   }
+  function notesTab(j) {
+    const out = el("div"); const k = keyOf(j); const st = statuses[k] || {};
+    const ta = el("textarea", { rows: 5, placeholder: "Your notes about this job (saved in this browser, exported with your statuses)", "aria-label": "Notes", maxlength: 20000, style: "width:100%" });
+    ta.value = st.notes || "";
+    ta.addEventListener("change", () => { setStatus(j, { notes: ta.value }); toast("Notes saved"); });
+    out.append(el("div", { class: "section" }, el("h3", { text: "Notes" }), ta));
+    const app = appForJob(j);
+    out.append(el("div", { class: "section" }, el("h3", { text: "Application" }), app ? el("div", null,
+      facts([["Stage", STAGE_LABEL[app.stage]], ["Applied", fmtDate(app.applied_date)], ["Follow-up", (() => { const f = fuOf(app); return f ? (f.state === "upcoming" ? `on ${fmtDate(f.due)}` : `${f.state} since ${fmtDate(f.due)}`) : "—"; })()],
+        ["Next step", app.next_step ? `${app.next_step}${app.next_step_date ? ` · ${fmtDate(app.next_step_date)}` : ""}` : "—"], ["Outcome so far", C.furthest(app)]]),
+      el("button", { class: "btn small", type: "button", style: "margin-top:8px", onclick: () => openDrawer(app.id) }, "Open in My Applications"))
+      : el("div", null, el("p", { class: "muted", style: "margin:0 0 8px", text: "Not applied yet." }), el("button", { class: "btn small", type: "button", onclick: () => markApplied(j) }, "Mark Applied"))));
+    const hist = [...(st.history || [])].reverse();
+    out.append(el("div", { class: "section" }, el("h3", { text: "Status history" }), hist.length ? el("ol", { class: "timeline" }, hist.map((h) =>
+      el("li", null, el("span", { class: "when", text: fmtTime(h.at) }), el("span", { text: `${h.status}${h.reason ? ` (${h.reason})` : ""}` })))) : el("p", { class: "muted", style: "margin:0", text: "No status changes yet." })));
+    return out;
+  }
   function quickLinks(j) {
     const name = encodeURIComponent(j.company);
     const slug = j.company.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -713,10 +1245,15 @@
     const apply = safeUrl(j.apply_url);
     if (apply) box.append(el("a", { class: "btn", href: apply, target: "_blank", rel: "noopener noreferrer", title: "Open application (o)" }, "Open Application"));
     box.append(el("button", { class: "btn", type: "button", "aria-pressed": String(statusOf(j) === "shortlisted"), onclick: () => shortlist(j), title: "Shortlist (s)" }, statusOf(j) === "shortlisted" ? "Shortlisted ✓" : "Shortlist"));
+    const app = appForJob(j);
+    box.append(el("button", { class: "btn", type: "button", onclick: () => (app ? openDrawer(app.id) : markApplied(j)), title: app ? "Open in My Applications" : "Mark applied (a)" }, app ? (app.stage === "applied" ? "Applied ✓" : `Applied ✓ · ${STAGE_LABEL[app.stage]}`) : "Mark Applied"));
     const reason = el("select", { "aria-label": "Skip with reason" }, el("option", { value: "", text: "Skip…" }), SKIP_REASONS.map((r) => el("option", { value: r, text: r })));
     reason.addEventListener("change", () => { if (reason.value) skip(j, reason.value); });
     const st = el("select", { "aria-label": "Status" }, STATUSES.map((s) => el("option", { value: s, text: s || "Status…", selected: s === statusOf(j) })));
-    st.addEventListener("change", () => { const undo = setStatus(j, { status: st.value }); toast(st.value ? `Status: ${st.value}` : "Status cleared", undo); renderAll(true); renderActions(); });
+    st.addEventListener("change", () => {
+      if (st.value === "applied" && !appForJob(j)) { markApplied(j); return; }
+      const undo = setStatus(j, { status: st.value }); toast(st.value ? `Status: ${st.value}` : "Status cleared", undo); renderAll(true); renderActions();
+    });
     box.append(reason, st, el("span", { class: "spacer" }));
     const li = safeUrl(j.linkedin_url); if (li) box.append(el("a", { class: "btn small ghost", href: li, target: "_blank", rel: "noopener noreferrer" }, "LinkedIn search"));
     box.append(...quickLinks(j));
@@ -726,7 +1263,9 @@
     if (!d) { toast("Details not available for this job"); return; }
     download(d.package_filename, d.package, "text/markdown;charset=utf-8");
     const ok = await copyText(d.package);
-    const undo = setStatus(j, { status: "package exported" });
+    const app = appForJob(j);
+    if (app && !app.package) { apps[app.id] = C.edit(app, { package: d.package_filename }); saveApps(); }
+    const undo = setStatus(j, app ? { package: d.package_filename } : { status: "package exported", package: d.package_filename });
     toast(ok ? "Package downloaded and copied" : "Package downloaded (clipboard unavailable)", undo);
     renderAll(true); if (pJob) renderActions();
   }
@@ -740,7 +1279,7 @@
     toast(`Skipped (${reason || "other"})`, undo); renderAll(true); if (pJob) renderActions();
   }
   function exportStatuses() {
-    const payload = { exported_at: new Date().toISOString(), format: 2, statuses, track_overrides: overrides };
+    const payload = { exported_at: new Date().toISOString(), format: 3, statuses, track_overrides: overrides, applications: apps };
     download("jobsearch-statuses.json", JSON.stringify(payload, null, 2), "application/json");
     store.set(K.exported, payload.exported_at); renderBanners(); toast("Exported jobsearch-statuses.json");
   }
@@ -758,23 +1297,111 @@
   // ---------- track tabs, toolbar ----------
   for (const b of document.querySelectorAll(".track-tab")) b.addEventListener("click", () => switchTrack(b.dataset.track));
   function switchTrack(t) {
-    ui.track = t; saveUI();
-    history.replaceState(null, "", t === "coop_intern" ? "#coop" : "#fulltime");
+    const onApps = ["applications", "stats", "followups"].includes(tstate().view);
+    const v = tstate().view;
+    ui.track = t; if (onApps) tstate().view = v; saveUI();
     $("#q").value = tstate().q || ""; closePop(); renderAll();
   }
+  // URL hash: #coop | #fulltime [/view] [?label=Strong|Stretch&q=…&sort=newest&salary=120000]; #applications[/coop|/fulltime]
+  function writeHash() {
+    const st = tstate(); const v = st.view || defaultView(); const tr = ui.track === "coop_intern" ? "coop" : "fulltime";
+    let h;
+    if (v === "applications") h = `#applications/${tr}`;
+    else {
+      const p = new URLSearchParams();
+      for (const f of FILTERS) { const vals = st.filters[f.id]; if (vals && vals.length) p.set(f.id, vals.join("|")); }
+      if (st.q) p.set("q", st.q); if (st.sort && st.sort !== "overall") p.set("sort", st.sort); if (st.salary) p.set("salary", st.salary);
+      if (st.salaryKnown) p.set("salary_known", "1");
+      const qs = p.toString(); h = `#${tr}${v !== defaultView() || qs ? `/${v}` : ""}${qs ? `?${qs}` : ""}`;
+    }
+    if (location.hash !== h) history.replaceState(null, "", h);
+  }
+  function readHash() {
+    const m = /^#(coop|fulltime|applications)(?:\/([a-z0-9]+))?(?:\?(.*))?$/.exec(location.hash || ""); if (!m) return;
+    if (m[1] === "applications") { if (m[2] === "coop" || m[2] === "fulltime") ui.track = m[2] === "coop" ? "coop_intern" : "full_time"; tstate().view = "applications"; return; }
+    ui.track = m[1] === "coop" ? "coop_intern" : "full_time";
+    const st = tstate();
+    if (m[2] && VIEWS.some((v) => v.id === m[2])) st.view = m[2];
+    if (m[3] !== undefined) {
+      const p = new URLSearchParams(m[3]); st.filters = {};
+      for (const f of FILTERS) if (p.get(f.id)) st.filters[f.id] = p.get(f.id).split("|");
+      st.q = p.get("q") || ""; if (p.get("sort") && SORTS[p.get("sort")]) st.sort = p.get("sort");
+      st.salary = Number(p.get("salary")) || 0; st.salaryKnown = p.get("salary_known") === "1";
+    }
+  }
+  window.addEventListener("hashchange", () => { readHash(); saveUI(); $("#q").value = tstate().q || ""; renderAll(); });
   $("#both").addEventListener("change", () => { ui.both = $("#both").checked; saveUI(); renderAll(); });
   $("#sort").addEventListener("change", () => { tstate().sort = $("#sort").value; saveUI(); renderList(); });
-  $("#mode-toggle").addEventListener("click", () => { ui.mode = ui.mode === "cards" ? "table" : "cards"; saveUI(); renderList(); });
+  $("#mode-toggle").addEventListener("click", () => { const st = tstate(); const v = st.view || defaultView(); st.modes = st.modes || {}; st.modes[v] = modeOf(v) === "cards" ? "table" : "cards"; saveUI(); renderList(); });
   $("#density").addEventListener("click", () => { ui.compact = !ui.compact; saveUI(); renderList(true); });
   let qTimer = null;
   $("#q").addEventListener("input", () => { clearTimeout(qTimer); qTimer = setTimeout(() => { tstate().q = $("#q").value; saveUI(); renderCounts(); renderList(); }, 120); });
   $("#help-btn").addEventListener("click", () => $("#help").showModal());
 
+  // ---------- command palette (⌘K) ----------
+  let palItems = []; let palSel = 0;
+  function paletteSource() {
+    const st = tstate();
+    const items = [
+      ...VIEWS.map((v) => ({ kind: "View", label: v.label, run: () => setView(v.id) })),
+      { kind: "Action", label: "Export statuses", run: exportStatuses },
+      { kind: "Action", label: "Add application", run: () => openAddApp() },
+      { kind: "Action", label: "Switch to Co-op / Internships", run: () => switchTrack("coop_intern") },
+      { kind: "Action", label: "Switch to Full-time", run: () => switchTrack("full_time") },
+      { kind: "Action", label: "Toggle light / dark theme", run: () => $("#theme").click() },
+      { kind: "Action", label: "Cards / table", run: () => $("#mode-toggle").click() },
+      { kind: "Action", label: "Compact density", run: () => $("#density").click() },
+      { kind: "Action", label: "Clear all filters", run: () => { st.filters = {}; st.q = ""; st.salary = 0; $("#q").value = ""; ui.day = null; saveUI(); renderAll(); } },
+      { kind: "Action", label: "Keyboard shortcuts", run: () => $("#help").showModal() },
+    ];
+    const byCo = counts(JOBS.filter((j) => !j.filtered).map((j) => j.company));
+    for (const [c, n] of byCo) items.push({ kind: "Company", label: c, sub: `${n} job${n > 1 ? "s" : ""}`, run: () => { const t = tstate(); t.filters = { company: [c] }; t.q = ""; $("#q").value = ""; saveUI(); setView("all"); } });
+    for (const a of liveApps()) items.push({ kind: "Application", label: a.title, sub: `${a.company} · ${STAGE_LABEL[a.stage]}`, run: () => openDrawer(a.id) });
+    return items;
+  }
+  function openPalette() {
+    const d = $("#palette"); if (d.open) return;
+    const q = $("#palette-q"); q.value = ""; d.showModal(); drawPalette(""); q.focus();
+  }
+  function drawPalette(qs) {
+    const words = qs.toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = (x) => words.every((w) => `${x.label} ${x.sub || ""} ${x.kind}`.toLowerCase().includes(w));
+    let items = paletteSource().filter(hit);
+    if (words.length) {
+      const jobs = [];
+      for (const j of JOBS) { if (jobs.length >= 40) break; if (!j.filtered && words.every((w) => `${j.title} ${j.company}`.toLowerCase().includes(w))) jobs.push(j); }
+      items = items.concat(jobs.map((j) => ({ kind: "Job", label: j.title, sub: `${j.company} · ${TRACKS[trackOf(j)]}${j.score != null ? ` · ${Math.round(j.score)}` : ""}`, run: () => openPanel(j.id) })));
+    } else items = items.filter((x) => x.kind === "View" || x.kind === "Action");
+    palItems = items.slice(0, 60); palSel = 0; renderPaletteList();
+  }
+  function renderPaletteList() {
+    const ul = $("#palette-list"); ul.textContent = "";
+    if (!palItems.length) { ul.append(el("li", { class: "muted empty-pal", text: "No matches" })); return; }
+    palItems.forEach((x, i) => ul.append(el("li", { role: "option", id: `pal-${i}`, "aria-selected": String(i === palSel), onmousemove: () => { if (palSel !== i) { palSel = i; mark(); } },
+      onclick: () => runPalette(i) }, el("span", { class: "pk", text: x.kind }), el("span", { class: "pl", text: x.label }), x.sub ? el("span", { class: "ps", text: x.sub }) : null)));
+    $("#palette-q").setAttribute("aria-activedescendant", `pal-${palSel}`);
+    function mark() { for (const [i, li] of [...ul.children].entries()) li.setAttribute("aria-selected", String(i === palSel)); $("#palette-q").setAttribute("aria-activedescendant", `pal-${palSel}`); }
+  }
+  function runPalette(i) { const x = palItems[i]; $("#palette").close(); if (x) setTimeout(() => x.run(), 0); }
+  $("#palette-q").addEventListener("input", (e) => drawPalette(e.target.value));
+  $("#palette-q").addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault(); palSel = (palSel + (e.key === "ArrowDown" ? 1 : -1) + palItems.length) % Math.max(1, palItems.length); renderPaletteList();
+      const n = document.getElementById(`pal-${palSel}`); if (n) n.scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter") { e.preventDefault(); runPalette(palSel); }
+  });
+  $("#palette").addEventListener("click", (e) => { if (e.target === $("#palette")) $("#palette").close(); });
+  $("#palette-btn").addEventListener("click", openPalette);
+
   // ---------- keyboard ----------
   document.addEventListener("keydown", (e) => {
     const tag = (e.target.tagName || "").toLowerCase();
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openPalette(); return; }
+    if (document.querySelector("dialog[open]")) return;   // dialogs handle their own keys (Esc closes them)
     if (["input", "textarea", "select"].includes(tag) && e.key !== "Escape") return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (dApp && e.key === "Escape") { closeDrawer(); return; }
+    if (dApp) return;
     const idx = current.findIndex((j) => j.id === selectedId);
     const move = (dlt) => {
       const n = current[Math.max(0, Math.min(current.length - 1, (idx < 0 ? -1 : idx) + dlt))]; if (!n) return;
@@ -789,8 +1416,10 @@
       case "j": move(1); break;
       case "k": move(-1); break;
       case "Enter": if (sel && tag !== "button" && tag !== "a") openPanel(sel.id); else return; break;
-      case "Escape": if ($("#help").open) $("#help").close(); else if (pJob) closePanel(); else closePop(); break;
+      case "Escape": if (pJob) closePanel(); else if (picked.size) clearPicks(); else closePop(); break;
       case "s": if (sel) shortlist(sel); break;
+      case "a": if (sel && !sel.filtered) markApplied(sel); break;
+      case " ": if (sel && tag !== "button" && tag !== "a") { e.preventDefault(); togglePick(sel.id); } else return; break;
       case "x": if (sel) skip(sel, "other"); break;
       case "o": if (sel && safeUrl(sel.apply_url)) window.open(sel.apply_url, "_blank", "noopener"); break;
       case "g": if (sel && !sel.filtered) generate(sel); break;
@@ -804,8 +1433,8 @@
 
   // ---------- boot ----------
   function renderAll(keepScroll) { renderCounts(); renderTiles(); renderList(keepScroll); }
-  if (location.hash === "#coop") ui.track = "coop_intern"; else if (location.hash === "#fulltime") ui.track = "full_time";
   if (!["coop_intern", "full_time"].includes(ui.track)) ui.track = "full_time";
+  readHash();
   $("#q").value = tstate().q || "";
   renderHeader(); renderBanners();
   if (!JOBS.length) {
@@ -814,5 +1443,4 @@
   } else {
     renderAll();
   }
-  history.replaceState(null, "", ui.track === "coop_intern" ? "#coop" : "#fulltime");
 })();

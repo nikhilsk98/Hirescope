@@ -15,7 +15,7 @@ import logging
 import re
 import shutil
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from ..storage import db
@@ -84,18 +84,17 @@ def _text(v, limit: int = MAX_TEXT) -> str:
     return str(v)[:limit]
 
 
-def _iso(v, fallback: str) -> str:
-    """A sane ISO timestamp (UTC) or the fallback; a future timestamp from a bad clock is clamped to now."""
+def _iso(v, fallback: str, cap: str | None = None) -> str:
+    """An ISO timestamp (UTC) or the fallback. Entries are capped at the export's own time (`cap`), so a bad
+    clock can't make an entry win forever, and re-importing the same file is deterministic."""
     try:
         t = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
     except (TypeError, ValueError):
         return fallback
     if t.tzinfo is None:
         t = t.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
-    if t > now + timedelta(minutes=5):
-        t = now
-    return t.astimezone(timezone.utc).isoformat(timespec="seconds")
+    out = t.astimezone(timezone.utc).isoformat(timespec="seconds")
+    return min(out, cap) if cap else out
 
 
 def _date(v) -> str | None:
@@ -136,18 +135,18 @@ def merge(conn, payload: dict, apps_dir: Path | None, now: str | None = None) ->
         if pk is None:
             res.statuses_unmatched += 1
             continue
-        at = _iso(e.get("updated_at"), exported)
+        at = _iso(e.get("updated_at"), exported, exported)
         cur = conn.execute("SELECT user_status_at FROM jobs WHERE id=?", (pk,)).fetchone()
         if cur["user_status_at"] and cur["user_status_at"] >= at:
             res.statuses_kept_db += 1
             continue
-        conn.execute("UPDATE jobs SET user_status=?, skip_reason=?, user_status_at=? WHERE id=?",
+        conn.execute("UPDATE jobs SET user_status=?, skip_reason=?, user_status_at=?, user_notes=? WHERE id=?",
                      (status or None, _text(e.get("skip_reason"), 200) or None if status == "skipped" else None,
-                      at, pk))
+                      at, _text(e.get("notes")) or None, pk))
         res.statuses_applied += 1
 
     for key, v in (payload.get("track_overrides") or {}).items():
-        track, at = (v.get("track"), _iso(v.get("updated_at"), exported)) if isinstance(v, dict) else (v, exported)
+        track, at = (v.get("track"), _iso(v.get("updated_at"), exported, exported)) if isinstance(v, dict) else (v, exported)
         if track not in TRACKS and track not in (None, ""):
             continue
         pk = find_job(conn, key)
@@ -180,7 +179,7 @@ def _merge_app(conn, app_id: str, a: dict, exported: str, apps_dir: Path | None,
     stage = a.get("stage") or "applied"
     if stage not in STAGES:
         raise ValueError(f"unknown stage {stage!r}")
-    updated = _iso(a.get("updated_at"), exported)
+    updated = _iso(a.get("updated_at"), exported, exported)
     vals = {f: _text(a.get(f), 2000 if f != "notes" else MAX_TEXT) or None for f in APP_FIELDS}
     vals.update(company=company, title=title, stage=stage, applied_date=_date(a.get("applied_date")),
                 next_step_date=_date(a.get("next_step_date")), followed_up=_date(a.get("followed_up")),
@@ -211,7 +210,7 @@ def _merge_app(conn, app_id: str, a: dict, exported: str, apps_dir: Path | None,
         cur = conn.execute(
             "INSERT OR IGNORE INTO application_events (app_id, at, kind, from_stage, to_stage, note) "
             "VALUES (?,?,?,?,?,?)",
-            (app_id, _iso(ev.get("at"), updated), _text(ev.get("kind"), 40),
+            (app_id, _iso(ev.get("at"), updated, exported), _text(ev.get("kind"), 40),
              _text(ev.get("from"), 40), _text(ev.get("to"), 40), _text(ev.get("note"), 2000)))
         res.events_added += cur.rowcount
 
@@ -276,25 +275,25 @@ def applications(conn, include_deleted: bool = True, with_jd: bool = True) -> li
     return out
 
 
-def sync_payload(conn, closed_days: int = 60) -> dict:
+def sync_payload(conn) -> dict:
     """What SQLite knows that the browser may not (e.g. after clearing site data or on another browser):
     statuses, track overrides, applications, and the open/closed state of jobs you acted on."""
     statuses, overrides = {}, {}
     for r in conn.execute("SELECT company, source, job_id, title, user_status, skip_reason, user_status_at, "
-                          "track_override, track_override_at FROM jobs WHERE user_status_at IS NOT NULL OR "
+                          "user_notes, track_override, track_override_at FROM jobs WHERE user_status_at IS NOT NULL OR "
                           "track_override_at IS NOT NULL"):
         key = job_key(r)
         if r["user_status_at"]:
             statuses[key] = {"company": r["company"], "title": r["title"], "job_id": r["job_id"],
                              "source": r["source"], "status": r["user_status"] or "",
-                             "skip_reason": r["skip_reason"] or None, "updated_at": r["user_status_at"]}
+                             "skip_reason": r["skip_reason"] or None, "notes": r["user_notes"] or "",
+                             "updated_at": r["user_status_at"]}
         if r["track_override_at"]:
             overrides[key] = {"track": r["track_override"], "updated_at": r["track_override_at"]}
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=closed_days)).isoformat(timespec="seconds")
     state = {}
     for r in conn.execute("SELECT j.company, j.source, j.job_id, j.job_status, j.status_changed_at FROM jobs j "
                           "WHERE j.user_status_at IS NOT NULL OR j.id IN (SELECT job_pk FROM applications WHERE "
-                          "job_pk IS NOT NULL) OR (j.job_status = 'closed' AND j.status_changed_at >= ?)", (cutoff,)):
+                          "job_pk IS NOT NULL)"):
         state[job_key(r)] = [r["job_status"], r["status_changed_at"]]
     return {"generated_at": db.utcnow(), "statuses": statuses, "track_overrides": overrides,
             "applications": applications(conn), "job_state": state}

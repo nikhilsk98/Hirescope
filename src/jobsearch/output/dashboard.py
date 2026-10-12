@@ -331,8 +331,7 @@ def write_data_js(path: Path, jobs: list[dict], meta: dict, tz: str, resume_hash
             "apply_today": {t: [i for i in ids if i in shown_ids] for t, ids in apply_today(visible, today).items()},
             "missed": [i for i in missed if i in shown_ids],
             "h1b": h1b or {},
-            "learned": meta.get("learned") or {"status": "Feedback learning starts once dashboard statuses are "
-                                                         "imported into the pipeline (Phase 4).", "adjustments": []},
+            "learned": meta.get("learned") or {"status": "No statuses imported yet.", "adjustments": []},
             "days": days}
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".js.tmp")

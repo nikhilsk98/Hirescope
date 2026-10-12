@@ -39,11 +39,13 @@ def features(job: dict, prefs: Preferences) -> dict[str, set[str]]:
         elif m := re.search(r",\s*([A-Z]{2})\b", job.get("location") or ""):
             loc = m.group(1)
     bd = job.get("breakdown") or {}
+    co = job["company"].casefold()
+    not_company = lambda xs: {x for x in xs if x.casefold() != co}   # noqa: E731 - "Stripe" the product is the company
     return {
         "company": {job["company"]},
-        "skills": set(job.get("skills") or []),
-        "missing_skills": set(bd.get("missing_skills") or []),
-        "domain": {k["canonical"] for k in kws if k.get("category") == "domain"},
+        "skills": not_company(job.get("skills") or []),
+        "missing_skills": not_company(bd.get("missing_skills") or []),
+        "domain": not_company(k["canonical"] for k in kws if k.get("category") == "domain"),
         "location": {loc} if loc else set(),
         "level": {job["level"]} if job.get("level") and job["level"] != "unknown" else set(),
     }

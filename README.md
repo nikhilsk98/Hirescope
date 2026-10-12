@@ -110,17 +110,61 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
 - **Co-op / Internships** and **Full-time** tabs at the top are separate workspaces (own view, filters, sort,
   search, Apply Today, stats); `#coop` / `#fulltime` are bookmarkable. Unclear jobs show in both with a "?" badge
   and **Move to Co-op / Move to Full-time** (saved in the browser and included in Export statuses).
-- Sidebar views: Last 24h (default when it has jobs), Apply Today, All Jobs, My Companies, Shortlisted, Closing Soon,
-  Skill Gaps, Missed Matches (weekly false-negative review), Filtered Out (with reasons), Coverage.
-- Cards (score ring, label, badges, ATS meter) or a sortable table; Comfortable / Compact density.
-- Filter chips (company, tier, label, level, work mode, location, status, flags, posted within, min score);
-  sort by Newest posted, Best JD match, Overall, ATS coverage, Deadline, Company (secondary: newest posted).
-- Detail panel: Overview, Requirements (✓ / ✗ / ? per line), Keywords, Score breakdown, Full JD (keywords
-  highlighted, Jump to requirements), Similar jobs; actions Generate Resume, Open Application, Shortlist, Skip with
-  reason, status, LinkedIn search, Levels.fyi / Glassdoor / eng-blog links.
-- Keys: `j`/`k`, `Enter`, `s` shortlist, `x` skip, `o` open, `g` package, `/` search, `1`/`2` tabs, `?` help.
-- Statuses save instantly in the browser; **Export statuses** downloads `jobsearch-statuses.json` (import into the
-  pipeline is Phase 4).
+- Sidebar views: Last 24h (default when it has jobs), Apply Today, All Jobs, My Companies, **My Applications**,
+  Shortlisted, **Follow-ups Due**, Closing Soon, Skill Gaps, **Stats**, Missed Matches (weekly false-negative review),
+  Filtered Out (with reasons), Coverage, **Run Log**.
+- Cards (score ring, label, badges, ATS meter) or a sortable table, remembered per view; Comfortable / Compact density.
+- Filter chips (company, tier, label, level, work mode, location, status, flags, posted within, min score, **salary
+  slider**); sort by Newest posted, Best JD match, Overall, ATS coverage, Deadline, Company (secondary: newest posted).
+  Filters, search and sort live in the URL hash (`#fulltime/all?label=Strong&sort=newest`), so a view is bookmarkable.
+- Detail panel: Overview (incl. "You know N people here"), Requirements (✓ / ✗ / ? per line), Keywords, Score
+  breakdown (incl. learned adjustments), Full JD (keywords highlighted, Jump to requirements), Similar jobs, Notes &
+  History; actions Generate Resume, Open Application, Shortlist, **Mark Applied**, Skip with reason, status, LinkedIn
+  search, Levels.fyi / Glassdoor / eng-blog links.
+- **Bulk select** (checkbox on hover, or `Space`): shortlist, skip with a reason, or export CSV for many jobs at once.
+- **Command palette** `⌘K`: jump to any job, company, application, view or action.
+- Keys: `j`/`k`, `Enter`, `s` shortlist, `x` skip, `a` mark applied, `o` open, `g` package, `/` search, `1`/`2` tabs,
+  `Space` select, `⌘K` palette, `[` / `]` move a board card, `?` help.
+
+### My Applications (`#applications`)
+- **Mark Applied** (or `a`) moves a job here with today's date (editable), its apply link, the job package you
+  generated, and a **saved local copy of the JD** (kept after the posting disappears). **Add application** covers jobs
+  you applied to elsewhere (company, role, track, link, date, source, optional pasted JD).
+- **Board**: Applied → Online Assessment → Interviewing → Offer, plus Rejected · Ghosted · Withdrawn. Drag cards, or
+  focus one and press `[` / `]`. Every move is logged on the card's timeline with its date. Cards show the track, days
+  since applying, next step, follow-up state, referral, and "Posting closed".
+- **Table**: sortable, searchable, stage filter, **Export CSV** (formula-safe).
+- **Drawer**: stage bar, timeline, next step + date, contact, referral (suggests your connections), notes, link,
+  source, package used, saved JD.
+- **Helpers**: follow-up reminders (`applications.follow_up_days`, default 7–10 days after applying or your last
+  follow-up; you send them yourself), "Ghosted?" suggestions after `ghosted_after_days` (30) without an update — never
+  set automatically — and an upcoming-steps list.
+- **Duplicate guard**: before marking applied (and in Add application) you're warned about the same posting, a
+  near-duplicate title at the same company, or other applications there in the last `same_company_window_days`.
+- **Stats** per track: applications per week, response / OA / interview rates, offers, median days to first
+  response (inline SVG), plus response rates by source, company tier, score label and level.
+- CLI (SQLite copy, as of the last import): `python -m jobsearch.apps list | followups | stats | csv [FILE] | import FILE`.
+
+### Statuses, sync and feedback learning
+- Statuses, notes, track overrides and applications save in the browser instantly. **Export statuses** downloads
+  `jobsearch-statuses.json` (format 3). Each run imports the newest `jobsearch-statuses*.json` in
+  `statuses_import_dir` (default `~/Downloads`; `--statuses FILE` for a specific one, `--no-import` to skip) and merges
+  it into SQLite: per item, **SQLite wins unless the export's entry is newer**; application timelines are unioned.
+  Imported files are archived in `data/imports/`.
+- Each run writes `dashboard/sync.js` from SQLite, and the page merges it on load (newer wins), so clearing browser
+  data or opening the dashboard in another browser loses nothing that was exported.
+- **Feedback learning** (`feedback` in preferences): shortlist / package / applied / interviewing / offer are
+  positive; a skip teaches only what its reason is about (company → company, location → location, too senior/junior
+  → level, missing skills → those skills, not interested in role → skills and domain). Compensation, visa,
+  start-date, duplicate and "other" skips teach nothing; rejections are ignored. Each company / skill / domain /
+  location / level needs `min_evidence` labeled jobs, moves the score by at most `max_per_feature` per group and
+  `max_total` per job, and component weights move at most ±25%. Everything learned is listed under **Learned
+  adjustments** and in each job's Score tab. Learning never un-hides a filtered job; it suggests reviewing the rule.
+- **Referral finder**: put LinkedIn's official connections export at `inputs/Connections.csv` (LinkedIn → Settings →
+  Data privacy → Get a copy of your data → Connections). Companies are matched by brand (aliases, legal suffixes
+  stripped); "Google Cloud" for Google is shown only as a possible match. Cards get a "Referral · N" badge. Never
+  scrapes LinkedIn, never contacts anyone.
+- **Reopened roles**: a closed job you had shortlisted that reappears gets a banner, a badge and a log warning.
 - Data: `dashboard/data.js` holds compact summaries; per-job details load on demand from `dashboard/details/`.
 
 ## Two-track rules
@@ -216,10 +260,13 @@ then one line per keyword: `JD exact term | required|preferred|mentioned | match
 
 | Path | Contents |
 |---|---|
-| `data/jobs.db` | SQLite: `jobs`, `job_sources` (per-source presence), `runs`, `source_status`, `embeddings` cache, `resume_versions` |
+| `data/jobs.db` | SQLite: `jobs`, `job_sources` (per-source presence), `applications`, `application_events`, `runs`, `source_status`, `embeddings` cache, `resume_versions` |
 | `data/jd/` | full JD text per posting |
 | `data/logs/jobsearch.log` | JSON-lines log, rotated at 2 MB × 5 |
+| `data/applications/` | saved JD copies for your applications |
+| `data/imports/` | archived dashboard exports that were imported |
 | `dashboard/data.js` | generated `window.META` / `window.JOBS` |
+| `dashboard/sync.js` | generated from SQLite: your statuses, notes, overrides and applications (gitignored) |
 
 Dedupe: exact on (company, source job id); fuzzy cross-source on company + normalized title + location.
 A JD whose text hash changes is marked **updated**. A job is **closed** after 2 consecutive *successful* fetches
