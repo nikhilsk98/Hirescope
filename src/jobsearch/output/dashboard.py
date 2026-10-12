@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
 
+from ..config import ApplyToday
 from .packages import package_filename, render_package
 
 DISCLAIMER = ("Scores rank postings against your resume and preferences using local heuristics. "
@@ -53,7 +54,7 @@ def requirement_status(lines: list[str], keywords: list[dict]) -> list[list]:
     return out
 
 
-def _badges(job: dict, today: str, latest_day: str, tz: str, mine: set[str]) -> list[str]:
+def _badges(job: dict, today: str, latest_day: str, tz: str, mine: set[str], closing_days: int = 7) -> list[str]:
     sig = job.get("signals") or {}
     b = []
     if job["job_status"] == "updated":
@@ -63,7 +64,7 @@ def _badges(job: dict, today: str, latest_day: str, tz: str, mine: set[str]) -> 
     fh = sig.get("fresh_hours")
     if fh is not None and fh <= 48:
         b.append("fresh")
-    if job.get("deadline") and today <= job["deadline"] <= (date.fromisoformat(today) + timedelta(days=7)).isoformat():
+    if job.get("deadline") and today <= job["deadline"] <= (date.fromisoformat(today) + timedelta(days=closing_days)).isoformat():
         b.append("closing")
     if sig.get("ghost"):
         b.append("ghost")
@@ -82,7 +83,8 @@ def _badges(job: dict, today: str, latest_day: str, tz: str, mine: set[str]) -> 
     return b
 
 
-def build_entry(job: dict, tz: str, tier: int | None, today: str, latest_day: str, mine: set[str]) -> dict:
+def build_entry(job: dict, tz: str, tier: int | None, today: str, latest_day: str, mine: set[str],
+                closing_days: int = 7) -> dict:
     flags = {k: v.get("value") for k, v in (job.get("flags") or {}).items()}
     sig = job.get("signals") or {}
     e = {
@@ -111,7 +113,7 @@ def build_entry(job: dict, tz: str, tier: int | None, today: str, latest_day: st
         "label": job.get("label"),
         "filtered": bool(job.get("filtered")),
         "flags": flags,
-        "badges": _badges(job, today, latest_day, tz, mine),
+        "badges": _badges(job, today, latest_day, tz, mine, closing_days),
         "terms": job.get("terms") or [],
         "deadline": job.get("deadline"),
         "salary": ({"min": job["salary_min"], "max": job["salary_max"], "currency": job.get("salary_currency")}
@@ -190,11 +192,12 @@ def skill_gaps(visible: list[dict], now: datetime) -> dict:
     return out
 
 
-def apply_today(visible: list[dict], today: str, per_track: int = 20) -> dict:
-    """Candidates for the per-track Apply Today queue (the page drops applied/skipped ones and shows ~5).
-    Favors last-24h Strong and Stretch matches, then deadline urgency."""
+def apply_today(visible: list[dict], today: str, per_track: int = 20, cfg: ApplyToday | None = None) -> dict:
+    """Candidates for the per-track Apply Today queue (the page drops applied/skipped ones and shows
+    preferences apply_today.size). Score + urgency points from preferences apply_today: fresh, deadline, Strong."""
+    a = cfg or ApplyToday()
     out = {}
-    soon = (date.fromisoformat(today) + timedelta(days=7)).isoformat()
+    soon = (date.fromisoformat(today) + timedelta(days=a.closing_soon_days)).isoformat()
     for track in ("coop_intern", "full_time"):
         cands = []
         for j in visible:
@@ -204,17 +207,17 @@ def apply_today(visible: list[dict], today: str, per_track: int = 20) -> dict:
             if j.get("deadline") and j["deadline"] < today:
                 continue
             fh = (j.get("signals") or {}).get("fresh_hours")
-            urgency = 10 if fh is not None and fh <= 24 else 5 if fh is not None and fh <= 72 else 0
+            urgency = a.fresh_24h if fh is not None and fh <= 24 else a.fresh_72h if fh is not None and fh <= 72 else 0
             if j.get("deadline") and j["deadline"] <= soon:
-                urgency += 6
+                urgency += a.closing_soon
             if j.get("label") == "Strong":
-                urgency += 5
+                urgency += a.strong
             cands.append((j["score"] + urgency, j["id"]))
         out[track] = [pk for _, pk in sorted(cands, reverse=True)[:per_track]]
     return out
 
 
-def missed_matches(jobs: list[dict], tier_of, now: datetime, limit: int = 60) -> list[int]:
+def missed_matches(jobs: list[dict], tier_of, now: datetime, limit: int = 60, rules=None) -> list[int]:
     """Weekly false-negative review: low-scored or title-filtered jobs from tier 1/2 companies in the last 7 days."""
     from ..match.prefilter import candidate
     cutoff = (now - timedelta(days=7)).isoformat()
@@ -224,7 +227,7 @@ def missed_matches(jobs: list[dict], tier_of, now: datetime, limit: int = 60) ->
             continue
         if not j.get("filtered") and j.get("label") == "Weak":
             picks.append((j.get("qual_score") or 0, j["id"]))
-        elif j.get("filtered") and candidate(j, j.get("filter_reasons") or []):
+        elif j.get("filtered") and candidate(j, j.get("filter_reasons") or [], rules):
             picks.append((0, j["id"]))
     return [pk for _, pk in sorted(picks, reverse=True)[:limit]]
 
@@ -273,7 +276,8 @@ def select_visible(jobs: list[dict], top_n: int) -> list[dict]:
 
 def write_data_js(path: Path, jobs: list[dict], meta: dict, tz: str, resume_hash: str, top_n: int,
                   tier_of, my_companies: set[str] | None = None, max_filtered: int = 4000,
-                  now: datetime | None = None, h1b: dict | None = None) -> dict:
+                  now: datetime | None = None, h1b: dict | None = None, apply_cfg: ApplyToday | None = None,
+                  title_rules=None) -> dict:
     """jobs: decoded open job rows (scored). top_n visible jobs per track get details; filtered ones a summary.
 
     The Filtered tab lists missed-match candidates and software-relevant filtered jobs first (title matched but
@@ -291,7 +295,8 @@ def write_data_js(path: Path, jobs: list[dict], meta: dict, tz: str, resume_hash
     for j in filtered:
         key = re.sub(r"[:(—].*$", "", (j.get("filter_reasons") or ["?"])[0]).strip()
         reason_counts[key] = reason_counts.get(key, 0) + 1
-    missed = missed_matches(jobs, tier_of, now)
+    apply_cfg = apply_cfg or ApplyToday()
+    missed = missed_matches(jobs, tier_of, now, rules=title_rules)
     missed_set = set(missed)
     filtered.sort(key=lambda j: (j["id"] not in missed_set,
                                  any(r.startswith("Title does not match") for r in j.get("filter_reasons") or []),
@@ -300,7 +305,8 @@ def write_data_js(path: Path, jobs: list[dict], meta: dict, tz: str, resume_hash
 
     days = sorted({local_day(j["first_seen"], tz) for j in visible}, reverse=True)
     latest_day = days[0] if days else today
-    entries = [build_entry(j, tz, tier_of(j), today, latest_day, mine) for j in [*visible, *shown_filtered]]
+    entries = [build_entry(j, tz, tier_of(j), today, latest_day, mine, apply_cfg.closing_soon_days)
+               for j in [*visible, *shown_filtered]]
     shown_ids = {e["id"] for e in entries}
     for e in entries:
         e["similar"] = [i for i in e.get("similar", []) if i in visible_ids]
@@ -328,7 +334,8 @@ def write_data_js(path: Path, jobs: list[dict], meta: dict, tz: str, resume_hash
             "filtered_count": len(filtered), "filtered_listed": len(shown_filtered),
             "filtered_reasons": dict(sorted(reason_counts.items(), key=lambda kv: -kv[1])),
             "skill_gaps": skill_gaps(visible, now),
-            "apply_today": {t: [i for i in ids if i in shown_ids] for t, ids in apply_today(visible, today).items()},
+            "apply_today": {t: [i for i in ids if i in shown_ids] for t, ids in apply_today(visible, today, cfg=apply_cfg).items()},
+            "ui_cfg": {"apply_today_size": apply_cfg.size, "closing_soon_days": apply_cfg.closing_soon_days},
             "missed": [i for i in missed if i in shown_ids],
             "h1b": h1b or {},
             "learned": meta.get("learned") or {"status": "No statuses imported yet.", "adjustments": []},

@@ -10,7 +10,7 @@
     rejected: "Rejected", ghosted: "Ghosted", withdrawn: "Withdrawn" };
   const ACTIVE = ["applied", "oa", "interviewing", "offer"];
   const RESPONSES = ["oa", "interviewing", "offer", "rejected"];
-  const NEAR_DUPLICATE = 85;
+  const NEAR_DUPLICATE = 85;   // default only; the page passes preferences applications.near_duplicate_ratio
   const CSV_COLUMNS = ["company", "title", "track", "stage", "applied_date", "days_since_applied", "next_step",
     "next_step_date", "follow_up", "contact", "referral", "source", "link", "package", "notes"];
 
@@ -52,13 +52,13 @@
   const tokenSortRatio = (a, b) => ratio(a.split(" ").filter(Boolean).sort().join(" "), b.split(" ").filter(Boolean).sort().join(" "));
   const ckey = (s) => (s || "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
 
-  function duplicateWarnings(company, title, jobKey, apps, today, windowDays, excludeId) {
-    const out = []; const recent = []; const ck = ckey(company); const w = windowDays ?? 30;
+  function duplicateWarnings(company, title, jobKey, apps, today, windowDays, excludeId, nearRatio) {
+    const out = []; const recent = []; const ck = ckey(company); const w = windowDays ?? 30; const near = nearRatio ?? NEAR_DUPLICATE;
     for (const a of apps) {
       if (a.deleted || a.id === excludeId) continue;
       if (jobKey && a.job_key === jobKey) { out.push({ kind: "same_job", app_id: a.id, message: `You already applied to this posting on ${a.applied_date || "?"}` }); continue; }
       if (ckey(a.company) !== ck) continue;
-      if (tokenSortRatio(normTitle(a.title), normTitle(title)) >= NEAR_DUPLICATE) {
+      if (tokenSortRatio(normTitle(a.title), normTitle(title)) >= near) {
         out.push({ kind: "near_duplicate", app_id: a.id, message: `Similar role at ${a.company}: “${a.title}” (applied ${a.applied_date || "?"})` }); continue;
       }
       const d = day(a.applied_date);

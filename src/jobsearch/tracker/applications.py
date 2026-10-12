@@ -18,7 +18,7 @@ STAGE_LABELS = {"applied": "Applied", "oa": "Online Assessment", "interviewing":
                 "rejected": "Rejected", "ghosted": "Ghosted", "withdrawn": "Withdrawn"}
 ACTIVE = ("applied", "oa", "interviewing", "offer")
 RESPONSES = ("oa", "interviewing", "offer", "rejected")   # the company answered
-NEAR_DUPLICATE = 85
+NEAR_DUPLICATE = 85   # default only; callers pass preferences applications.near_duplicate_ratio
 CSV_COLUMNS = ("company", "title", "track", "stage", "applied_date", "days_since_applied", "next_step",
                "next_step_date", "follow_up", "contact", "referral", "source", "link", "package", "notes")
 
@@ -63,7 +63,8 @@ def _norm_title(t: str) -> str:
 
 
 def duplicate_warnings(company: str, title: str, job_key: str | None, apps: list[dict], today: date,
-                       window_days: int = 30, exclude_id: str | None = None) -> list[dict]:
+                       window_days: int = 30, exclude_id: str | None = None,
+                       near_ratio: int = NEAR_DUPLICATE) -> list[dict]:
     """Warn before applying again: the same posting, a near-duplicate role, or other recent applications at the
     same company. Returns [{kind: same_job|near_duplicate|same_company, app_id, message}]."""
     out = []
@@ -79,7 +80,7 @@ def duplicate_warnings(company: str, title: str, job_key: str | None, apps: list
         if " ".join((a.get("company") or "").casefold().split()) != ck:
             continue
         sim = fuzz.token_sort_ratio(_norm_title(a.get("title") or ""), _norm_title(title))
-        if sim >= NEAR_DUPLICATE:
+        if sim >= near_ratio:
             out.append({"kind": "near_duplicate", "app_id": a["id"],
                         "message": f"Similar role at {a['company']}: “{a['title']}” (applied "
                                    f"{a.get('applied_date') or '?'})"})

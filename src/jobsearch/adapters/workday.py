@@ -24,13 +24,8 @@ from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, Sour
 from .util import join_locations, parse_dt
 
 PAGE = 20
-# Workday's search tokenizes "co-op" into "co" OR "op" (matches nearly every job) and "intern" also hits
-# "International"/"Internal", so co-op/intern roles come from the site's own early-career facets instead.
-# Multi-word searches are AND-ed (Lowe's: "software engineer" 51 vs "software" 90), so role phrases stay precise.
-# ("developer" alone also matches "business development", so only developer phrases are searched.)
-QUERIES = ["software", "software developer", "web developer", "application developer", "internship", "new grad",
-           "cloud engineer", "platform engineer", "devops", "data engineer", "full stack", "backend", "frontend",
-           "site reliability", "infrastructure engineer"]
+# Role searches come from config/title_rules.yaml -> search_queries.workday (why those phrases: see that file).
+# Co-op/intern roles come from each site's own early-career facets.
 _US = {"united states of america", "united states", "usa", "us"}
 _EARLY = re.compile(r"\b(intern|interns|internship|co-?op|student|university|college|graduate|early career|campus|"
                     r"apprentice)", re.I)
@@ -125,7 +120,7 @@ class WorkdayAdapter(Adapter):
         applied = {facet[0]: [facet[1]]} if facet else {}
         max_pages = 50 if ctx.full else min(ctx.max_pages, 10)
 
-        searches = [(q, applied) for q in QUERIES]
+        searches = [(q, applied) for q in ctx.queries.get("workday", [])]
         for param, fid, desc in _early_career_facets(first.get("facets") or []):
             searches.append((f"[{desc}]", {**applied, param: [fid]}))
         items: dict[str, dict] = {}

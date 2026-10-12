@@ -21,6 +21,8 @@ class Salary(BaseModel):
 class WorkAuth(BaseModel):
     needs_sponsorship: bool | None = None
     us_citizen: bool | None = None
+    # co-op/intern posting that states "no sponsorship": flag = keep it with "check CPT/OPT"; filter = hide it
+    coop_no_sponsorship: Literal["flag", "filter"] = "flag"
 
 
 class CompanyTiers(BaseModel):
@@ -28,6 +30,8 @@ class CompanyTiers(BaseModel):
     tier2: list[str] = []
     tier3: list[str] = []
     excluded: list[str] = []
+    check_every_hours: dict[int, float] = {1: 0, 2: 20, 3: 70}   # 0 = every run
+    max_pages: dict[int, int] = {1: 100, 2: 25, 3: 10}           # listing pages per company per run
 
     def tier_of(self, company: str) -> int | None:
         key = company.casefold()
@@ -101,14 +105,19 @@ class Feedback(BaseModel):
     max_total: float = 6            # points, per job (all learned adjustments together)
     weight_nudge_max: float = 0.25  # component weights move at most +/-25% of their configured value
     weight_min_jobs: int = 5        # ...and only with this many positive and negative jobs
+    positive_weights: dict[str, float] = {"shortlisted": 1.0, "package exported": 1.0, "applied": 1.0,
+                                          "interviewing": 1.0, "offer": 1.0, "interested": 0.5}
+    # skip reason -> the feature groups it teaches (others teach nothing)
+    reason_groups: dict[str, list[str]] = {"company": ["company"], "location": ["location"], "too senior": ["level"],
+                                           "too junior": ["level"], "missing skills": ["missing_skills"],
+                                           "not interested in role": ["skills", "domain"]}
 
 
 class Aggregator(BaseModel):
     """Optional paid/free-tier job-search API (JSearch on RapidAPI, or SerpAPI Google Jobs). Off by default."""
     enabled: bool = False
     provider: str = "jsearch"       # jsearch | serpapi (key in .env: JSEARCH_API_KEY / SERPAPI_API_KEY)
-    queries: list[str] = ["software engineer new grad 2027", "software engineer intern spring 2027",
-                          "software engineering co-op 2027", "entry level software engineer"]
+    queries: list[str] = []         # your search queries (set in preferences.yaml)
     date_posted: str = "week"       # jsearch: today | 3days | week | month
 
 
@@ -126,13 +135,49 @@ class Notifications(BaseModel):
     enabled: bool = True
     early_bird_hours: int = 48       # "early bird": Strong matches posted within this many hours
     digest_weekday: str = "Sunday"   # weekly digest (data/digests/) on the first run of this day
+    season_remind_days: int = 21     # hiring seasons: remind this many days before a predicted window
 
 
 class Applications(BaseModel):
     follow_up_days: tuple[int, int] = (7, 10)   # reminder window after applying (or after your last follow-up)
     ghosted_after_days: int = 30                 # suggest "Ghosted" (you confirm; never automatic)
     same_company_window_days: int = 30           # duplicate guard: other applications at the company this recent
+    near_duplicate_ratio: int = 85               # duplicate guard: title similarity (0-100) that counts as the same role
 
+
+class Scoring(BaseModel):
+    """Component scores (0-100) and penalties used by match/score.py."""
+    soft_rule_penalty: float = 5            # per failed soft rule
+    neutral_qualification: float = 50       # qualification when there is no JD text to compare against
+    yoe_penalty_per_year: float = 8         # per year above yoe.match_max
+    yoe_penalty_cap: float = 30
+    citizenship_penalty: float = 30         # only when work_authorization.us_citizen is not set
+    clearance_penalty: float = 10           # only when work_authorization.us_citizen is not set
+    title_fit: dict[str, float] = {"core": 100, "coop": 100, "related": 85, "semantic": 70}
+    level_fit: dict[str, float] = {"intern": 100, "entry": 100, "mid": 100, "senior": 60, "other": 30}
+    yoe_fit: dict[str, float] = {"match": 100, "stretch": 60, "over": 20}   # <= match_max / <= stretch_max / above
+    grad_fit: dict[str, float] = {"match": 100, "mismatch": 25}
+    degree_above_yours: float = 40          # JD asks for a higher degree than your resume shows
+    location_fit: dict[str, float] = {"preferred": 100, "remote_us": 90, "other_us": 75, "no_preferences": 100}
+    tier_fit: dict[int, float] = {1: 100, 2: 75, 3: 50}
+
+
+class ApplyToday(BaseModel):
+    """The per-track "Apply Today" queue: Strong/Stretch jobs ranked by score + these urgency points."""
+    size: int = 5                   # shown per track
+    fresh_24h: float = 10
+    fresh_72h: float = 5
+    closing_soon: float = 6         # deadline within closing_soon_days
+    strong: float = 5
+    closing_soon_days: int = 7      # also the "Closing soon" badge / view
+
+
+class Health(BaseModel):
+    """Source health alerts (ops/health.py)."""
+    drop: float = 0.70              # alert when a source lists this much less than its recent average
+    min_history: int = 2            # successful past runs needed before judging
+    min_avg_zero: float = 3         # "returned 0" alerts only for sources that usually list at least this many
+    min_avg_drop: float = 10        # drop alerts only for sources this big
 
 class Weights(BaseModel):
     qualification: float = 0.65
@@ -149,16 +194,17 @@ class Thresholds(BaseModel):
 
 
 class CoopTrack(BaseModel):
+    """Your dates live in preferences.yaml; unset = no start-window rule."""
     enabled: bool = True
-    start_window: tuple[str, str] = ("2026-12", "2027-03")   # YYYY-MM inclusive
-    boost_terms: list[str] = ["Spring 2027", "Winter 2027", "January 2027", "Jan 2027"]
+    start_window: tuple[str, str] | None = None   # YYYY-MM inclusive
+    boost_terms: list[str] = []
     filter_summer_only: bool = True
 
 
 class FullTimeTrack(BaseModel):
     enabled: bool = True
-    start_from: str = "2027-05"
-    boost_terms: list[str] = ["Class of 2027", "2027 start", "New Grad 2027", "2027 New Grad"]
+    start_from: str | None = None                 # YYYY-MM; unset = no start-date rule
+    boost_terms: list[str] = []
 
 
 class Tracks(BaseModel):
@@ -196,6 +242,8 @@ class Preferences(BaseModel):
     work_authorization: WorkAuth = WorkAuth()
     company_tiers: CompanyTiers = CompanyTiers()
     max_posting_age_days: int | None = 60
+    grad_window_slack_months: int = 2          # a stated graduation window still matches this many months either side
+    excluded_employment_types: list[str] = ["contract", "part_time", "temporary"]   # rules.employment_type
     rules: Rules = Rules()
     weights: Weights = Weights()
     thresholds: Thresholds = Thresholds()
@@ -210,6 +258,9 @@ class Preferences(BaseModel):
     backups: Backups = Backups()
     schedule: Schedule = Schedule()
     notifications: Notifications = Notifications()
+    scoring: Scoring = Scoring()
+    apply_today: ApplyToday = ApplyToday()
+    health: Health = Health()
     connections_csv: str = "inputs/Connections.csv"   # LinkedIn data export (optional): referral finder
     top_n: int = 1000                         # per track
     timezone: str = "America/New_York"
@@ -244,6 +295,13 @@ class TitleRules(BaseModel):
     coop_role_words: list[str] = []
     fuzzy_threshold: int = 90
     employment_type_words: dict[str, list[str]] = {}
+    new_grad_patterns: list[str] = []      # regexes: a title that is a New Grad / early-career role
+    non_level_phrases: list[str] = []      # phrases with level-like words that are not levels
+    role_profile: list[str] = []           # meaning-based pre-filter: what you are looking for
+    contrast_profiles: list[str] = []      # ...and technical roles you are not
+    tech_hint_words: list[str] = []        # a filtered title needs one of these to be rescued by meaning
+    posting_role_words: list[str] = []     # free-text posts (HN): words that make a header segment a role
+    search_queries: dict[str, list] = {}   # role keywords searched on query-based sources (workday, ...)
 
 
 def _yaml(path: Path):

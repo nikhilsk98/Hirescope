@@ -82,3 +82,68 @@ employment_type_words:
   internship: [intern, internship]
   co-op: [co op]
   new_grad: [new graduate, university graduate, early career, entry level, campus]
+
+# --- New Grad / early-career titles (regexes, case-insensitive). Matching full-time roles get the New Grad boost
+# (preferences boosts.new_grad) and the "New Grad" badge; also used by the hiring-season tracker.
+new_grad_patterns:
+  - 'new grad(uate)?s?'
+  - 'university grad(uate)?'
+  - 'college grad(uate)?'
+  - 'early career'
+  - 'entry[- ]level'
+  - 'class of 20\d\d'
+  - 'graduate (software|engineer|developer|program|programme)'
+  - 'rotational'
+  - 'recent grad(uate)?s?'
+
+# Phrases that contain level-like words but are not levels ("staff" in "member of technical staff").
+non_level_phrases: [member of technical staff]
+
+# --- Meaning-based pre-filter (preferences prefilter: threshold / margin) --------------------------------
+# What you are looking for: a hidden job whose title + opening is close to one of these (and closer than to any
+# contrast profile) is rescued. Your resume's summary lines are added at runtime.
+role_profile:
+  - Software engineer building backend services, APIs and distributed systems
+  - Full-stack web developer building React and Node.js applications
+  - Frontend engineer building web user interfaces in JavaScript and TypeScript
+  - Software engineering intern or co-op student writing production code
+  - Cloud and platform engineer building infrastructure, CI/CD and developer tooling
+  - Software developer writing, testing and deploying application code
+  - New graduate software engineer joining an engineering team
+# Technical roles that are NOT this search.
+contrast_profiles:
+  - Electrical or hardware engineer designing circuits, boards and power electronics
+  - Mechanical, manufacturing, process or industrial engineer working on physical products
+  - Digital IC, ASIC, FPGA or chip design and verification engineer
+  - Civil, structural, project or construction engineer
+  - Sales engineer, solutions consultant or customer-facing technical support
+  - Lab technician, test technician or field service technician
+  - Research scientist publishing papers in a research lab
+# A rescue needs one of these (regex fragments, whole words) in the title: generic "Engineering Intern" / "Systems
+# Engineer" / "Design Engineer" titles are too often mechanical, electrical or process roles.
+tech_hint_words: [software, 'develop(er|ers|ment engineer\w*)', 'programm\w*', cloud, devops, devsecops, platform,
+  'full[- ]?stack', backend, 'back[- ]end', frontend, 'front[- ]end', web, 'data engineer\w*', mts, technical staff,
+  technology, 'application(s)?', java, python, '\.?net', salesforce, sde, swe, sre, site reliability,
+  infrastructure, automation, integration, ios, android, mobile, coding, computer science, it]
+
+# --- Free-text job posts (Hacker News Who's Hiring): a header segment naming one of these is a role --------
+posting_role_words: [software, 'engineer(ing)?', developer, swe, sde, programmer, 'full[- ]?stack', 'front[- ]?end',
+  'back[- ]?end', devops, sre, platform, infrastructure, mobile, ios, android, data engineer, ml engineer,
+  machine learning engineer, 'intern(ship)?', 'co-?op', new grad, founding engineer]
+
+# --- Role keywords searched on query-based sources ---------------------------------------------------------
+search_queries:
+  # Workday: "co-op" tokenizes to "co" OR "op" and "intern" also hits "International", so co-op/intern roles come
+  # from each site's early-career facets instead. Multi-word searches are AND-ed, so phrases stay precise;
+  # "developer" alone matches "business development", so only developer phrases are searched.
+  workday: [software, software developer, web developer, application developer, internship, new grad,
+            cloud engineer, platform engineer, devops, data engineer, full stack, backend, frontend,
+            site reliability, infrastructure engineer]
+  # SmartRecruiters `q` full-text search ("co-op" / "new grad" match far too broadly, so they are not searched)
+  smartrecruiters: [software, developer, intern, engineer]
+  # Amazon search.json: each item is one query (category[] or base_query)
+  amazon:
+    - {"category[]": software-development}
+    - {base_query: intern}
+    - {base_query: co-op}
+    - {base_query: new grad}

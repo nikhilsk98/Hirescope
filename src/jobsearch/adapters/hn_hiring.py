@@ -12,6 +12,7 @@ from __future__ import annotations
 import html
 import json
 import re
+from functools import lru_cache
 from datetime import datetime, timezone
 
 from ..config import Company
@@ -20,9 +21,14 @@ from .canonical import canonical_key
 
 API = "https://hacker-news.firebaseio.com/v0"
 THREAD_TITLE = re.compile(r"^Ask HN: Who is hiring\?", re.I)
-ROLE = re.compile(r"\b(software|engineer(?:ing)?|developer|swe|sde|programmer|full[- ]?stack|front[- ]?end|back[- ]?end|"
-                  r"devops|sre|platform|infrastructure|mobile|ios|android|data engineer|ml engineer|machine learning "
-                  r"engineer|intern(?:ship)?|co-?op|new grad|founding engineer)\b", re.I)
+
+
+@lru_cache(maxsize=1)
+def _role_re() -> re.Pattern:
+    """A header segment naming a software role: config/title_rules.yaml -> posting_role_words."""
+    from ..config import load_title_rules
+    words = load_title_rules().posting_role_words
+    return re.compile(r"\b(" + "|".join(words) + r")\b", re.I) if words else re.compile(r"(?!)")
 NOT_ROLE = re.compile(r"\b(remote|onsite|on-site|hybrid|full[- ]?time|part[- ]?time|contract|visa|salary|equity|"
                       r"\$|€|£|https?://|www\.)", re.I)
 LOCATION = re.compile(r"\b(remote|onsite|on-site|hybrid|usa?|united states|new york|nyc|san francisco|sf|bay area|"
@@ -51,13 +57,14 @@ def parse_post(item: dict) -> dict | None:
     if len(segs) < 2:
         return None
     company = re.sub(r"\s*\((?:YC|yc)[^)]*\)\s*$", "", segs[0]).strip()
-    if not company or len(company) > 80 or ROLE.search(company) and len(segs) < 3:
+    role = _role_re()
+    if not company or len(company) > 80 or role.search(company) and len(segs) < 3:
         return None
     roles, locs = [], []
     for s in segs[1:]:
         if re.match(r"https?://", s):
             continue
-        if ROLE.search(s) and not (NOT_ROLE.search(s) and not re.search(r"engineer|developer|intern", s, re.I)):
+        if role.search(s) and not (NOT_ROLE.search(s) and not re.search(r"engineer|developer|intern", s, re.I)):
             roles.append(s)
         elif LOCATION.search(s) or re.search(r"remote|onsite|hybrid", s, re.I):
             locs.append(s)

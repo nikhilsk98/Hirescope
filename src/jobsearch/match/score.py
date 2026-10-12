@@ -17,13 +17,7 @@ from ..extract.skills import extract_skills
 from .rules import RuleResult
 from .semantic import SemanticResult
 
-PENALTY_SOFT_RULE = 5
-NEUTRAL_QUALIFICATION = 50.0   # used when there is no JD text to match against
-PENALTY_NO_SPONSORSHIP = 25
-PENALTY_CITIZENSHIP = 30
-PENALTY_CLEARANCE = 10
-PENALTY_YOE_PER_YEAR = 8
-PENALTY_YOE_CAP = 30
+# All points and component scores come from preferences.yaml -> scoring (config.Scoring).
 _DEGREE_RANK = {"Bachelor's": 1, "Master's": 2, "PhD": 3}
 
 
@@ -124,6 +118,7 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
               discovered_ok: bool = False, jd_text: str = "",
               learned: list[tuple[str, float]] | None = None) -> ScoreResult:
     now = now or datetime.now(timezone.utc)
+    sc = prefs.scoring
     gaps: list[str] = []
     resume_skills = set(resume.skills)
 
@@ -153,16 +148,17 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     # experience, none for mid roles because of graduation status). Senior is a Stretch.
     level_bits, level_notes = [], []
     if rules.title and rules.title.kind != "none":
-        level_bits.append({"related": 85, "semantic": 70}.get(rules.title.kind, 100))
+        level_bits.append(sc.title_fit.get(rules.title.kind, sc.title_fit.get("core", 100)))
         level_notes.append(f"title ~ {rules.title.matched} ({rules.title.kind})")
     lvl = job.get("level") or "unknown"
     if lvl != "unknown":
-        level_bits.append({"intern": 100, "entry": 100, "mid": 100, "senior": 60}.get(lvl, 30))
+        level_bits.append(sc.level_fit.get(lvl, sc.level_fit.get("other", 30)))
         level_notes.append(f"level {lvl}")
     yoe = job.get("yoe_required")
     y = prefs.yoe
     if yoe is not None:
-        level_bits.append(100 if yoe <= y.match_max else 60 if yoe <= y.stretch_max else 20)
+        level_bits.append(sc.yoe_fit["match"] if yoe <= y.match_max else
+                          sc.yoe_fit["stretch"] if yoe <= y.stretch_max else sc.yoe_fit["over"])
         level_notes.append(f"{yoe:g}+ yrs required")
         if yoe > y.match_max:
             gaps.append(f"Requires {yoe:g}+ years; your match window is 0–{y.match_max:g}")
@@ -170,14 +166,14 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     my_grad = int(prefs.graduation_date[:4]) if prefs.graduation_date else None
     if grad and my_grad:
         ok = my_grad in grad
-        level_bits.append(100 if ok else 25)
+        level_bits.append(sc.grad_fit["match"] if ok else sc.grad_fit["mismatch"])
         level_notes.append(f"grad year(s) {grad}")
         if not ok:
             gaps.append(f"Targets graduation year(s) {grad}; yours is {my_grad}")
     deg = job.get("degree")
     if deg and _resume_degree(resume) and _DEGREE_RANK[deg] > _resume_degree(resume):
         gaps.append(f"Mentions {deg} degree; resume shows a lower degree")
-        level_bits.append(40)
+        level_bits.append(sc.degree_above_yours)
     level_score = sum(level_bits) / len(level_bits) if level_bits else None
 
     w = prefs.weights.qualification_parts
@@ -190,7 +186,7 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     if skills_score is None and sem.score is None:
         # Nothing to compare the resume against (no JD): the title alone is not evidence of fit.
         # Use a neutral prior so the job is neither a match nor a rejection.
-        qual = NEUTRAL_QUALIFICATION
+        qual = sc.neutral_qualification
         qual_missing = [*qual_missing, "qualification (no JD text)"]
 
     # --- Preference ----------------------------------------------------
@@ -199,21 +195,22 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         loc_score = 0.0
         if rules.location_ok:
             pref_hit = preferred_match(job.get("location"), prefs.preferred_locations)
+            lf = sc.location_fit
             if pref_hit:
-                loc_score, loc_detail = 100.0, f"preferred: {pref_hit}"
+                loc_score, loc_detail = lf["preferred"], f"preferred: {pref_hit}"
             elif job.get("remote_us"):
-                loc_score, loc_detail = 90.0, "remote (US)"
+                loc_score, loc_detail = lf["remote_us"], "remote (US)"
             else:
-                loc_score = 100.0 if not prefs.preferred_locations else 75.0
+                loc_score = lf["no_preferences"] if not prefs.preferred_locations else lf["other_us"]
                 loc_detail = "in the US"
     tier = prefs.company_tiers.tier_of(job["company"]) or (company.tier if company else None)
     # a company outside your tiers and the seed list is a known fact (not missing data): treat it as tier 3
-    tier_score = {1: 100, 2: 75, 3: 50}.get(tier or 3)
+    tier_score = sc.tier_fit.get(tier or 3, sc.tier_fit.get(3))
 
     fresh_pts, fresh_detail, age_h = freshness(job, prefs, now, discovered_ok)
 
     et = job.get("employment_type")
-    et_score = None if not et else (0.0 if et in ("contract", "part_time", "temporary") else 100.0)
+    et_score = None if not et else (0.0 if et in prefs.excluded_employment_types else 100.0)
 
     sal_score, sal_detail = None, "Salary not stated"
     s = prefs.salary
@@ -232,11 +229,11 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     pref, pref_missing = _weighted(pref_parts)
 
     # --- Penalties -----------------------------------------------------
-    penalties = [{"reason": r, "points": PENALTY_SOFT_RULE} for r in rules.soft_issues
+    penalties = [{"reason": r, "points": sc.soft_rule_penalty} for r in rules.soft_issues
                  if not r.startswith("Requires ")]  # YOE gets its own scaled penalty below
     if yoe is not None and yoe > y.match_max:
         penalties.append({"reason": f"Requires {yoe:g}+ years (match window 0–{y.match_max:g})",
-                          "points": min(PENALTY_YOE_CAP, PENALTY_YOE_PER_YEAR * (yoe - y.match_max))})
+                          "points": min(sc.yoe_penalty_cap, sc.yoe_penalty_per_year * (yoe - y.match_max))})
     flags = job.get("flags") or {}
     auth = prefs.work_authorization
     # Explicit no-sponsorship / citizens-only / clearance are hard rules (rules._work_authorization); what reaches
@@ -244,9 +241,9 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     if rules.signals.get("check_cpt_opt"):
         gaps.append("States no visa sponsorship — check whether CPT/OPT is allowed for this co-op/internship")
     if auth.us_citizen is None and flags.get("citizenship", {}).get("value", "").startswith(("US citizenship", "US person")):
-        penalties.append({"reason": "Citizenship / US person requirement (your status isn't set)", "points": PENALTY_CITIZENSHIP})
+        penalties.append({"reason": "Citizenship / US person requirement (your status isn't set)", "points": sc.citizenship_penalty})
     if flags.get("clearance", {}).get("value") == "Clearance required" and auth.us_citizen is None:
-        penalties.append({"reason": "Security clearance required", "points": PENALTY_CLEARANCE})
+        penalties.append({"reason": "Security clearance required", "points": sc.clearance_penalty})
 
     ghosts = ghost_signals(job, prefs, now, jd_text)
     penalties += [{"reason": f"Ghost risk: {r}", "points": pts} for r, pts in ghosts]

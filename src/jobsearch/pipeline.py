@@ -40,8 +40,6 @@ log = logging.getLogger(__name__)
 # Bump when extraction logic changes; stored jobs are then re-extracted from their saved title/location/JD.
 EXTRACT_VERSION = "2026-10-12.14"  # .14: "2027 Summer Intern" term order; .13: "Toronto, CA" = Canada
 EXTRACT_CONFIGS = ("title_rules.yaml", "levels.yaml", "locations.yaml", "skills_synonyms.yaml", "ats_keywords.yaml")
-TIER_INTERVAL_HOURS = {1: 0, 2: 20, 3: 70}       # tier 1 every run, tier 2 daily, tier 3 every 3 days
-TIER_MAX_PAGES = {1: 100, 2: 25, 3: 10}
 DIRECTORY_KEY = "ats_directory:simplify"
 WORKERS = 16
 # Each source family gets its own worker pool so a slow shared host (e.g. api.smartrecruiters.com, where
@@ -232,8 +230,10 @@ def tier_of(company: Company, cfg: Config) -> int:
     return cfg.prefs.company_tiers.tier_of(company.name) or company.tier
 
 
-def due(conn, company: Company, label: str, tier: int, now: datetime) -> bool:
-    hours = TIER_INTERVAL_HOURS.get(tier, 70)
+def due(conn, company: Company, label: str, tier: int, now: datetime, every: dict[int, float] | None = None) -> bool:
+    """Tier schedule: preferences company_tiers.check_every_hours (0 = every run)."""
+    every = every or {1: 0, 2: 20, 3: 70}
+    hours = every.get(tier, max(every.values()))
     if hours == 0:
         return True
     last = db.last_ok(conn, company.name, label)
@@ -282,11 +282,11 @@ def plan(conn, cfg: Config, watch: list[WatchItem], *, only_company: str | None 
         t = tier_of(c, cfg)
         if quick and t != 1:
             continue
-        if force_all or only_source or quick or due(conn, c, label, t, now):
+        if force_all or only_source or quick or due(conn, c, label, t, now, cfg.prefs.company_tiers.check_every_hours):
             planned.append(Planned(c, None, f"tier {t}"))
         else:
             skipped.append(SourceOutcome(c.name, c.source, False, status="skipped", origin=c.origin, tier=t,
-                                         notes=[f"tier {t}: not due (checked every {TIER_INTERVAL_HOURS[t]}h)"]))
+                                         notes=[f"tier {t}: not due (checked every {cfg.prefs.company_tiers.check_every_hours.get(t)}h)"]))
     if only_source:
         planned = [p for p in planned if p.company is not None or p.watch is not None]
     return planned, skipped
@@ -310,7 +310,7 @@ def _context(conn, cfg: Config, company: Company, label: str, multi: bool, tier:
     full = tier == 1 or company.origin == "my_companies"
     return FetchContext(
         full=full,
-        max_pages=TIER_MAX_PAGES.get(tier, 10),
+        max_pages=cfg.prefs.company_tiers.max_pages.get(tier, min(cfg.prefs.company_tiers.max_pages.values())),
         want=lambda title, loc: quick_relevant(title, loc, cfg.prefs, cfg.title_rules),
         known=db.known_listings(conn, label, None if multi else company.name),
         known_relevant=db.relevant_listings(conn, label, None if multi else company.name),
@@ -549,9 +549,9 @@ def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: E
     # meaning-based pre-filter: rescue relevant jobs with unusual titles
     rescued = 0
     if prefs.prefilter.enabled:
-        cands = [j for j in jobs if results[j["id"]].hidden and candidate(j, results[j["id"]].reasons)]
+        cands = [j for j in jobs if results[j["id"]].hidden and candidate(j, results[j["id"]].reasons, cfg.title_rules)]
         hits = rescue(embedder, [(j["id"], job_text(j, _jd(j))) for j in cands], prefs.prefilter.threshold,
-                      prefs.prefilter.margin, extra_profile=resume.bullets("summary")[:3])
+                      prefs.prefilter.margin, extra_profile=resume.bullets("summary")[:3], rules=cfg.title_rules)
         for j in cands:
             if r := hits.get(j["id"]):
                 j["_semantic_title"] = {"similarity": r.similarity, "profile": r.profile}

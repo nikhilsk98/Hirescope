@@ -70,7 +70,8 @@
   const liveApps = () => Object.values(apps).filter((a) => !a.deleted);
   const appForJob = (j) => liveApps().find((a) => a.job_key === keyOf(j)) || null;
   const today = () => META.today || new Date().toISOString().slice(0, 10);
-  const appsCfg = Object.assign({ follow_up_days: [7, 10], ghosted_after_days: 30, same_company_window_days: 30 }, META.applications_cfg || {});
+  const appsCfg = Object.assign({ follow_up_days: [7, 10], ghosted_after_days: 30, same_company_window_days: 30, near_duplicate_ratio: 85 }, META.applications_cfg || {});
+  const UI_CFG = Object.assign({ apply_today_size: 5, closing_soon_days: 7 }, META.ui_cfg || {});   // preferences apply_today
 
   // SQLite's copy (sync.js, written by each run) fills in anything this browser doesn't have; newer always wins
   (function mergeSync() {
@@ -145,7 +146,7 @@
   const visibleJobs = () => JOBS.filter((j) => !j.filtered && inTrack(j));
   const DONE = ["applied", "skipped", "rejected", "interviewing", "offer"];
   const applyQueue = () => (META.apply_today ? (ui.both ? [...(META.apply_today.coop_intern || []), ...(META.apply_today.full_time || [])] : META.apply_today[ui.track] || []) : [])
-    .map((id) => BY_ID.get(id)).filter((j) => j && !DONE.includes(statusOf(j))).slice(0, ui.both ? 10 : 5);
+    .map((id) => BY_ID.get(id)).filter((j) => j && !DONE.includes(statusOf(j))).slice(0, (ui.both ? 2 : 1) * UI_CFG.apply_today_size);
 
   const VIEWS = [
     { id: "last24", label: "Last 24h", ic: "⚡", group: "Discover", jobs: () => visibleJobs().filter((j) => isFresh24(j)) },
@@ -155,7 +156,7 @@
     { id: "applications", label: "My Applications", ic: "▦", group: "Mine", special: true, count: () => appsInTrack().length },
     { id: "shortlisted", label: "Shortlisted", ic: "✓", jobs: () => JOBS.filter((j) => inTrack(j) && statusOf(j) === "shortlisted") },
     { id: "followups", label: "Follow-ups Due", ic: "↻", special: true, count: () => new Set([...followupsDue(), ...ghostsDue()].map((a) => a.id)).size },
-    { id: "closing", label: "Closing Soon", ic: "⏳", jobs: () => visibleJobs().filter((j) => j.deadline && daysUntil(j.deadline) >= 0 && daysUntil(j.deadline) <= 7) },
+    { id: "closing", label: "Closing Soon", ic: "⏳", jobs: () => visibleJobs().filter((j) => j.deadline && daysUntil(j.deadline) >= 0 && daysUntil(j.deadline) <= UI_CFG.closing_soon_days) },
     { id: "skillgaps", label: "Skill Gaps", ic: "◔", group: "Insights", special: true, count: () => ((META.skill_gaps || {})[`${ui.track}:30`] || { skills: [] }).skills.length },
     { id: "stats", label: "Stats", ic: "▥", special: true, count: () => appsInTrack().length },
     { id: "seasons", label: "Hiring Seasons", ic: "◷", special: true, count: () => seasonsInTrack().filter((x) => x.remind).length },
@@ -693,7 +694,7 @@
   async function markApplied(j) {
     const existing = appForJob(j);
     if (existing) { openDrawer(existing.id); toast("Already in My Applications"); return; }
-    const warns = C.duplicateWarnings(j.company, j.title, keyOf(j), liveApps(), today(), appsCfg.same_company_window_days);
+    const warns = C.duplicateWarnings(j.company, j.title, keyOf(j), liveApps(), today(), appsCfg.same_company_window_days, null, appsCfg.near_duplicate_ratio);
     if (warns.length && !(await confirmDialog("Possible duplicate application", warns.map((w) => w.message), "Mark applied anyway"))) return;
     const d = await loadDetail(j);
     const st = statuses[keyOf(j)] || {};
@@ -955,7 +956,7 @@
     if (C.ghostSuggestion(a, today(), appsCfg.ghosted_after_days)) body.append(el("div", { class: "banner warn", style: "margin:0 0 12px" },
       el("span", { text: `No update in ${C.day(today()) - C.lastActivity(a)} days. Mark it Ghosted? (Only if you agree.)` }),
       el("button", { class: "btn small x", type: "button", onclick: () => moveTo(a, "ghosted") }, "Mark Ghosted")));
-    const warns = C.duplicateWarnings(a.company, a.title, a.job_key, liveApps(), today(), appsCfg.same_company_window_days, a.id);
+    const warns = C.duplicateWarnings(a.company, a.title, a.job_key, liveApps(), today(), appsCfg.same_company_window_days, a.id, appsCfg.near_duplicate_ratio);
     if (warns.length) body.append(el("div", { class: "banner info", style: "margin:0 0 12px" }, el("ul", { style: "margin:0" }, warns.map((w) => el("li", { text: w.message })))));
 
     const field = (label, key, type, attrs) => {
@@ -1024,7 +1025,7 @@
     const check = () => {
       warnBox.textContent = "";
       const co = f.elements.company.value.trim(), ti = f.elements.title.value.trim(); if (!co || !ti) return;
-      const w = C.duplicateWarnings(co, ti, null, liveApps(), today(), appsCfg.same_company_window_days);
+      const w = C.duplicateWarnings(co, ti, null, liveApps(), today(), appsCfg.same_company_window_days, null, appsCfg.near_duplicate_ratio);
       if (w.length) warnBox.append(el("div", { class: "banner warn" }, el("ul", { style: "margin:0" }, w.map((x) => el("li", { text: x.message })))));
     };
     f.elements.company.oninput = check; f.elements.title.oninput = check;

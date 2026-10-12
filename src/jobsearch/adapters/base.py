@@ -12,6 +12,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 from typing import Callable, ClassVar
 
 import httpx
@@ -64,6 +65,16 @@ def _always(title: str, location: str | None) -> bool:
     return True
 
 
+@lru_cache(maxsize=1)
+def _search_queries() -> dict:
+    from ..config import load_title_rules
+    return load_title_rules().search_queries
+
+
+def default_queries() -> dict[str, list]:
+    return dict(_search_queries())
+
+
 @dataclass
 class FetchContext:
     since: datetime | None = None
@@ -76,6 +87,8 @@ class FetchContext:
     max_details: int = 400                  # detail fetches allowed this run for this company
     covered: set[tuple[str, str]] = field(default_factory=set)  # (source, board) fetched officially this run
     known_relevant: dict[str, str | None] = field(default_factory=dict)  # visible job id -> apply url
+    # role keywords for query-based sources, per adapter (config/title_rules.yaml -> search_queries)
+    queries: dict[str, list] = field(default_factory=lambda: default_queries())
 
     def needs_detail(self, job_id: str, now: datetime | None = None) -> bool:
         ts = self.known.get(job_id)

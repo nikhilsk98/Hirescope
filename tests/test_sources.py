@@ -144,8 +144,8 @@ def test_workday_early_career_facets_replace_fuzzy_coop_search():
                   {"descriptor": "US, CA, University Park", "id": "loc"}]}]}]
     assert _early_career_facets(facets) == [("workerSubType", "i", "Intern (Fixed Term)"),
                                             ("workerSubType", "g", "New College Graduate")]
-    from jobsearch.adapters.workday import QUERIES
-    assert "co-op" not in QUERIES and "intern" not in QUERIES
+    queries = FetchContext().queries["workday"]          # config/title_rules.yaml -> search_queries
+    assert "co-op" not in queries and "intern" not in queries and "software" in queries
 
 
 def test_workday_helpers():

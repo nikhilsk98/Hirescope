@@ -3,7 +3,10 @@
 # Patterns are regexes searched in the normalized title (lowercase, abbreviations expanded, e.g.
 # "Sr. SWE II" -> "senior software engineer ii"). Company rules are checked first, then generic.
 # "mid_or_senior" means it depends on stated years of experience: <= mid_max_yoe -> mid, else senior.
-mid_max_yoe: 5
+mid_max_yoe: 5      # keep equal to preferences yoe.match_max
+# A title with no level word falls back to the stated years: <= entry_max_yoe -> entry, <= mid_max_yoe -> mid,
+# more -> senior.
+entry_max_yoe: 1
 
 companies:
   Amazon:   # Amazon L4 = SDE I, L5 = SDE II, L6 = SDE III / senior, L7+ = principal

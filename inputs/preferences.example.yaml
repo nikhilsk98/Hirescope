@@ -54,6 +54,7 @@ salary:
 work_authorization:       # never assumed: fill these in yourself
   needs_sponsorship: null # true -> full-time "no sponsorship" filtered, co-op flagged (CPT/OPT); null = unknown
   us_citizen: null        # false -> "US citizens / US persons only" and "clearance required" filtered
+  coop_no_sponsorship: flag  # co-op/intern says "no sponsorship": flag = keep with "check CPT/OPT", filter = hide
 
 # --- Companies (tiers) --------------------------------------------------
 # Tiers override config/companies.yaml. tier1: every run; tier2: daily; tier3: every 3 days.
@@ -63,6 +64,8 @@ company_tiers:
   tier2: []
   tier3: []
   excluded: []
+  check_every_hours: {1: 0, 2: 20, 3: 70}   # how often each tier is checked (0 = every run)
+  max_pages: {1: 100, 2: 25, 3: 10}         # listing pages per company per run, by tier
 
 # --- Freshness ---------------------------------------------------------
 max_posting_age_days: 60
@@ -107,9 +110,11 @@ timezone: America/New_York
 my_companies_csv: inputs/my_companies.csv
 statuses_import_dir: ~/Downloads
 # --- Feedback learning (from your dashboard statuses; bounded, listed under "Learned adjustments") --------
-feedback: {enabled: true, min_evidence: 2, max_per_feature: 3, max_total: 6, weight_nudge_max: 0.25, weight_min_jobs: 5}
+feedback: {enabled: true, min_evidence: 2, max_per_feature: 3, max_total: 6, weight_nudge_max: 0.25, weight_min_jobs: 5,
+           positive_weights: {shortlisted: 1, package exported: 1, applied: 1, interviewing: 1, offer: 1, interested: 0.5},
+           reason_groups: {company: [company], location: [location], too senior: [level], too junior: [level], missing skills: [missing_skills], not interested in role: [skills, domain]}}
 # --- My Applications ---------------------------------------------------------------------------
-applications: {follow_up_days: [7, 10], ghosted_after_days: 30, same_company_window_days: 30}
+applications: {follow_up_days: [7, 10], ghosted_after_days: 30, same_company_window_days: 30, near_duplicate_ratio: 85}
 # LinkedIn connections export (Settings > Data privacy > Get a copy of your data > Connections). Optional.
 connections_csv: inputs/Connections.csv
 # --- Optional aggregator (off by default; key in .env). Sends only these queries to the provider. -----------
@@ -118,3 +123,56 @@ aggregator:
   provider: jsearch       # jsearch | serpapi
   queries: ["software engineer new grad 2027", "software engineer intern spring 2027", "software engineering co-op 2027", "entry level software engineer"]
   date_posted: week
+# --- Notifications / digest / seasons -----------------------------------------------------------------
+notifications: {enabled: true, early_bird_hours: 48, digest_weekday: Sunday, season_remind_days: 21}
+
+# ======================================================================================================
+# Fine-tuning. Every value below is the built-in default; change any of them here (nothing is hardcoded).
+# ======================================================================================================
+
+# --- Rules: details -----------------------------------------------------------------------------------
+grad_window_slack_months: 2      # a stated graduation window ("graduating Dec 2026 - Jun 2027") still matches
+                                 # if your graduation_date is within this many months of it
+excluded_employment_types: [contract, part_time, temporary]   # rules.employment_type applies to these;
+                                 # they also score 0 on the employment-type component
+
+# --- Scoring: component scores (0-100) and penalty points ------------------------------------------------
+scoring:
+  soft_rule_penalty: 5           # points off per failed soft rule (rules: ... soft)
+  neutral_qualification: 50      # qualification score when a listing has no JD text (uncertain, not a match)
+  yoe_penalty_per_year: 8        # points off per required year above yoe.match_max ...
+  yoe_penalty_cap: 30            # ... capped here
+  citizenship_penalty: 30        # citizens-only posting, only when work_authorization.us_citizen is not set
+  clearance_penalty: 10          # clearance-required posting, only when work_authorization.us_citizen is not set
+  title_fit: {core: 100, coop: 100, related: 85, semantic: 70}       # core/co-op title vs related vs meaning match
+  level_fit: {intern: 100, entry: 100, mid: 100, senior: 60, other: 30}
+  yoe_fit: {match: 100, stretch: 60, over: 20}   # required years <= match_max / <= stretch_max / above
+  grad_fit: {match: 100, mismatch: 25}           # JD's graduation year(s) include yours / don't
+  degree_above_yours: 40         # JD asks for a higher degree than your resume shows
+  location_fit: {preferred: 100, remote_us: 90, other_us: 75, no_preferences: 100}   # no_preferences: when
+                                 # preferred_locations is empty, every US location scores this
+  tier_fit: {1: 100, 2: 75, 3: 50}   # company tier (a company outside your tiers and the seed list counts as 3)
+
+# --- Apply Today queue + Closing soon ------------------------------------------------------------------
+apply_today:
+  size: 5                        # jobs shown per track (twice that with "Show both tracks")
+  fresh_24h: 10                  # urgency points: posted in the last 24h ...
+  fresh_72h: 5                   # ... or the last 72h
+  closing_soon: 6                # deadline within closing_soon_days
+  strong: 5                      # Strong label
+  closing_soon_days: 7           # also the "Closing soon" badge and view
+
+# --- Source health alerts ----------------------------------------------------------------------------
+health:
+  drop: 0.70                     # alert when a source lists 70% fewer jobs than its recent average
+  min_history: 2                 # successful past runs needed before judging
+  min_avg_zero: 3                # "returned 0 jobs" only for sources that usually list at least this many
+  min_avg_drop: 10               # drop alerts only for sources this big (small boards swing naturally)
+
+# --- Schedule (scripts/schedule.sh install reads these) and backups --------------------------------------
+schedule:
+  full_times: ["08:00", "18:00"]   # launchd full runs, local time
+  quick_hours: 2.5                 # quick checks (My Companies + tier 1) every N hours; 0 = off
+backups:
+  dir: null                        # default data/backups; e.g. "~/Library/Mobile Documents/com~apple~CloudDocs/HireScope"
+  keep: 14                         # daily backups kept

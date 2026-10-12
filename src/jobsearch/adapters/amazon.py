@@ -22,12 +22,7 @@ from .util import parse_dt
 
 BASE = "https://www.amazon.jobs/en/search.json"
 PAGE = 100
-SEARCHES = [
-    {"category[]": "software-development"},
-    {"base_query": "intern"},
-    {"base_query": "co-op"},
-    {"base_query": "new grad"},
-]
+# Searches: config/title_rules.yaml -> search_queries.amazon (each a dict of search.json params)
 
 
 def _description(j: dict) -> str:
@@ -79,7 +74,7 @@ class AmazonAdapter(Adapter):
         max_pages = 40 if ctx.full else ctx.max_pages
         jobs: dict[str, RawJob] = {}
         capped = []
-        for search in SEARCHES:
+        for search in ctx.queries.get("amazon", []):
             offset, hits = 0, None
             for _ in range(max_pages):
                 params = {**search, "country": "USA", "result_limit": PAGE, "offset": offset, "sort": "recent"}

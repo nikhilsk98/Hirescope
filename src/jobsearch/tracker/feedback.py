@@ -21,11 +21,7 @@ from dataclasses import dataclass, field
 from ..config import Feedback, Preferences
 from ..extract.locations import preferred_match
 
-POSITIVE = {"shortlisted": 1.0, "package exported": 1.0, "applied": 1.0, "interviewing": 1.0, "offer": 1.0,
-            "interested": 0.5}
-REASON_GROUPS = {"company": ("company",), "location": ("location",), "too senior": ("level",),
-                 "too junior": ("level",), "missing skills": ("missing_skills",),
-                 "not interested in role": ("skills", "domain")}
+# Positive status weights and skip-reason -> feature groups: preferences feedback.positive_weights / reason_groups
 GROUPS = ("company", "skills", "domain", "location", "level")
 GROUP_LABEL = {"company": "Company", "skills": "Skill", "domain": "Domain", "location": "Location", "level": "Level"}
 
@@ -142,8 +138,8 @@ def learn(jobs: list[dict], prefs: Preferences) -> Learned:
         if not st or st == "rejected":
             continue
         f = features(j, prefs)
-        if st in POSITIVE:
-            w = POSITIVE[st]
+        if st in cfg.positive_weights:
+            w = cfg.positive_weights[st]
             L.labeled += 1
             L.positives += 1
             for g in GROUPS:
@@ -154,7 +150,7 @@ def learn(jobs: list[dict], prefs: Preferences) -> Learned:
                 filtered_pos[re.sub(r"[:(—].*$", "", (j.get("filter_reasons") or ["?"])[0]).strip()] += 1
         elif st == "skipped":
             reason = (j.get("skip_reason") or "other").strip().lower()
-            groups = REASON_GROUPS.get(reason)
+            groups = cfg.reason_groups.get(reason)
             if not groups:
                 ignored[reason] += 1
                 continue

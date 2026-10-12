@@ -111,7 +111,8 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
         else:
             log.warning("sponsorship history enabled but %s not found", f)
     counts = write_data_js(paths.DASHBOARD / "data.js", jobs, meta, cfg.prefs.timezone,
-                           resume.version_hash, cfg.prefs.top_n, tier_of, {w.company for w in watch}, h1b=h1b)
+                           resume.version_hash, cfg.prefs.top_n, tier_of, {w.company for w in watch}, h1b=h1b,
+                           apply_cfg=cfg.prefs.apply_today, title_rules=cfg.title_rules)
     log.info("dashboard: %d visible, %d filtered (%d listed), %d detail chunks -> %s", counts["visible"],
              counts["filtered"], counts["filtered_listed"], counts["chunks"], paths.DASHBOARD / "index.html")
     return counts
@@ -253,7 +254,7 @@ def _main(args, log_file: Path) -> int:
     s["scope"] = "rescore" if args.rescore else "quick" if args.quick else (
         "partial" if (args.company or args.source or args.watchlist) else "full")
     s["health_alerts"] = [] if args.rescore else health.check(
-        summary.outcomes, lambda c, src: db.recent_job_counts(conn, c, src, 5))
+        summary.outcomes, lambda c, src: db.recent_job_counts(conn, c, src, 5), cfg.prefs.health)
     for a in s["health_alerts"]:
         log.warning("SOURCE HEALTH: %s", a["message"])
     rows, early = alerts.new_strong(conn, run_started, cfg.prefs.notifications.early_bird_hours)
@@ -273,7 +274,8 @@ def _main(args, log_file: Path) -> int:
     if not args.dry_run:
         tz = ZoneInfo(cfg.prefs.timezone)
         today = datetime.now(tz).date()
-        seasons = track_seasons(conn, today)
+        seasons = track_seasons(conn, today, rules=cfg.title_rules,
+                                remind_days=cfg.prefs.notifications.season_remind_days)
         publish(conn, cfg, resume, s, coverage_rows(conn, summary, watch), watch, log_file,
                 partial_run=bool(args.source or args.company or args.watchlist or args.quick),
                 last_run=last_fetch if args.rescore else None, learned=learned, imported=imported, seasons=seasons)

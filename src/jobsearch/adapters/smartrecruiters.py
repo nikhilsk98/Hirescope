@@ -25,8 +25,7 @@ from .util import parse_dt
 LIST = "https://api.smartrecruiters.com/v1/companies/{co}/postings?limit=100&offset={offset}&country=us"
 # `q` full-text search (verified 2026-10-12: ServiceNow q=software -> 139 of 695). Some retail-heavy companies
 # post 20,000+ store jobs; searching avoids paging through them.
-# "co-op" / "new grad" match far too broadly (Domino's "co-op" -> 7,947), so they are not searched.
-QUERIES = ["software", "developer", "intern", "engineer"]
+# Queries: config/title_rules.yaml -> search_queries.smartrecruiters ("co-op" / "new grad" match far too broadly).
 ONE = "https://api.smartrecruiters.com/v1/companies/{co}/postings/{id}"
 
 
@@ -79,7 +78,7 @@ class SmartRecruitersAdapter(Adapter):
         max_pages = 20 if ctx.full else ctx.max_pages
         by_id: dict[str, dict] = {}
         capped, total = [], 0
-        for q in QUERIES:
+        for q in ctx.queries.get("smartrecruiters", []):
             offset, found = 0, None
             url = ""
             try:

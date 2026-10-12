@@ -244,6 +244,20 @@ passing an ATS; missing keywords are gaps, never suggestions to add something yo
 Hub CSV you downloaded at `inputs/h1b_employer_data.csv`; matched companies show past approvals as company history,
 never as job-level eligibility.
 
+## Where the settings live
+
+Nothing about your search is hardcoded. `inputs/preferences.yaml` (documented line by line in
+`inputs/preferences.example.yaml`) holds your profile and every tuning value: graduation date, track windows and
+preferred terms, levels and YOE limits, locations and work modes, work authorization (incl. the co-op
+"no sponsorship" policy), company tiers and how often each tier is checked, score weights, component scores and
+penalties (`scoring`), label thresholds, freshness and boosts, ghost signals, Apply Today weights, feedback
+learning weights, application reminders and duplicate guard, source-health thresholds, notifications, schedule,
+backups. `config/` holds the shared vocabularies: `title_rules.yaml` (titles, co-op words, New Grad patterns,
+meaning-filter role profiles, role keywords searched on Workday / SmartRecruiters / Amazon, HN role words),
+`levels.yaml` (level ladders and the years-of-experience fallbacks), `locations.yaml`, `skills_synonyms.yaml`,
+`ats_keywords.yaml`, `companies.yaml`, `company_aliases.yaml`. Code defaults are neutral (no dates, terms or
+queries); after editing, `python -m jobsearch.run --rescore` re-applies everything without fetching.
+
 ## How scoring works
 
 1. **Hard filters** (`preferences.yaml → rules`): title must match a target/related title (as a phrase, or fuzzy

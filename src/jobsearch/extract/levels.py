@@ -16,6 +16,7 @@ LEVELS = ("intern", "entry", "mid", "senior", "staff_plus", "manager", "unknown"
 @dataclass(frozen=True)
 class LevelRules:
     mid_max_yoe: float
+    entry_max_yoe: float
     companies: dict[str, tuple[tuple[re.Pattern, str], ...]]   # casefolded company -> rules
     generic: tuple[tuple[re.Pattern, str], ...]
 
@@ -28,6 +29,7 @@ def load_level_rules(path: Path = paths.CONFIG / "levels.yaml") -> LevelRules:
         return tuple((re.compile(r["pattern"]), r["level"]) for r in rules or [])
     return LevelRules(
         mid_max_yoe=float(raw.get("mid_max_yoe", 5)),
+        entry_max_yoe=float(raw.get("entry_max_yoe", 1)),
         companies={k.casefold(): comp(v) for k, v in (raw.get("companies") or {}).items()},
         generic=comp(raw.get("generic")),
     )
@@ -54,7 +56,7 @@ def map_level(norm_title: str, company: str, yoe_required: float | None = None,
                     return Level(lvl, f"{where} with {yoe_required:g}+ YOE")
                 return Level(lvl, where)
     if yoe_required is not None:  # no level in the title: fall back to stated years
-        if yoe_required <= 1:
+        if yoe_required <= rules.entry_max_yoe:
             return Level("entry", f"no level in title; {yoe_required:g}+ YOE")
         if yoe_required <= rules.mid_max_yoe:
             return Level("mid", f"no level in title; {yoe_required:g}+ YOE")

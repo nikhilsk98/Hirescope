@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 
 from rapidfuzz import fuzz
 
@@ -17,12 +18,16 @@ from ..extract.normalize import has_word, normalize_title
 from ..extract.dates import Window
 from ..extract.track import COOP, FULL_TIME, UNCLEAR
 
-# phrases that contain level-like words but are not levels
-NON_LEVEL_PHRASES = ("member of technical staff",)
-GRAD_SLACK_MONTHS = 2
-_NEW_GRAD = re.compile(r"\b(new grad(uate)?s?|university grad(uate)?|college grad(uate)?|early career|entry[- ]level|"
-                       r"class of 20\d\d|graduate (software|engineer|developer|program|programme)|rotational|"
-                       r"recent grad(uate)?s?)\b", re.I)
+
+
+@lru_cache(maxsize=8)
+def _new_grad_re(patterns: tuple[str, ...]) -> re.Pattern:
+    return re.compile(r"\b(" + "|".join(patterns) + r")\b", re.I) if patterns else re.compile(r"(?!)")
+
+
+def is_new_grad_title(title: str, rules: TitleRules) -> bool:
+    """New Grad / early-career title (config/title_rules.yaml -> new_grad_patterns)."""
+    return bool(_new_grad_re(tuple(rules.new_grad_patterns)).search(title or ""))
 
 
 @dataclass
@@ -64,7 +69,7 @@ def match_title(norm_title: str, track: str, prefs: Preferences, rules: TitleRul
 
 def excluded_words(norm_title: str, prefs: Preferences, rules: TitleRules) -> list[str]:
     t = norm_title
-    for p in NON_LEVEL_PHRASES:
+    for p in rules.non_level_phrases:
         t = t.replace(p, " ")
     return [w for w in prefs.excluded_title_words if has_word(t, normalize_title(w, rules))]
 
@@ -141,7 +146,7 @@ def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime 
             res.stretch_reasons.append(f"Requires {yoe:g}+ years (match window 0–{y.match_max:g})")
 
     et = job.get("employment_type")
-    if et in ("contract", "part_time", "temporary"):
+    if et in prefs.excluded_employment_types:
         fail("employment_type", f"Employment type is {et}")
 
     posted = job.get("posted_date")
@@ -152,7 +157,7 @@ def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime 
         elif prefs.max_posting_age_days and age > prefs.max_posting_age_days:
             fail("posting_age", f"Posted {age} days ago (max {prefs.max_posting_age_days})")
 
-    _two_track(job, prefs, res, fail)
+    _two_track(job, prefs, rules, res, fail)
     _work_authorization(job, prefs, res, fail)
 
     s = prefs.salary
@@ -173,9 +178,10 @@ def _fmt_window(w: dict) -> str:
     return a if a == b else f"{a} – {b}"
 
 
-def _two_track(job: dict, prefs: Preferences, res: RuleResult, fail) -> None:
-    """Spring 2027 co-op/intern and May 2027 full-time rules: summer-only filter, start windows, graduation
-    windows, New Grad and eligibility signals. Unstated dates are uncertain, never a rejection."""
+def _two_track(job: dict, prefs: Preferences, rules: TitleRules, res: RuleResult, fail) -> None:
+    """Co-op/intern and full-time track rules from preferences.tracks (start windows, preferred terms), plus the
+    summer-only filter, graduation windows, New Grad and eligibility signals. Unstated dates are uncertain,
+    never a rejection."""
     t = prefs.tracks
     title = job.get("title") or job.get("normalized_title") or ""
     terms = job.get("terms") or []
@@ -186,7 +192,7 @@ def _two_track(job: dict, prefs: Preferences, res: RuleResult, fail) -> None:
     my_grad = (prefs.graduation_date or "")[:7] or None
     gws = job.get("grad_windows") or []
     if gws and my_grad:
-        hits = [w for w in gws if Window(w["start"], w["end"], "").contains(my_grad, GRAD_SLACK_MONTHS)]
+        hits = [w for w in gws if Window(w["start"], w["end"], "").contains(my_grad, prefs.grad_window_slack_months)]
         if hits:
             res.signals["grad"] = {"status": "match", "evidence": hits[0].get("evidence")}
             res.boosts.append(("grad_match", f"Graduation window {_fmt_window(hits[0])} includes yours ({my_grad})"))
@@ -200,10 +206,9 @@ def _two_track(job: dict, prefs: Preferences, res: RuleResult, fail) -> None:
     sws = job.get("start_windows") or []
     if res.track == COOP:
         if t.coop_intern.filter_summer_only and job.get("summer_only"):
-            fail("summer_only", "Summer-only internship (your full-time track starts "
-                                f"{t.full_time.start_from}; summer-only is filtered in preferences)")
-        lo, hi = t.coop_intern.start_window
-        if sws:
+            fail("summer_only", "Summer-only internship (filtered: tracks.coop_intern.filter_summer_only)")
+        lo, hi = t.coop_intern.start_window or ("", "")
+        if sws and t.coop_intern.start_window:
             ok = [w for w in sws if lo <= w["start"][:7] <= hi]
             if ok:
                 res.signals["start"] = {"status": "in window", "evidence": ok[0].get("evidence")}
@@ -212,11 +217,11 @@ def _two_track(job: dict, prefs: Preferences, res: RuleResult, fail) -> None:
                 fail("start_window", f"Starts {_fmt_window(sws[0])}, outside your co-op window {lo} – {hi}")
         else:
             res.signals["start"] = {"status": "not stated"}
-        if any(term.lower() in evid for term in t.coop_intern.boost_terms):
-            res.boosts.append(("term", "States a Spring 2027 / January 2027 term"))
+        if term := next((x for x in t.coop_intern.boost_terms if x.lower() in evid), None):
+            res.boosts.append(("term", f"States a preferred term (“{term}”)"))
     elif res.track == FULL_TIME:
         start_from = t.full_time.start_from
-        if sws:
+        if sws and start_from:
             if all(w["end"][:7] < start_from for w in sws):
                 res.signals["start"] = {"status": "too early", "evidence": sws[0].get("evidence")}
                 fail("start_window", f"Starts {_fmt_window(sws[0])}, before your {start_from} start")
@@ -224,9 +229,9 @@ def _two_track(job: dict, prefs: Preferences, res: RuleResult, fail) -> None:
                 res.signals["start"] = {"status": "ok", "evidence": sws[0].get("evidence")}
         else:
             res.signals["start"] = {"status": "not stated"}
-        if any(term.lower() in evid for term in t.full_time.boost_terms):
-            res.boosts.append(("term", "States Class of 2027 / 2027 start"))
-        if _NEW_GRAD.search(title) or job.get("source") == "simplify_newgrad":
+        if term := next((x for x in t.full_time.boost_terms if x.lower() in evid), None):
+            res.boosts.append(("term", f"States a preferred start (“{term}”)"))
+        if is_new_grad_title(title, rules) or job.get("source") == "simplify_newgrad":
             res.signals["new_grad"] = True
             res.boosts.append(("new_grad", "New Grad / early-career role (top priority)"))
     if job.get("eligibility_note"):
@@ -238,8 +243,8 @@ def _work_authorization(job: dict, prefs: Preferences, res: RuleResult, fail) ->
 
     Full-time: no sponsorship (if you need it), US citizens / US persons only (if you aren't one), or security
     clearance required -> filtered with the quote. Co-op/Intern: citizens / US persons only or clearance required
-    -> filtered; "no sponsorship" alone is kept with a "Check eligibility (CPT/OPT)" flag, since co-ops and
-    internships are often allowed on CPT.
+    -> filtered; "no sponsorship" alone follows work_authorization.coop_no_sponsorship: "flag" (default) keeps it
+    with a "Check eligibility (CPT/OPT)" flag, since co-ops and internships are often allowed on CPT; "filter" hides it.
     """
     auth = prefs.work_authorization
     flags = job.get("flags") or {}
@@ -252,7 +257,7 @@ def _work_authorization(job: dict, prefs: Preferences, res: RuleResult, fail) ->
     if auth.us_citizen is False and clr.get("value") == "Clearance required":
         fail("work_authorization", f"Security clearance required{q(clr)}")
     if auth.needs_sponsorship and spons.get("value") == "No sponsorship":
-        if res.track == COOP:
+        if res.track == COOP and auth.coop_no_sponsorship == "flag":
             res.signals["check_cpt_opt"] = spons.get("evidence") or "States no visa sponsorship"
         else:
             fail("work_authorization", f"States no visa sponsorship{q(spons)}")
