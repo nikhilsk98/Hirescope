@@ -47,6 +47,48 @@ class Rules(BaseModel):
     yoe: RuleMode = "hard"          # applies to yoe.filter_min_yoe+ ; the stretch band is always soft
     employment_type: RuleMode = "soft"
     posting_age: RuleMode = "soft"
+    summer_only: RuleMode = "hard"  # co-op track: summer-only internships (tracks.coop_intern.filter_summer_only)
+    grad_window: RuleMode = "hard"  # a stated graduation window that excludes your graduation date
+    start_window: RuleMode = "soft" # a stated start date outside the track's window
+    stale_posting: RuleMode = "hard"  # posted more than ghost.stale_days ago
+
+
+class Freshness(BaseModel):
+    """Additive bonus (capped), so a fresh Weak job can never outrank a clearly stronger one by more than `cap`."""
+    boost_24h: float = 8
+    boost_72h: float = 4
+    decay_days: float = 21          # after 72h the bonus decays linearly to 0 by this age
+    cap: float = 10
+    coop_multiplier: float = 1.5    # spring co-op hiring is happening now: extra urgency (still capped)
+
+
+class Boosts(BaseModel):
+    new_grad: float = 8             # New Grad / University Grad / Class of 2027 roles (top priority)
+    term: float = 4                 # JD states a preferred term (Spring 2027 / Jan 2027; Class of 2027 / 2027 start)
+    grad_match: float = 3           # stated graduation window includes yours
+    cap: float = 12
+
+
+class Ghost(BaseModel):
+    age_days: int = 90              # posted longer ago than this -> "ghost risk"
+    stale_days: int = 365           # posted longer ago than this -> filtered (rules.stale_posting)
+    age_penalty: float = 5
+    repost_penalty: float = 4       # reopened / reposted
+    evergreen_penalty: float = 4    # "talent pool", "evergreen", "future opportunities"
+
+
+class Prefilter(BaseModel):
+    """Meaning-based pre-filter: rescue relevant jobs whose titles the keyword rules miss."""
+    enabled: bool = True
+    threshold: float = 0.52         # cosine similarity to the target-role profile
+    margin: float = 0.05            # ...and at least this much closer than to any contrast profile
+
+
+class SponsorshipHistory(BaseModel):
+    """Optional: past H-1B approvals per company from a manually downloaded USCIS Employer Data Hub CSV.
+    Company history only - never job-level eligibility."""
+    enabled: bool = False
+    file: str = "inputs/h1b_employer_data.csv"
 
 
 class Weights(BaseModel):
@@ -54,9 +96,8 @@ class Weights(BaseModel):
     preference: float = 0.35
     qualification_parts: dict[str, float] = {"skills": 0.4, "semantic": 0.4, "level": 0.2}
     preference_parts: dict[str, float] = {
-        "location": 0.3, "company_tier": 0.25, "freshness": 0.25,
-        "employment_type": 0.1, "salary": 0.1,
-    }
+        "location": 0.35, "company_tier": 0.35, "employment_type": 0.15, "salary": 0.15,
+    }   # freshness is a separate capped bonus (Freshness)
 
 
 class Thresholds(BaseModel):
@@ -115,6 +156,11 @@ class Preferences(BaseModel):
     rules: Rules = Rules()
     weights: Weights = Weights()
     thresholds: Thresholds = Thresholds()
+    freshness: Freshness = Freshness()
+    boosts: Boosts = Boosts()
+    ghost: Ghost = Ghost()
+    prefilter: Prefilter = Prefilter()
+    sponsorship_history: SponsorshipHistory = SponsorshipHistory()
     top_n: int = 1000                         # per track
     timezone: str = "America/New_York"
     my_companies_csv: str = "inputs/my_companies.csv"

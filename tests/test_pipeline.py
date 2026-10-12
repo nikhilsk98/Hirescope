@@ -137,8 +137,13 @@ def test_two_runs_same_day_one_tab_no_duplicates(conn, cfg, resume, embedder, gr
     assert sorted(j["job_id"] for j in jobs) == ["1001", "1002", "1003"]
     assert len({j["day"] for j in jobs}) == 1
     visible = [j for j in jobs if not j["filtered"]]
-    assert all("package" in j for j in visible) and all("package" not in j for j in jobs if j["filtered"])
+    assert all("chunk" in j for j in visible) and all("chunk" not in j for j in jobs if j["filtered"])
     assert meta["visible_count"] == len(visible) and "not an interview" in meta["disclaimer"]
+    # details (JD, package, keywords) live in lazily loaded chunk files, keeping data.js small
+    chunk = (tmp_path / "details" / f"d_{visible[0]['chunk']}.js").read_text()
+    body = json.loads(re.search(r"window\.__details\((.*)\);", chunk, re.S).group(1))
+    d = body[str(visible[0]["id"])]
+    assert d["package"].startswith("---") and "## ATS keywords" in d["package"] and "reqs" in d
 
 
 def test_local_day_uses_timezone():

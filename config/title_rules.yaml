@@ -21,6 +21,7 @@ abbreviations:
   "new grad": new graduate
   ng: new graduate
   coop: co op
+  mts: member of technical staff
 
 # Full-time track: a title containing any of these phrases (or a close fuzzy match) is a match,
 # with or without a level ("Software Engineer", "Software Engineer II", "Backend Engineer, Payments").
@@ -29,6 +30,7 @@ core_titles:
   - software engineering
   - software developer
   - software development engineer
+  - software development engineering
   - backend engineer
   - frontend engineer
   - full stack engineer
@@ -53,10 +55,22 @@ related_titles:
   - mobile engineer
   - ios engineer
   - android engineer
+  - java developer
+  - net developer          # ".NET Developer" normalizes to "net developer"
+  - python developer
+  - javascript developer
+  - react developer
+  - salesforce developer
+  - cloud developer
+  - ui developer
+  - ui engineer
+  - web engineer
+  - integration engineer
+  - build and release engineer
 
 # Co-op/Intern track: an intern/co-op title matches when it also contains one of these words
 # ("Software Engineering Co-op", "SDE Intern", "Spring 2027 Co-op - Backend").
-coop_role_words: [software, developer, development, sde, swe, backend, frontend,
+coop_role_words: [software, developer, software development, sde, swe, backend, frontend,
   full stack, web, cloud, platform, programming, programmer, computer science,
   infrastructure, devops, data engineering, machine learning]
 

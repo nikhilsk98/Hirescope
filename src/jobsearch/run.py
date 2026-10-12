@@ -17,9 +17,10 @@ from .adapters.base import HttpClient
 from .config import load_config
 from .extract.resume import parse_resume
 from .match.semantic import Embedder
-from .output.dashboard import coverage_rows, write_data_js
+from .output.dashboard import coverage_rows, select_visible, write_data_js
+from .output.h1b import load_h1b, match_companies
 from .output.links import check_links
-from .pipeline import ensure_extraction_current, run
+from .pipeline import compute_similar, ensure_extraction_current, run
 from .watchlist import WatchlistError, load_watchlist
 from .storage import db
 
@@ -53,7 +54,7 @@ def setup_logging(verbose: bool) -> Path:
 
 
 def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_file: Path,
-            partial_run: bool = False) -> dict:
+            partial_run: bool = False, last_run: str | None = None) -> dict:
     """Write dashboard/data.js from the current DB state."""
     by_name = {db.company_key(c.name): c.tier for c in cfg.companies}
     mine = {w.company.casefold() for w in watch}
@@ -62,7 +63,7 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
         return (1 if j["company"].casefold() in mine else None) or \
             cfg.prefs.company_tiers.tier_of(j["company"]) or by_name.get(j["company_key"])
     meta = {
-        "last_run": db.utcnow(),
+        "last_run": last_run or db.utcnow(),
         "summary": summary,
         "log_path": str(log_file),
         "resume_path": str(resume.path),
@@ -71,10 +72,25 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
         "repo_root": str(paths.ROOT),
         "coverage": coverage,
     }
-    counts = write_data_js(paths.DASHBOARD / "data.js", db.open_jobs(conn), meta, cfg.prefs.timezone,
-                           resume.version_hash, cfg.prefs.top_n, tier_of, {w.company for w in watch})
-    log.info("dashboard: %d visible, %d filtered (%d listed) -> %s", counts["visible"], counts["filtered"],
-             counts["filtered_listed"], paths.DASHBOARD / "index.html")
+    jobs = db.open_jobs(conn)
+    shown = select_visible(jobs, cfg.prefs.top_n)
+    compute_similar(conn, Embedder(conn), shown)            # "More like this"
+    jobs = db.open_jobs(conn)
+    h1b = {}
+    sh = cfg.prefs.sponsorship_history
+    if sh.enabled:
+        f = (paths.ROOT / sh.file) if not Path(sh.file).is_absolute() else Path(sh.file)
+        if f.exists():
+            try:
+                h1b = match_companies(sorted({j["company"] for j in shown}), load_h1b(f))
+            except ValueError as e:
+                log.warning("sponsorship history: %s", e)
+        else:
+            log.warning("sponsorship history enabled but %s not found", f)
+    counts = write_data_js(paths.DASHBOARD / "data.js", jobs, meta, cfg.prefs.timezone,
+                           resume.version_hash, cfg.prefs.top_n, tier_of, {w.company for w in watch}, h1b=h1b)
+    log.info("dashboard: %d visible, %d filtered (%d listed), %d detail chunks -> %s", counts["visible"],
+             counts["filtered"], counts["filtered_listed"], counts["chunks"], paths.DASHBOARD / "index.html")
     return counts
 
 
@@ -129,7 +145,8 @@ def main(argv=None) -> int:
 
     run_id = db.start_run(conn, args.dry_run)
     db.record_resume_version(conn, resume.version_hash, str(args.resume))
-    ensure_extraction_current(conn, cfg, force=args.rescore)
+    last_fetch = None
+    ensure_extraction_current(conn, cfg)   # re-extracts only when extraction code or config changed
     client = HttpClient(host_intervals={"myworkdayjobs.com": 0.5, "githubusercontent.com": 0.2,
                                          "boards-api.greenhouse.io": 0.25, "api.lever.co": 0.5,
                                          "api.ashbyhq.com": 0.5, "api.smartrecruiters.com": 0.35})
@@ -150,15 +167,17 @@ def main(argv=None) -> int:
     db.finish_run(conn, run_id, s)
 
     if args.rescore:  # keep the last real run's summary in the header
-        last = conn.execute("SELECT summary FROM runs WHERE summary IS NOT NULL AND dry_run=0 AND "
+        last = conn.execute("SELECT summary, finished_at FROM runs WHERE summary IS NOT NULL AND dry_run=0 AND "
                             "(json_extract(summary, '$.scope') = 'full' OR (json_extract(summary, '$.scope') IS NULL "
                             "AND json_extract(summary, '$.sources_checked') > 1)) ORDER BY id DESC LIMIT 1").fetchone()
+        last_fetch = None
         if last:
+            last_fetch = last[1]
             s = {**json.loads(last[0]), "scored": s["scored"], "filtered": s["filtered"], "strong": s["strong"],
-                 "by_track": s["by_track"], "rescored_at": db.utcnow()}
+                 "by_track": s["by_track"], "rescored_at": db.utcnow(), "scope": "full"}
     if not args.dry_run:
         publish(conn, cfg, resume, s, coverage_rows(conn, summary, watch), watch, log_file,
-                partial_run=bool(args.source or args.company))
+                partial_run=bool(args.source or args.company), last_run=last_fetch if args.rescore else None)
     conn.close()
     if tmp:
         tmp.cleanup()
