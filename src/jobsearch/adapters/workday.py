@@ -27,8 +27,10 @@ PAGE = 20
 # Workday's search tokenizes "co-op" into "co" OR "op" (matches nearly every job) and "intern" also hits
 # "International"/"Internal", so co-op/intern roles come from the site's own early-career facets instead.
 # Multi-word searches are AND-ed (Lowe's: "software engineer" 51 vs "software" 90), so role phrases stay precise.
-QUERIES = ["software", "developer", "internship", "new grad", "cloud engineer", "platform engineer", "devops",
-           "data engineer", "full stack", "backend", "frontend", "site reliability", "infrastructure engineer"]
+# ("developer" alone also matches "business development", so only developer phrases are searched.)
+QUERIES = ["software", "software developer", "web developer", "application developer", "internship", "new grad",
+           "cloud engineer", "platform engineer", "devops", "data engineer", "full stack", "backend", "frontend",
+           "site reliability", "infrastructure engineer"]
 _US = {"united states of america", "united states", "usa", "us"}
 _EARLY = re.compile(r"\b(intern|interns|internship|co-?op|student|university|college|graduate|early career|campus|"
                     r"apprentice)", re.I)

@@ -16,10 +16,10 @@ companies:
     - {pattern: '\b(sde|software development engineer|software dev engineer)\s*(iii|3)\b', level: senior}
     - {pattern: '\bprincipal\b', level: staff_plus}
   Netflix:  # "Software Engineer 4/5/6": 4 ~ mid, 5 ~ senior, 6 ~ staff
-    - {pattern: '\b(engineer|developer)\s+(3|l3)\b', level: entry}
-    - {pattern: '\b(engineer|developer)\s+(4|l4)\b', level: mid}
-    - {pattern: '\b(engineer|developer)\s+(5|l5)\b', level: senior}
-    - {pattern: '\b(engineer|developer)\s+(6|7|l6|l7)\b', level: staff_plus}
+    - {pattern: '\b(engineer|engineering|developer)\s+(3|l3)\b|\(l3\)', level: entry}
+    - {pattern: '\b(engineer|engineering|developer)\s+(4|l4)\b|\(l4\)|\bl4\b', level: mid}
+    - {pattern: '\b(engineer|engineering|developer)\s+(5|l5)\b|\bl5\b', level: senior}
+    - {pattern: '\b(engineer|engineering|developer)\s+(6|7|l6|l7)\b|\bl[67]\b', level: staff_plus}
   Google:
     - {pattern: '\bl3\b', level: entry}
     - {pattern: '\bl4\b', level: mid}
