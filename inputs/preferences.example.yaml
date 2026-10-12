@@ -85,7 +85,7 @@ weights:
 thresholds:
   strong: 70
   stretch: 50
-top_n: 1500               # max non-filtered jobs written to the dashboard
+top_n: 1000               # max non-filtered jobs per track written to the dashboard
 timezone: America/New_York
 my_companies_csv: inputs/my_companies.csv
 statuses_import_dir: ~/Downloads

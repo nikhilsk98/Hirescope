@@ -12,6 +12,9 @@ Note: an unknown company id returns 200 with totalFound 0 (not 404), so 0 jobs c
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
+
+import httpx
 from datetime import datetime, timezone
 
 from ..config import Company
@@ -20,6 +23,10 @@ from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, Sour
 from .util import parse_dt
 
 LIST = "https://api.smartrecruiters.com/v1/companies/{co}/postings?limit=100&offset={offset}&country=us"
+# `q` full-text search (verified 2026-10-12: ServiceNow q=software -> 139 of 695). Some retail-heavy companies
+# post 20,000+ store jobs; searching avoids paging through them.
+# "co-op" / "new grad" match far too broadly (Domino's "co-op" -> 7,947), so they are not searched.
+QUERIES = ["software", "developer", "intern", "engineer"]
 ONE = "https://api.smartrecruiters.com/v1/companies/{co}/postings/{id}"
 
 
@@ -43,7 +50,8 @@ def _description(d: dict) -> str:
 
 class SmartRecruitersAdapter(Adapter):
     name = "smartrecruiters"
-    capabilities = Capabilities(full_description=False, posted_date=True, pagination=True, official=True)
+    capabilities = Capabilities(full_description=False, posted_date=True, pagination=True, official=True,
+                                query_based=True)
 
     def _raw(self, company: str, co: str, p: dict, detail: dict | None) -> RawJob:
         d = detail or {}
@@ -68,19 +76,29 @@ class SmartRecruitersAdapter(Adapter):
         if not co:
             raise SourceError(f"{company.name}: smartrecruiters requires 'board' (company identifier)")
         now = datetime.now(timezone.utc)
-        items, offset, total = [], 0, None
-        max_pages = 50 if ctx.full else ctx.max_pages
-        try:
-            for _ in range(max_pages):
-                page = self.http.get_json(LIST.format(co=co, offset=offset))
-                total = page.get("totalFound", 0) if total is None else total
-                items.extend(page.get("content") or [])
-                offset += 100
-                if offset >= total or not page.get("content"):
-                    break
-        except Exception as e:  # noqa: BLE001
-            raise SourceError(f"{company.name}: {LIST.format(co=co, offset=offset)}: {e}") from e
-        partial = f"capped at {len(items)} of {total}" if total and len(items) < total else None
+        max_pages = 20 if ctx.full else ctx.max_pages
+        by_id: dict[str, dict] = {}
+        capped, total = [], 0
+        for q in QUERIES:
+            offset, found = 0, None
+            url = ""
+            try:
+                for _ in range(max_pages):
+                    url = LIST.format(co=co, offset=offset) + f"&q={quote(q)}"
+                    page = self.http.get_json(url)
+                    found = page.get("totalFound", 0) if found is None else found
+                    for p in page.get("content") or []:
+                        by_id.setdefault(str(p.get("id")), p)
+                    offset += 100
+                    if offset >= found or not page.get("content"):
+                        break
+                else:
+                    capped.append(f"“{q}” capped at {offset} of {found}")
+            except Exception as e:  # noqa: BLE001
+                raise SourceError(f"{company.name}: {url}: {e}") from e
+            total += found or 0
+        items = list(by_id.values())
+        partial = "; ".join(capped) or None
 
         jobs, details = [], 0
         for p in items:
@@ -98,6 +116,13 @@ class SmartRecruitersAdapter(Adapter):
             jobs.append(self._raw(company.name, co, p, detail))
         notes = ["0 postings: SmartRecruiters also returns 0 for unknown company ids"] if not total else []
         return FetchResult(jobs=jobs, partial=partial, notes=notes)
+
+    def check_open(self, company: Company, job_id: str, apply_url: str | None) -> bool | None:
+        try:
+            d = self.http.get_json(ONE.format(co=company.board, id=job_id))
+        except httpx.HTTPStatusError as e:
+            return False if e.response.status_code in (404, 410) else None
+        return bool(d.get("active", True))
 
     def fetch_one(self, url: str, company: str | None = None) -> RawJob | None:
         m = re.search(r"smartrecruiters\.com/([^/]+)/(\d{6,})", url)

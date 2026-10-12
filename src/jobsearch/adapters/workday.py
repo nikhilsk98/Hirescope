@@ -16,14 +16,22 @@ import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
+import httpx
+
 from ..config import Company
 from ..extract.text import html_to_text
 from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, SourceError
 from .util import join_locations, parse_dt
 
 PAGE = 20
-QUERIES = ["software", "developer", "intern", "co-op", "new grad"]
+# Workday's search tokenizes "co-op" into "co" OR "op" (matches nearly every job) and "intern" also hits
+# "International"/"Internal", so co-op/intern roles come from the site's own early-career facets instead.
+# Multi-word searches are AND-ed (Lowe's: "software engineer" 51 vs "software" 90), so role phrases stay precise.
+QUERIES = ["software", "developer", "internship", "new grad", "cloud engineer", "platform engineer", "devops",
+           "data engineer", "full stack", "backend", "frontend", "site reliability", "infrastructure engineer"]
 _US = {"united states of america", "united states", "usa", "us"}
+_EARLY = re.compile(r"\b(intern|interns|internship|co-?op|student|university|college|graduate|early career|campus|"
+                    r"apprentice)", re.I)
 
 
 def _posted_on(text: str | None, now: datetime) -> tuple[datetime | None, bool]:
@@ -36,6 +44,22 @@ def _posted_on(text: str | None, now: datetime) -> tuple[datetime | None, bool]:
     if m := re.search(r"(\d+)\+?\s*days? ago", t):
         return (now - timedelta(days=int(m.group(1))), "+" not in t)
     return None, False
+
+
+def _early_career_facets(facets: list, parent: str | None = None) -> list[tuple[str, str, str]]:
+    """(facetParameter, id, descriptor) for facet values like 'Intern (Fixed Term)', 'Co-op', 'Univ Employment',
+    'New College Graduate' (job type / job family / worker sub-type facets; never location facets)."""
+    out = []
+    for f in facets or []:
+        param = f.get("facetParameter") or parent
+        if param and "location" in param.lower():
+            continue
+        for v in f.get("values") or []:
+            if "facetParameter" in v:
+                out += _early_career_facets([v], param)
+            elif v.get("id") and _EARLY.search(v.get("descriptor") or ""):
+                out.append((param, v["id"], v["descriptor"]))
+    return out
 
 
 def _find_us_facet(facets: list) -> tuple[str, str] | None:
@@ -52,7 +76,8 @@ def _find_us_facet(facets: list) -> tuple[str, str] | None:
 
 class WorkdayAdapter(Adapter):
     name = "workday"
-    capabilities = Capabilities(full_description=False, posted_date=True, pagination=True, official=True)
+    capabilities = Capabilities(full_description=False, posted_date=True, pagination=True, official=True,
+                                query_based=True)
 
     @staticmethod
     def _base(company: Company) -> tuple[str, str, str]:
@@ -96,15 +121,19 @@ class WorkdayAdapter(Adapter):
             raise SourceError(f"{company.name}: {url}: {e}") from e
         facet = _find_us_facet(first.get("facets") or [])
         applied = {facet[0]: [facet[1]]} if facet else {}
-        max_pages = 100 if ctx.full else ctx.max_pages
+        max_pages = 50 if ctx.full else min(ctx.max_pages, 10)
 
+        searches = [(q, applied) for q in QUERIES]
+        for param, fid, desc in _early_career_facets(first.get("facets") or []):
+            searches.append((f"[{desc}]", {**applied, param: [fid]}))
         items: dict[str, dict] = {}
         capped = []
-        for q in QUERIES:
+        for q, facets in searches:
             offset, total = 0, None
+            text = "" if q.startswith("[") else q
             for _ in range(max_pages):
-                page = self.http.post_json(url, {"appliedFacets": applied, "limit": PAGE, "offset": offset,
-                                                 "searchText": q})
+                page = self.http.post_json(url, {"appliedFacets": facets, "limit": PAGE, "offset": offset,
+                                                 "searchText": text})
                 if total is None:
                     total = page.get("total") or 0
                 posts = page.get("jobPostings") or []
@@ -135,6 +164,17 @@ class WorkdayAdapter(Adapter):
         if details >= ctx.max_details:
             notes.append(f"detail fetches capped at {ctx.max_details}; remaining fetched next run")
         return FetchResult(jobs=jobs, partial=partial, notes=notes)
+
+    def check_open(self, company: Company, job_id: str, apply_url: str | None) -> bool | None:
+        u = urlparse(apply_url or "")
+        m = re.match(r"^/(?:[a-z]{2}-[A-Z]{2}/)?([^/]+)(/job/.+)$", u.path)
+        if not u.hostname or not m:
+            return None
+        try:
+            info = self._detail(u.hostname, u.hostname.split(".")[0], m.group(1), m.group(2))
+        except httpx.HTTPStatusError as e:
+            return False if e.response.status_code in (404, 410) else None
+        return bool(info.get("title")) if info.get("posted", True) else False
 
     def fetch_one(self, url: str, company: str | None = None) -> RawJob | None:
         u = urlparse(url)

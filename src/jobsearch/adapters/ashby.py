@@ -71,7 +71,10 @@ class AshbyAdapter(Adapter):
         if not m:
             return None
         api = API.format(board=m.group(1))
-        for j in self.http.get_json(api).get("jobs", []):
+        cache = self.__dict__.setdefault("_boards", {})
+        if api not in cache:  # one board download serves every posting on it (Simplify enrichment)
+            cache[api] = self.http.get_json(api).get("jobs", [])
+        for j in cache[api]:
             if j.get("id") == m.group(2):
                 return self._job(company or m.group(1), j, api)
         return None

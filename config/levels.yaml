@@ -6,11 +6,20 @@
 mid_max_yoe: 5
 
 companies:
-  Amazon:
+  Amazon:   # Amazon L4 = SDE I, L5 = SDE II, L6 = SDE III / senior, L7+ = principal
+    - {pattern: '\bl4\b', level: entry}
+    - {pattern: '\bl5\b', level: mid}
+    - {pattern: '\bl6\b', level: senior}
+    - {pattern: '\bl([7-9]|10)\b', level: staff_plus}
     - {pattern: '\b(sde|software development engineer|software dev engineer)\s*(i|1)\b(?!\s*(i|1))', level: entry}
     - {pattern: '\b(sde|software development engineer|software dev engineer)\s*(ii|2)\b', level: mid}
     - {pattern: '\b(sde|software development engineer|software dev engineer)\s*(iii|3)\b', level: senior}
     - {pattern: '\bprincipal\b', level: staff_plus}
+  Netflix:  # "Software Engineer 4/5/6": 4 ~ mid, 5 ~ senior, 6 ~ staff
+    - {pattern: '\b(engineer|developer)\s+(3|l3)\b', level: entry}
+    - {pattern: '\b(engineer|developer)\s+(4|l4)\b', level: mid}
+    - {pattern: '\b(engineer|developer)\s+(5|l5)\b', level: senior}
+    - {pattern: '\b(engineer|developer)\s+(6|7|l6|l7)\b', level: staff_plus}
   Google:
     - {pattern: '\bl3\b', level: entry}
     - {pattern: '\bl4\b', level: mid}
@@ -43,9 +52,9 @@ generic:   # first match wins, so order matters
   - {pattern: '\b(senior|sr)\b', level: senior}
   - {pattern: '\blead\b', level: senior}
   - {pattern: '\b(new graduate|university graduate|college graduate|early career|entry level|junior|graduate|associate|apprenticeship|rotational)\b', level: entry}
-  - {pattern: '\b(engineer|developer|sde|swe|programmer)\s+(i|1)\b(?!\s*(i|1))', level: entry}
-  - {pattern: '\b(engineer|developer|sde|swe|programmer|analyst)\s+(ii|2)\b', level: mid}
-  - {pattern: '\b(engineer|developer|sde|swe|programmer)\s+(iii|3)\b', level: mid_or_senior}
-  - {pattern: '\b(engineer|developer|sde|swe|programmer)\s+(iv|v|vi|4|5|6)\b', level: senior}
+  - {pattern: '\b(engineer|developer|sde|swe|programmer)\s+(i|1)\b(?!\s*(i|1|month|week|hour|hr|day|year|yr))', level: entry}
+  - {pattern: '\b(engineer|developer|sde|swe|programmer|analyst)\s+(ii|2)\b(?!\s*(month|week|hour|hr|day|year|yr))', level: mid}
+  - {pattern: '\b(engineer|developer|sde|swe|programmer)\s+(iii|3)\b(?!\s*(month|week|hour|hr|day|year|yr))', level: mid_or_senior}
+  - {pattern: '\b(engineer|developer|sde|swe|programmer)\s+(iv|v|vi|4|5|6)\b(?!\s*(month|week|hour|hr|day|year|yr))', level: senior}
   - {pattern: '\b(level|l)\s*(1|2)\b', level: entry}
   - {pattern: '\b(level|l)\s*3\b', level: mid}

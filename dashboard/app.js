@@ -86,7 +86,8 @@
     if (!META.last_run) { meta.append("No run yet — run ", el("code", { text: "scripts/run.sh" })); return; }
     meta.append(
       el("span", null, "Last run ", el("b", { text: fmtTime(META.last_run) })),
-      el("span", null, "Sources ", el("b", { text: `${s.sources_ok}/${s.sources_checked} ok` })),
+      el("span", null, el("b", { text: `${s.sources_ok} of ${s.sources_checked}` }), " companies/sources checked successfully this run",
+        s.sources_skipped ? el("span", { class: "muted", text: ` (${s.sources_skipped} not due)` }) : null),
       el("span", null, "Jobs found ", el("b", { text: s.jobs_found })),
       el("span", null, "New ", el("b", { text: s.new }), " · Updated ", el("b", { text: s.updated }), " · Closed ", el("b", { text: s.closed })),
       el("span", null, "Strong ", el("b", { text: s.strong })),
@@ -95,24 +96,112 @@
     );
     $("#disclaimer").textContent = META.disclaimer || "";
     const w = $("#warnings");
-    for (const f of s.failures || []) w.append(el("div", { class: "warn", text: `Coverage incomplete: ${f.company} (${f.source}) failed — ${f.error}` }));
+    const fails = s.failures || [], manual = s.manual || [], partial = s.partial || [];
+    if (fails.length || manual.length || partial.length) {
+      const det = el("details", { class: "warn" }, el("summary", { text:
+        `Coverage incomplete: ${fails.length} failed, ${manual.length} need a manual check, ${partial.length} partial — see the Coverage tab` }));
+      const ul = el("ul");
+      for (const f of fails) ul.append(el("li", { text: `${f.company} (${f.source}) failed — ${f.error}` }));
+      for (const m of manual) ul.append(el("li", null, `${m.company}: manual check needed `, safeUrl(m.url) ? el("a", { href: m.url, target: "_blank", rel: "noopener noreferrer", text: m.url }) : ""));
+      for (const p of partial) ul.append(el("li", { text: `${p.company} (${p.source}) partial — ${p.why}` }));
+      det.append(ul); w.append(det);
+    }
     if (META.partial_run) w.append(el("div", { class: "warn", text: "Last run was limited to one source/company; other companies were not re-checked." }));
     if (/example/i.test(META.resume_path || "")) w.append(el("div", { class: "warn", text: `Scored against ${META.resume_path} (DEMO resume). Add inputs/master_resume.md for real matches.` }));
   }
 
+  // ---------- track switch ----------
+  const TRACK_KEY = "jobsearch.track";
+  const TRACK_LABEL = { coop_intern: "Co-op/Intern", full_time: "Full-time", unclear: "Unclear" };
+  let activeTrack = (location.hash === "#coop" && "coop_intern") || (location.hash === "#fulltime" && "full_time") || store.get(TRACK_KEY, "both");
+  const trackOk = (j) => activeTrack === "both" || j.track === activeTrack || j.track === "unclear";
+  function trackBadge(j) {
+    const t = j.track || "full_time";
+    return el("span", { class: `badge track ${t}`, title: j.track_evidence || "", text: t === "unclear" ? "? Unclear" : TRACK_LABEL[t] });
+  }
+  function renderTrackBar() {
+    for (const b of document.querySelectorAll(".track-btn")) {
+      const t = b.dataset.track;
+      b.setAttribute("aria-checked", String(t === activeTrack));
+      const n = JOBS.filter((j) => !j.filtered && (t === "both" || j.track === t || j.track === "unclear")).length;
+      b.querySelector(".n").textContent = n;
+    }
+  }
+  for (const b of document.querySelectorAll(".track-btn")) b.addEventListener("click", () => {
+    activeTrack = b.dataset.track; store.set(TRACK_KEY, activeTrack);
+    history.replaceState(null, "", activeTrack === "coop_intern" ? "#coop" : activeTrack === "full_time" ? "#fulltime" : "#");
+    renderTrackBar(); renderTabs(); render();
+  });
+
+  // ---------- add job by URL ----------
+  $("#add-job").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const url = $("#add-url").value.trim();
+    if (!/^https?:\/\//i.test(url)) { toast("Enter a full http(s) URL"); return; }
+    const cmd = `cd ${META.repo_root || "<repo>"} && ./scripts/add_url.sh ${JSON.stringify(url)}`;
+    const ok = await copyText(cmd);
+    toast(ok ? "Command copied — paste it in Terminal" : cmd);
+  });
+
+  // ---------- coverage ----------
+  function renderCoverage() {
+    const box = $("#coverage"); box.textContent = "";
+    const counts = { ok: 0, failed: 0, manual: 0, skipped: 0 };
+    for (const r of COVERAGE) counts[r.status] = (counts[r.status] || 0) + 1;
+    box.append(el("p", null, el("b", { text: `${counts.ok} ok` }), ` · ${counts.failed} failed · ${counts.manual} manual check · ${counts.skipped} not due this run (checked on their tier schedule)`));
+    const t = el("table", { class: "jobs coverage" });
+    t.append(el("thead", null, el("tr", null, ...["Company", "Status", "Source", "Detected via", "Last checked", "Open roles", "Notes"].map((h) => el("th", { text: h })))));
+    const tb = el("tbody");
+    const order = { failed: 0, manual: 1, ok: 2, skipped: 3 };
+    for (const r of [...COVERAGE].sort((a, b) => (order[a.status] - order[b.status]) || a.company.localeCompare(b.company))) {
+      const st = el("span", { class: `badge cov-${r.status}`, text: { ok: "OK", failed: "Failed", manual: "Manual check", skipped: "Not due" }[r.status] || r.status });
+      const link = safeUrl(r.url);
+      tb.append(el("tr", null,
+        el("td", null, r.company, r.my_company ? el("span", { class: "badge", text: "My Company" }) : null, r.tier ? el("span", { class: "muted", text: ` · tier ${r.tier}` }) : null),
+        el("td", null, st, r.partial ? el("div", { class: "muted", text: `partial: ${r.partial}` }) : null),
+        el("td", { text: r.source }),
+        el("td", { text: r.detected_via || (r.origin === "seed" ? "seed list" : r.origin || "") }),
+        el("td", { text: r.last_checked ? fmtTime(r.last_checked) : "—" }),
+        el("td", { text: r.open_roles ?? "—" }),
+        el("td", null, r.error ? el("div", { class: "err", text: r.error }) : null, r.notes ? el("div", { class: "muted", text: r.notes }) : null,
+          link ? el("a", { href: link, target: "_blank", rel: "noopener noreferrer", text: r.status === "manual" ? "Check manually" : "link" }) : null),
+      ));
+    }
+    t.append(tb); box.append(t);
+  }
+
+  function render() {
+    const cov = activeTab === "coverage";
+    $("#coverage").hidden = !cov;
+    document.querySelector("table.jobs:not(.coverage)").hidden = cov;
+    document.querySelector(".controls").hidden = cov;
+    if (cov) { $("#empty").hidden = true; $("#filtered-summary").hidden = true; renderCoverage(); return; }
+    const fs = $("#filtered-summary");
+    fs.hidden = activeTab !== "filtered";
+    if (!fs.hidden) {
+      fs.textContent = `${META.filtered_count || 0} jobs filtered; ${META.filtered_listed || 0} listed here (software-relevant first). By reason: ` +
+        Object.entries(META.filtered_reasons || {}).map(([k, v]) => `${k} (${v})`).join(" · ");
+    }
+    renderRows();
+  }
+
   // ---------- tabs ----------
   const days = [...new Set(JOBS.filter((j) => !j.filtered).map((j) => j.day))].sort().reverse();
-  const tabs = [{ id: "all", label: "All open" }, ...days.map((d) => ({ id: "day:" + d, label: d })), { id: "filtered", label: "Filtered" }];
+  const tabs = [{ id: "all", label: "All open" }, ...days.map((d) => ({ id: "day:" + d, label: d })),
+    { id: "filtered", label: "Filtered" }, { id: "coverage", label: "Coverage" }];
   let activeTab = "all";
+  const COVERAGE = Array.isArray(META.coverage) ? META.coverage : [];
   function tabCount(id) {
-    if (id === "all") return JOBS.filter((j) => !j.filtered).length;
-    if (id === "filtered") return JOBS.filter((j) => j.filtered).length;
-    return JOBS.filter((j) => !j.filtered && "day:" + j.day === id).length;
+    if (id === "coverage") return COVERAGE.length;
+    const inTrack = JOBS.filter(trackOk);
+    if (id === "all") return inTrack.filter((j) => !j.filtered).length;
+    if (id === "filtered") return inTrack.filter((j) => j.filtered).length;
+    return inTrack.filter((j) => !j.filtered && "day:" + j.day === id).length;
   }
   function renderTabs() {
     const nav = $("#tabs"); nav.textContent = "";
     for (const t of tabs) {
-      nav.append(el("button", { role: "tab", "aria-selected": String(t.id === activeTab), onclick: () => { activeTab = t.id; renderTabs(); renderRows(); } },
+      nav.append(el("button", { role: "tab", "aria-selected": String(t.id === activeTab), onclick: () => { activeTab = t.id; renderTabs(); render(); } },
         t.label, el("span", { class: "n", text: tabCount(t.id) })));
     }
   }
@@ -130,10 +219,13 @@
   fillSelect("#f-type", "All types", uniq(JOBS.map((j) => j.employment_type)));
   fillSelect("#f-location", "Any location/mode", ["remote", "hybrid", "onsite", "unknown"]);
   fillSelect("#f-status", "Any status", ["(none)", ...STATUSES.filter(Boolean)]);
-  fillSelect("#f-flag", "Any flags", ["Has red flag", "No red flags", ...Object.values(RED_FLAG)]);
+  fillSelect("#f-flag", "Any flags", ["Has red flag", "No red flags", "Broken link", ...Object.values(RED_FLAG)]);
+  fillSelect("#f-mine", "All companies (any list)", ["My Companies only"]);
+  fillSelect("#f-level", "Any level", ["intern", "entry", "mid", "senior", "unknown"]);
   $("#search").addEventListener("input", renderRows);
 
   function matches(j) {
+    if (!trackOk(j)) return false;
     if (activeTab === "filtered" ? !j.filtered : j.filtered) return false;
     if (activeTab.startsWith("day:") && "day:" + j.day !== activeTab) return false;
     const v = (id) => $(id).value;
@@ -142,12 +234,15 @@
     if (v("#f-label") && j.label !== v("#f-label")) return false;
     if (v("#f-type") && j.employment_type !== v("#f-type")) return false;
     if (v("#f-location") && j.work_mode !== v("#f-location")) return false;
+    if (v("#f-mine") && !j.my_company) return false;
+    if (v("#f-level") && j.level !== v("#f-level")) return false;
     const st = (statuses[jobKey(j)] || {}).status || "";
     if (v("#f-status") === "(none)" ? st !== "" : v("#f-status") && st !== v("#f-status")) return false;
     const rf = redFlags(j), fv = v("#f-flag");
     if (fv === "Has red flag" && !rf.length) return false;
     if (fv === "No red flags" && rf.length) return false;
-    if (fv && fv !== "Has red flag" && fv !== "No red flags" && !rf.includes(fv)) return false;
+    if (fv === "Broken link" && j.link_status !== "broken") return false;
+    if (fv && !["Has red flag", "No red flags", "Broken link"].includes(fv) && !rf.includes(fv)) return false;
     const q = $("#search").value.trim().toLowerCase();
     if (q) {
       const hay = [j.title, j.company, j.location, (j.skills || []).join(" "), (j.filter_reasons || []).join(" ")].join(" ").toLowerCase();
@@ -166,6 +261,8 @@
     else if (j.day === latestDay) out.push(el("span", { class: "badge new", text: "New" }));  // first seen on the latest run day
     else out.push(el("span", { class: "badge", text: "Seen" }));
     for (const f of redFlags(j)) out.push(el("span", { class: "badge flag", text: f }));
+    if (j.link_status === "broken") out.push(el("span", { class: "badge flag", title: "Apply link returned 404/closed when last checked", text: "Broken link" }));
+    if (j.my_company) out.push(el("span", { class: "badge", text: "My Company" }));
     return out;
   }
 
@@ -253,7 +350,11 @@
       `Degree: ${j.degree || "Not stated"}`,
       `Graduation years: ${(j.grad_years || []).join(", ") || "Not stated"}`,
       `Salary: ${j.salary ? `${j.salary.currency || ""} ${j.salary.min.toLocaleString()}–${j.salary.max.toLocaleString()}` : "Not stated"}`,
-      `Employment type: ${j.employment_type}`, `Seniority (from title): ${j.seniority || "unknown"}`,
+      `Track: ${TRACK_LABEL[j.track] || j.track} — ${j.track_evidence || ""}`,
+      `Level: ${j.level} — ${j.level_evidence || ""}`,
+      `Terms: ${(j.terms || []).join(", ") || "Not stated"}`,
+      `Employment type: ${j.employment_type}`,
+      `Apply link: ${j.link_status || "not checked"}`,
       `Source: ${j.source} · Job ID ${j.job_id} · first seen ${fmtTime(j.first_seen)}`,
     ];
     flags.append(el("h3", { text: "Facts" }), list(facts));
@@ -278,7 +379,7 @@
       const id = jobKey(j);
       const tr = el("tr", { class: "job", onclick: () => { expanded.has(id) ? expanded.delete(id) : expanded.add(id); renderRows(); } },
         el("td", null, j.filtered ? el("span", { class: "muted", text: "—" }) : [el("div", { class: "score", text: Math.round(j.score) }), el("span", { class: `label ${j.label}`, text: j.label })]),
-        el("td", null, el("div", { class: "role-title", text: j.title }), el("div", { class: "role-sub" }, `${j.company}${j.tier ? ` · tier ${j.tier}` : ""} · ${j.employment_type}`, ...badges(j)),
+        el("td", null, el("div", { class: "role-title", text: j.title }), el("div", { class: "role-sub" }, trackBadge(j), ` ${j.company}${j.tier ? ` · tier ${j.tier}` : ""} · ${j.level !== "unknown" ? j.level : "level not stated"}${(j.terms || []).length ? " · " + j.terms.join(", ") : ""}`, ...badges(j)),
           j.filtered ? el("div", { class: "role-sub", text: (j.filter_reasons || []).join("; ") }) : null),
         el("td", null, j.location, el("div", { class: "role-sub", text: j.work_mode })),
         el("td", { text: j.posted_date }),
@@ -299,6 +400,7 @@
   });
 
   renderHeader();
+  renderTrackBar();
   renderTabs();
-  renderRows();
+  render();
 })();

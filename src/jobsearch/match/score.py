@@ -17,6 +17,7 @@ from .rules import RuleResult
 from .semantic import SemanticResult
 
 PENALTY_SOFT_RULE = 5
+NEUTRAL_QUALIFICATION = 50.0   # used when there is no JD text to match against
 PENALTY_NO_SPONSORSHIP = 25
 PENALTY_CITIZENSHIP = 30
 PENALTY_CLEARANCE = 10
@@ -139,6 +140,11 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         "level": Part(level_score, w.get("level", 0), "; ".join(level_notes) or "No level signals"),
     }
     qual, qual_missing = _weighted(qual_parts)
+    if skills_score is None and sem.score is None:
+        # Nothing to compare the resume against (no JD): the title alone is not evidence of fit.
+        # Use a neutral prior so the job is neither a match nor a rejection.
+        qual = NEUTRAL_QUALIFICATION
+        qual_missing = [*qual_missing, "qualification (no JD text)"]
 
     # --- Preference ----------------------------------------------------
     loc_score, loc_detail = None, "Location unknown"
@@ -209,6 +215,12 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     label = label_for(overall, prefs)
     if rules.stretch_reasons and label == "Strong":   # senior / 6-year roles are Stretch at best
         label = "Stretch"
+    no_jd = (job.get("extra") or {}).get("has_jd") is False
+    if no_jd:
+        # aggregator listing without a description: qualification rests on the title alone (uncertain)
+        if label == "Strong":
+            label = "Stretch"
+        gaps.append("No job description available yet — score uses title and preferences only; open the posting")
 
     def dump(parts):
         return {k: {"score": None if p.score is None else round(p.score, 1), "weight": p.weight, "detail": p.detail}
@@ -219,7 +231,7 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         "qualification": {"score": None if qual is None else round(qual, 1), "weight": wq, "parts": dump(qual_parts)},
         "preference": {"score": None if pref is None else round(pref, 1), "weight": wp, "parts": dump(pref_parts)},
         "penalties": penalties,
-        "stretch_reasons": rules.stretch_reasons,
+        "stretch_reasons": rules.stretch_reasons + (["No job description (score uncertain)"] if no_jd else []),
         "uncertain": qual_missing + pref_missing,
         "semantic_sections": sem.sections,
         "evidence": [{"jd": e.jd_line, "resume": e.resume_line, "section": e.section, "similarity": e.similarity}

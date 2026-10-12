@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
+import httpx
+
 from ..config import Company
 from ..extract.text import html_to_text
 from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, SourceError
@@ -35,9 +37,14 @@ def _description(j: dict) -> str:
     return html_to_text(html)
 
 
+def _job_page(apply_url: str | None) -> str | None:
+    return apply_url if apply_url and "amazon.jobs" in apply_url else None
+
+
 class AmazonAdapter(Adapter):
     name = "amazon"
-    capabilities = Capabilities(full_description=True, posted_date=True, pagination=True, official=True)
+    capabilities = Capabilities(full_description=True, posted_date=True, pagination=True, official=True,
+                                query_based=True)
 
     def _raw(self, company: str, j: dict, source_url: str) -> RawJob:
         jid = str(j.get("id_icims") or j.get("id"))
@@ -57,6 +64,16 @@ class AmazonAdapter(Adapter):
             extra={"business_category": j.get("business_category"), "job_category": j.get("job_category"),
                    "team": (j.get("team") or {}).get("label") if isinstance(j.get("team"), dict) else None},
         )
+
+    def check_open(self, company: Company, job_id: str, apply_url: str | None) -> bool | None:
+        url = _job_page(apply_url)
+        if not url:
+            return None
+        try:
+            r = self.http.get(url, headers={"Accept": "text/html"})
+        except httpx.HTTPStatusError as e:
+            return False if e.response.status_code in (404, 410) else None
+        return "/jobs/" in str(r.url)   # closed postings redirect to the search page
 
     def fetch(self, company: Company, ctx: FetchContext) -> FetchResult:
         max_pages = 40 if ctx.full else ctx.max_pages

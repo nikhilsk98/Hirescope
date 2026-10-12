@@ -97,3 +97,17 @@ def test_json_fields_roundtrip(conn):
     pk, _ = db.upsert_job(conn, rec(skills=["Python"], flags={"sponsorship": {"value": "Not stated", "evidence": None}}))
     row = db.open_jobs(conn)[0]
     assert row["skills"] == ["Python"] and row["flags"]["sponsorship"]["value"] == "Not stated"
+
+
+def test_reextraction_applies_config_fixes_without_refetch(conn, cfg, tmp_path):
+    from jobsearch.adapters.base import RawJob
+    from jobsearch.pipeline import ensure_extraction_current, to_record
+    raw = RawJob(company="DemoCo", job_id="9", title="Senior Engineer (DEMO)", source="lever", source_url="x",
+                 location="Lviv", description="- Python", employment_type="International EOR")
+    rec = to_record(raw, cfg, tmp_path)
+    rec.track = "coop_intern"               # what the old, buggy parser stored
+    pk, _ = db.upsert_job(conn, rec)
+    assert ensure_extraction_current(conn, cfg) == 1
+    row = db.open_jobs(conn)[0]
+    assert row["track"] == "full_time" and row["location_us"] == 0 and row["job_status"] == "new"
+    assert ensure_extraction_current(conn, cfg) == 0           # fingerprint unchanged -> nothing to do

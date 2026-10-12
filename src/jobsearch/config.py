@@ -115,7 +115,7 @@ class Preferences(BaseModel):
     rules: Rules = Rules()
     weights: Weights = Weights()
     thresholds: Thresholds = Thresholds()
-    top_n: int = 1500
+    top_n: int = 1000                         # per track
     timezone: str = "America/New_York"
     my_companies_csv: str = "inputs/my_companies.csv"
     statuses_import_dir: str = "~/Downloads"
