@@ -3,7 +3,8 @@
 Resume here: read this file and `git log --oneline` first, then continue from **In progress**.
 
 ## Current phase
-Phase 5 (next): LinkedIn alert emails (IMAP), Hacker News "Who's Hiring", optional aggregator, Google/Apple/Meta report.
+Phase 6 (next): launchd scheduling + quick checks, lock, notifications, run summary, Excel export, source health
+alerts, early-bird alerts, hiring-season tracker, weekly digest, backups.
 
 ## Completed
 - Phase 1 — vertical slice (Greenhouse → SQLite → scoring → dashboard → job package)
@@ -12,6 +13,7 @@ Phase 5 (next): LinkedIn alert emails (IMAP), Hacker News "Who's Hiring", option
 - Phase 3 — two-track rules, ATS keywords, freshness, meaning pre-filter, skill gaps, Apply Today, dashboard rebuild
 - Phase 4 — statuses import/merge, feedback learning, My Applications, follow-ups, outcome stats, referral finder,
   duplicate guard, reopened alerts, dashboard polish (report below)
+- Phase 5 — Hacker News Who's Hiring, LinkedIn alert emails (IMAP), optional aggregator, big-tech investigation
 
 ## Phase 4 report (2026-10-12)
 **Built**
@@ -54,23 +56,55 @@ no duplicate keys; the remaining same-title pairs are distinct requisitions, e.g
 follow-ups, JD copies, duplicate guard and re-import all correct. Screenshots reviewed (light + dark, both tabs, board,
 table, stats, drawer, follow-ups, palette, add dialog, bulk bar, run log, 760 px).
 
+## Phase 5 report (2026-10-12)
+**Built**
+- `adapters/hn_hiring.py`: official HN API; newest "Ask HN: Who is hiring?" thread; one job per post (header
+  `Company | Role | Location | …`), non-software posts skipped and cached per thread, only new posts fetched, posts
+  stored as seen by id; apply link = careers/ATS link (canonical key → merges with official postings).
+- `adapters/linkedin_alerts.py`: your own LinkedIn job-alert emails via read-only IMAP (`BODY.PEEK`, `readonly`),
+  plain-text and HTML layouts, sender allow-list, earliest alert date wins, never opens LinkedIn.
+- `adapters/aggregator.py`: optional JSearch / SerpAPI (off by default); query-based (misses kept 30 days); keys in
+  `.env`, masked in logs (`safe_url`).
+- `secrets.py` (.env loader, redaction); `Adapter.unavailable()` → unconfigured sources are **skipped with a note**
+  (Coverage: "Not set up / off"), never failures; `--no-email`; `--source X` now runs only that adapter.
+- `docs/experimental_big_tech.md`: Google (robots disallows job pages), Apple (site terms forbid robots), Meta (notice
+  forbids automated collection) → no adapters; add_url never fetches LinkedIn / Apple / Meta pages (paste the JD).
+- README: sources table, LinkedIn alert setup, aggregator, outbound requests; `.env.example`.
+
+**Tests**: 297 passed (13 new: alert parsing text/HTML, sender check, dedupe, credentials/redaction, skipped-not-failed,
+HN parsing, only-new fetching + skip cache, HN end-to-end incl. age-out, aggregator gating, JSearch + SerpAPI parsing,
+key masking, real seed list loads, add_url no-fetch hosts).
+
+**Real runs**: `--source hn_hiring` (live): October 2026 thread, 304 posts → 139 software posts stored, 52 visible
+after your rules (2 Strong). Full `--all`: 424 sources, 356 OK, 22 failed + 46 manual (same custom careers pages +
+OM1's Greenhouse board now 404), 42 partial; HN re-checked with 0 new fetches; LinkedIn alerts "not set up";
+6,393 visible (5,501 full-time / 887 co-op / 5 unclear), 1,207 Strong. Profile checks all OK (no non-US, 7+ YOE,
+staff+, senior-Strong, summer-only co-op, grad mismatch; no visible full-time no-sponsorship / citizenship / clearance).
+Screenshots: HN job detail (light), Coverage with the skipped source (dark).
+
 ## In progress
-Nothing — Phase 4 pushed.
+Nothing — Phase 5 pushed.
 
 ## Next
-Phase 5 → 6 → 7 per BUILD_PROMPT.md.
+Phase 6 → 7 per BUILD_PROMPT.md.
 
 ## Open issues
 - 21 watchlist companies have custom careers pages without readable job data; 47 need a careers_url (Manual check).
   One of your co-op leads is among them (no JobPosting data on its page) — add its postings with add_url.
 - 43 sources return partial listings (page caps); closures for those are verified per job.
 - Merged duplicates keep the older record until the official source is fetched again (its data then takes over).
+- HN posts with non-US remote wording ("REMOTE (European time zones)") can stay visible: the region isn't parsed.
+- OM1 (My Companies): its cached Greenhouse board returns 404; needs a careers URL or re-detection.
 - Reading `~/Downloads` from a launchd job may need macOS permission (Phase 6 will document / handle it).
 
 ## Needs Nikhil
 - Confirm GitHub `main` looks right → then I delete the local `backup-before-rewrite` branch.
 - Old remote branches `phase1-vertical-slice` and `phase2` still contain the 3 original commits with the Claude
   trailer (their content is already in main). Say "delete old branches" to remove them from GitHub.
+- LinkedIn alerts: create job alerts on LinkedIn, then put `IMAP_USER` + `IMAP_APP_PASSWORD` (Gmail app password) in
+  `.env` (see `.env.example`). Built and tested with DEMO emails; the real alert layout should be checked on the
+  first run (Coverage shows how many jobs each run parsed).
+- Optional aggregator: `aggregator.enabled: true` + `JSEARCH_API_KEY` or `SERPAPI_API_KEY` in `.env`.
 - Optional: `inputs/Connections.csv` (LinkedIn data export) for the referral finder.
 - Use the dashboard: shortlist / skip with reasons / Mark Applied, then **Export statuses** — the next run imports it
   and learning starts.
