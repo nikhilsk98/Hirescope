@@ -1544,7 +1544,8 @@
   }
   function resumeRef(j) {
     const r = resumeOf(j); const v = r && r.current;
-    return v ? { job_pk: j.id, version: v.version, pdf: v.pdf, pdf_name: v.pdf_name, manifest_sha: v.manifest_sha } : null;
+    // pdf_sha identifies the exact file sent (the manifest changes when a version is marked reviewed; the PDF never does)
+    return v ? { job_pk: j.id, version: v.version, pdf: v.pdf, pdf_name: v.pdf_name, pdf_sha: v.pdf_sha } : null;
   }
   function resumeSection(j) {
     const r = resumeOf(j); const rs = resumeStatus(j);

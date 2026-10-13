@@ -243,3 +243,20 @@ def test_version_numbers_are_unique_and_atomic(rb_env):
     from resume_builder.config import sha256_file
     assert m1["file_hashes"]["pdf"] == sha256_file(jd_of(rb_env) / "v1" / m1["files"]["pdf"])
     assert (jd_of(rb_env) / "v1" / "source" / "BUILD.md").exists()
+
+
+def test_locked_bullet_replaces_its_regenerated_twin_instead_of_doubling(rb_env):
+    full_build(rb_env)
+    jd = jd_of(rb_env)
+    c1 = versions._content_of(jd / "v1")
+    b = c1.experience[0].bullets[0]
+
+    def reword(c):
+        c.experience[0].bullets[0].text = "Built Java and Spring Boot REST APIs serving 2,000+ daily payment requests"
+    full_build(rb_env, edit=reword, regenerate=True)                       # v2: reworded (new text, same evidence)
+    c2 = versions._content_of(jd / "v2")
+    versions.lock(jd, c2.experience[0].bullets[0].id)
+    out = full_build(rb_env, regenerate=True)                              # baseline has the verbatim twin
+    c3 = versions._content_of(jd / f"v{out['version']}")
+    same = [x for x in c3.experience[0].bullets if x.evidence_ids == b.evidence_ids]
+    assert len(same) == 1 and same[0].text.startswith("Built Java and Spring Boot REST APIs serving")

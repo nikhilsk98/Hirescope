@@ -35,6 +35,8 @@ scripts do everything deterministic. Run every command from the repo root with `
    - bullets: action → technical work → verified outcome; ≤ 25 words, ≤ 2 lines; JD wording only where the cited
      evidence supports it; every number exactly as written; no ownership or scale the evidence doesn't state;
    - each bullet cites the evidence ids it uses (same role/project only); `priority` 1 = keep … 5 = cut first;
+   - fill the page: keep about as many bullets as `baseline.json` has (it is sized for one page) and drop only what
+     is irrelevant; the build warns above 30% empty space and trims automatically if you overshoot;
    - `requirements`: confirm or correct each category (direct / transferable / missing_evidence / gap); note any
      eligibility concern for Nikhil (never put visa status on the resume);
    - `notes.selection` / `notes.removed`: why these projects/bullets, what was left out.

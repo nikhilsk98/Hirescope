@@ -433,8 +433,8 @@ def brief(analysis: dict, bank: Bank, settings: Settings, locks: dict | None = N
     return "\n".join(L) + "\n"
 
 
-class BuildFailed(Exception):
-    pass
+class LimitReached(ContentError):
+    """The 3 build attempts of this generation are used up (usage limit); nothing was built."""
 
 
 def _expected_links(contact: dict, c: Content, bank: Bank) -> list[dict]:
@@ -509,6 +509,10 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
     if probs:
         raise ContentError("content problems:\n  - " + "\n  - ".join(probs))
     cap = min(settings.repair_max_attempts, max_attempts or settings.repair_max_attempts)
+    if int(state.get("attempts", 0)) >= cap:
+        raise LimitReached(f"this generation already used its {cap} build attempts (usage limit); nothing was built. "
+                           "The current version is unchanged. For more changes start a new generation: "
+                           "prepare --regenerate")
     gaps = {"entry": settings.layout.get("entry_gap_pt", 6), "education": settings.layout.get("education_gap_pt", 4)}
     attempts, log = [], [n.replace("locked", "hand-edited", 1) for n in pin_notes] + lock_notes
     used = int(state.get("attempts", 0))
@@ -519,7 +523,14 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
             log.append(f"repair limit reached ({cap} attempts for this request)")
             break
         used += 1
-        res, rep, parts = compile_and_validate(c, bank, settings, build_dir, gaps)
+        try:
+            res, rep, parts = compile_and_validate(c, bank, settings, build_dir, gaps)
+        except Exception:
+            # a build that stops (broken template copy, missing tool) ends this generation as failed, so the next
+            # prepare isn't blocked as "in progress"; the attempt still counts
+            state.update(attempts=used, status="failed")
+            (jd / "work" / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
+            raise
         attempts.append({"attempt": used, "ok": rep.ok, "pages": rep.pages,
                          "errors": [f"{x.name}: {x.detail}" for x in rep.errors()]})
         if rep.ok or not res.ok:

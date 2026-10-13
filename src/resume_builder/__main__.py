@@ -74,7 +74,8 @@ def cmd_prepare(args) -> int:
     out = pipeline.prepare(args.job, args.profile, regenerate=args.regenerate, force=args.force,
                            discard_edits=args.discard_edits)
     a = out["analysis"]
-    _bridge(a["job"]["pk"], None if out.get("reused") else "generating")
+    # reused: back to the current version's status (it may have been "queued" by a batch)
+    _bridge(a["job"]["pk"], out["reused"]["status"] if out.get("reused") else "generating")
     if out.get("reused"):
         r = out["reused"]
         print(f"REUSED: v{r['version']} ({r['status']}) was built from the same job, inputs, settings and locks; "
@@ -119,6 +120,11 @@ def cmd_build(args) -> int:
         with versions.JobLock(jd):
             res = pipeline.build(args.job, Path(args.content) if args.content else None)
             out = pipeline.finalize(res)
+    except pipeline.LimitReached:
+        cur = versions.current(jd)  # nothing was built: the status goes back to what the current version is
+        _bridge(job["id"], cur["status"] if cur else "failed",
+                None if cur else "build attempts used up before any version passed")
+        raise
     except (ContentError, CompileError, InputError) as e:
         cur = versions.current(jd)
         _bridge(job["id"], "failed", f"build stopped: {str(e)[:300]}"

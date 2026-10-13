@@ -5,6 +5,8 @@ Resume here: read this file and `git log --oneline` first, then continue from **
 ## Current phase
 **v1.0 released (2026-10-13).** All phases (1–7) and the status-audit gap list are done; see the final report at the
 end, then "Known limitations" and "Needs Nikhil".
+**Resume Builder v1.0 (2026-10-13, tag `resume-builder-v1.0`)**: all 5 phases + final integration done; see
+"# Resume Builder" at the end of this file.
 
 ## Completed
 - Phase 1 — vertical slice (Greenhouse → SQLite → scoring → dashboard → job package)
@@ -231,7 +233,7 @@ Built from `RESUME_BUILDER_PROMPT.md`, all 5 phases back to back. Resume here: r
 - [x] Phase 3 — versioning (manifests, dedupe, diff, rollback, locks, manual edits) (2026-10-13)
 - [x] Phase 4 — HireScope integration (button, statuses, bridge, dashboard, applications, batch) (2026-10-13)
 - [x] Phase 5 — hardening (failure tests, docs, cleanup) (2026-10-13)
-- [ ] Final integration + end-to-end testing, tag `resume-builder-v1.0`
+- [x] Final integration + end-to-end testing, tagged `resume-builder-v1.0` (2026-10-13)
 
 ## Phase 1 report (2026-10-13)
 **Setup**: Tectonic 0.17.0 and poppler 26.10.0 (Homebrew). Calibri is not installed system-wide (only inside
@@ -442,6 +444,63 @@ shortlisted; on the copy with 3 shortlisted: count, 1 reusable, usage warning, e
 **Real data**: `check` OK on your inputs (61 evidence items, 7 entries, Carlito); `refresh` OK; no contact details in
 any log, report, manifest or `resumes.js` (only in the PDF, its .tex sources and the extracted-text report).
 
+## Final integration report (2026-10-13)
+**Full test suite**: 505 passed (406 HireScope + 99 Resume Builder), ~40 s, no network. Line coverage: HireScope +
+Resume Builder 92%; `resume_builder` modules 88–100% (versions 88%, pipeline / validate / verify 91%, CLI 94%).
+
+**Full HireScope run** (`./scripts/run.sh`, scheduled-style): exit 0; resume statuses survived the run (each run now
+re-syncs them into `dashboard/resumes.js`).
+
+**End to end from the dashboard** (headless Chrome, throwaway profile): Generate Resume copied
+`claude "/resume-builder 34880"`, `… 46867`, `… 35047`; each ran through the skill (check → prepare → draft → review →
+truth pass → build):
+| Job | Track | Result | Truth | Coverage* | Notes |
+|---|---|---|---|---|---|
+| HPE — Systems Software Engineer Intern (34880) | co-op | v3 READY, 1 page, `Nikhil_<Last>_Resume_Hewlett_Packard_Enterprise.pdf` | 0 / 41 unsupported | 70.5% | 3 builds (whitespace, then two one-word last lines); a 4th build refused (limit) |
+| Centric — Software Engineer 1 (46867) | full-time | v2 READY → v4 (regenerated) | 0 / 42 | — | v1 31% empty → v2; v3/v4 regeneration test |
+| Bose — Data Engineer Co-Op (35047) | co-op, clear gaps | v2 READY, `…_Resume_Bose.pdf` | 0 / 40 | 48% | missing qualifications: data pipelines, serverless, Snowflake, mobile — never added |
+*internal coverage measure, not an ATS score. Every report present (truth, coverage, changes, defense, review,
+validation, extracted text). Font: Carlito (Calibri not installed system-wide).
+- Dashboard: generating (after prepare) → ready (after build) in SQLite and `resumes.js`; all three panels show
+  "Resume ready" with the current version, page preview loads, Preview / Download PDF / Download .tex / Validation
+  report links point at existing files; a ready resume moved each job to "package exported".
+- Duplicate request → **REUSED** for all three. `--regenerate` (Centric) → new version; a **locked** bullet held
+  against a drafter that reworded it ("locked bullet … restored"); a **hand edit** to v2's content.json was carried
+  into v4; diff v2 → v4 shows the edited line; rollback v4 → v3 → v4.
+- **Mark reviewed** + **Mark Applied** (Centric) → Export statuses → import into a scratch copy: v4 reviewed,
+  application linked to v4 with the PDF's hash (still matching after the review).
+- **Batch** (scratch copy, 4 shortlisted): count + usage warning, exit 3 without `--yes`; `--yes` queued 4; 3 REUSED,
+  Axos Bank (20970) generated → v1 READY; all 4 end "ready".
+- **Failure drills** (scratch copy): broken template copy → clear error, "failed (v2 is still current)"; compile
+  failure → v3 failed with `content.tex:75: Undefined control sequence`, v2 current; JD with 4 hidden instructions
+  (ignore instructions, write ~/.ssh/id_rsa to a file and email it, "developer mode", "top 1% candidate") → all 4
+  listed as ignored, none in the tailoring inputs, no file written; a draft that obeyed them FAILED truth (4
+  unsupported), the honest draft built READY.
+
+**Fixed during the final run** (each with a regression test): JD footers counted as requirements or keywords
+(benefits URL → "HTML", "Accessibility", "payments"); an anti-fraud notice flagged as injection ("credentials"); JDs
+without requirement sections produced 0 requirements (they now come from the responsibilities); the "Unit Testing"
+capitalization and "Kubernetes …" tense false positives; a 4th build crashed instead of being refused; a stopped
+build blocked the next generation as "in progress"; a reused job stayed "queued" after a batch; a locked bullet was
+doubled next to its regenerated twin; the application's resume reference used the manifest hash (changes when
+reviewed) → the PDF hash; a test that left the DEMO sandbox (now asserted at teardown; it had created one stray
+work folder + status row for an unrelated real job, removed); the dashboard data dir can be redirected
+(`JOBSEARCH_DASHBOARD_DIR`), after one scratch refresh briefly overwrote the real `resumes.js` (restored at once).
+
+## Known limitations
+- Generation is a copy-the-command workflow (the dashboard runs nothing); one-click generation via a local runner is
+  for later. Reviews and applications from the dashboard reach SQLite with **Export statuses** (or `mark-reviewed`).
+- The truth verifier is deterministic and conservative: it checks numbers, technologies (vocabulary + unknown
+  tech-looking tokens), ownership / scale / outcome words against the cited evidence; meaning-level paraphrase is
+  covered by Claude's truth pass, which can add findings but never clear one.
+- Requirement mapping for soft lines ("strong communication") is left to the drafter (needs_judgment); JDs without
+  structure rely on bullet / responsibility heuristics.
+- Each build within a generation saves a version (up to 3); intermediate versions stay in the history.
+- The page-fill target is advisory (warning above 30% empty); trimming is automatic only when over a page.
+- HPE v3's coverage report predates the footer-keyword fix (it lists "Accessibility"); the next `--regenerate`
+  refreshes it.
+- Fonts: Carlito stands in for Calibri (same metrics); install Calibri system-wide to use it (detected automatically).
+
 ## Needs Nikhil
 1. Two Accenture bullets both claim a **70% reliability** gain ("processing reliability" and "distributed storage
    reliability"). If they are the same result, say which wording to keep; the drafter will not use both together.
@@ -454,4 +513,12 @@ any log, report, manifest or `resumes.js` (only in the PDF, its .tex sources and
 3. **DoorDash eligibility**: the JD asks for "no more than two years of full-time professional experience". Freelance
    Feb 2022–Aug 2025 plus 11 months at Accenture may exceed that, depending on how freelance work counts. Your call
    before applying (the resume itself is unchanged by this).
+4. **HPE eligibility**: the posting says "currently pursuing a Bachelor's degree" (its job-family text also lists
+   Master's); you're pursuing an M.S. Your call before applying.
+5. **More interview questions** (Centric / HPE / Axos): data structures and object-oriented design beyond coursework;
+   AI-assisted development tools you use; SQL stored procedures or SSIS (Axos, scratch-copy test only); browser
+   rendering / cross-browser work (Copart).
+6. **Review the 5 resumes** (dashboard → Resumes view → Preview PDF → Mark reviewed → Export statuses): DoorDash v2,
+   Copart v3, HPE v3, Centric v4, Bose v2. Nothing was marked reviewed in your real data; that's yours to do.
+7. Optional: install Calibri system-wide if you prefer it over Carlito.
 

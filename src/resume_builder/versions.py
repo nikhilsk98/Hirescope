@@ -416,8 +416,15 @@ def apply_locks(content, locks: dict) -> tuple[object, list[str]]:
             continue    # its whole role/project was left out; the locked bullet can't stand alone
         i = next((n for n, x in enumerate(ent.bullets) if x.id == bid), None)
         if i is None:
-            ent.bullets.insert(0, new)
-            notes.append(f"locked bullet {bid} restored (it was removed)")
+            # the same fact under another id (a regenerated baseline, a reworded draft) is replaced, never doubled
+            j = next((n for n, x in enumerate(ent.bullets) if x.evidence_ids == new.evidence_ids), None)
+            if j is None:
+                ent.bullets.insert(0, new)
+                notes.append(f"locked bullet {bid} restored (it was removed)")
+            else:
+                if (ent.bullets[j].text, ent.bullets[j].evidence_ids) != (new.text, new.evidence_ids):
+                    notes.append(f"locked bullet {bid} restored")
+                ent.bullets[j] = new
         else:
             if (ent.bullets[i].text, ent.bullets[i].evidence_ids) != (new.text, new.evidence_ids):
                 notes.append(f"locked bullet {bid} restored")

@@ -36,15 +36,22 @@ INJECTION_PATTERNS = [
     r"\b(?:assistant|system)\s*:", r"\bnew instructions?\b", r"\boverride\b.*\b(?:rules|instructions)\b",
     r"\b(?:write|save|append|copy|upload|send|post|email)\b.{0,40}\b(?:file|disk|folder|server|url|webhook|address)\b",
     r"\b(?:rm -rf|curl |wget |sudo |chmod |base64)", r"(?:~/|/etc/|/users/|\.ssh|\.env\b|id_rsa)",
-    r"\b(?:api[_ ]?key|password|credentials?|secret token)\b",
+    r"\b(?:api[_ ]?keys?|passwords?|secret tokens?|access tokens?)\b",
     r"\b(?:include|add|insert|put|mention|write)\b.{0,60}\b(?:in|on|into|to)\s+(?:your|the)\s+(?:resume|cv|application)\b",
     r"\b(?:white|hidden|invisible) text\b", r"\bprompt injection\b",
 ]
 _INJ = re.compile("|".join(INJECTION_PATTERNS), re.I)
 
 RESP_HEAD = re.compile(r"^(?:key |your |core |primary |main )?(?:responsibilities|duties|what you(?:'ll| will) do|"
-                       r"what you'll be doing|in this role|the role|day[- ]to[- ]day|you will|role overview|"
+                       r"what you(?:'ll| will) be (?:doing|working on)|in this role|the role|day[- ]to[- ]day|you will|role overview|"
                        r"about the role|job duties|essential (?:duties|functions))\b", re.I)
+# footer sections and lines that are never requirements (benefits, EEO, accommodation, pay, fraud notices, links)
+BOILER_HEAD = re.compile(r"(?:benefit|what we (?:can )?offer|perks|equal (?:employment|opportunity)|eeo|accessib|"
+                         r"accommodation|diversity|inclusion|compensation|salary|pay (?:range|transparency)|"
+                         r"about (?:us|the company)|who we are|stay connected|privacy|fraud|e-verify|disclaimer)", re.I)
+BOILER_LINE = re.compile(r"https?://|www\.|\bequal (?:employment )?opportunity\b|\baccommodation\b|"
+                         r"\bbenefits?\b|\bsalary\b|\bwage\b|\bper hour\b|\bdisabilit|\bveteran|"
+                         r"\bfraudulent\b|\be-verify\b|#\w+", re.I)
 REQ_HEAD = re.compile(r"(?:qualifications|requirements|what you(?:'ll)? bring|who you are|what we're looking for|"
                       r"skills|experience|nice to have|preferred|bonus|education)", re.I)
 
@@ -108,7 +115,9 @@ def _jd_blocks(jd: str) -> list[tuple[str, str]]:
 
 
 def responsibilities(jd: str) -> list[str]:
-    return [ln for h, ln, _b in _jd_blocks(jd) if RESP_HEAD.match(h or "")][:15]
+    return [ln for h, ln, _b in _jd_blocks(jd) if RESP_HEAD.match(h or "") and not BOILER_LINE.search(ln)
+            and not (BOILER_HEAD.search(ln) and len(ln.split()) <= 5) and len(ln.split()) >= 4
+            and not ln.rstrip().endswith("?") and not re.search(r"\bper hour\b|\$\d|\b401\(k\)", ln)][:15]
 
 
 def _parse_keyword_line(line: str) -> dict | None:
@@ -208,18 +217,28 @@ def analyze(job: dict, package_text: str, bank: Bank, settings: Settings, profil
     if not required and not preferred:
         # no requirement sections parsed: the JD's bullets (outside responsibilities) and lines naming a skill
         for h, ln, bullet in _jd_blocks(jd):
-            if len(ln) < 300 and not _INJ.search(ln) and not RESP_HEAD.match(h or "") and (
-                    terms_in(ln) or (bullet and len(ln.split()) >= 4)):   # 2-3 word bullets are links / boilerplate
+            if (len(ln) < 300 and not _INJ.search(ln) and not RESP_HEAD.match(h or "") and not BOILER_HEAD.search(h or "")
+                    and not BOILER_LINE.search(ln) and len(ln.split()) >= 3
+                    and (terms_in(ln) or (bullet and len(ln.split()) >= 4))):   # short bullets are links / boilerplate
                 mentioned.append(ln)
         mentioned = mentioned[:20]
     resp = clean(responsibilities(jd))
+    if not required and not preferred and not mentioned:
+        # no requirement lines at all: what the role says it needs is in its responsibilities ("requires … Python")
+        mentioned = [ln for ln in resp if terms_in(ln)][:15]
     kws = []
     bank_terms = bank.evidenced_terms()
+    # the role's own text: JD lines outside footer sections (benefits, EEO, accommodation, pay, links)
+    body_terms = {t for h, ln, _b in _jd_blocks(jd) if not BOILER_HEAD.search(h or "") and not BOILER_LINE.search(ln)
+                  and not (BOILER_HEAD.search(ln) and len(ln.split()) <= 5)       # a footer heading on its own line
+                  for t in terms_in(ln)} | {t for ln in required + preferred for t in terms_in(ln)}
     for ln in _lines(sec.get("ATS keywords", "")):
         k = _parse_keyword_line(ln)
         if not k:
             continue
         canon = canonical(k["term"])
+        if k["section"] == "mentioned" and jd and canon not in body_terms:
+            continue        # only in the footer (e.g. "Accessibility" in an accommodation notice): not about the role
         ok, conc = _supported(canon, bank_terms)
         k.update(canonical=canon, supported=ok, evidence_ids=_evidence_for(conc, bank)[:8],
                  category=vocab().category.get(canon, "other"))

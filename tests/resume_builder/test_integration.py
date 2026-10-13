@@ -112,7 +112,7 @@ def test_review_from_dashboard_export_and_application_resume(rb_env):
                                               "stage": "applied", "updated_at": "2026-10-13T11:30:00Z",
                                               "job": {"source": "greenhouse", "resume": {
                                                   "job_pk": rb_env.job, "version": 1, "pdf_name": "x.pdf",
-                                                  "manifest_sha": "abc", "pdf": "../data/resumes/x.pdf"}}}}}
+                                                  "pdf_sha": "abc", "pdf": "../data/resumes/x.pdf"}}}}}
     conn = db.connect(rb_env.db_path)
     res = hs_statuses.merge(conn, export, None)
     assert res.resume_reviews_applied == 1 and any("999999" in e for e in res.errors)
@@ -171,6 +171,18 @@ def test_batch_shortlisted_needs_confirmation_and_queues(rb_env, capsys):
     assert len(q["jobs"]) == 1
 
 
+def test_batch_reused_job_leaves_queued(rb_env):
+    _cli_generation(rb_env)
+    conn = db.connect(rb_env.db_path)
+    conn.execute("UPDATE jobs SET user_status='shortlisted' WHERE id=?", (rb_env.job,))
+    conn.commit()
+    conn.close()
+    assert cli.main(["batch", "shortlisted", "--yes"]) == 0
+    assert _resumes_js(rb_env)["jobs"][str(rb_env.job)]["status"] == "queued"
+    assert cli.main(["prepare", str(rb_env.job)]) == 0                    # REUSED
+    assert _resumes_js(rb_env)["jobs"][str(rb_env.job)]["status"] == "ready"
+
+
 def test_set_status_validates_and_hirescope_run_refreshes(rb_env):
     with pytest.raises(ValueError):
         bridge.set_status(rb_env.job, "approved-by-ai")
@@ -182,3 +194,18 @@ def test_set_status_validates_and_hirescope_run_refreshes(rb_env):
     conn.close()
     assert bridge.refresh_all(rb_env.db_path) == 1
     assert _resumes_js(rb_env)["jobs"][str(rb_env.job)]["status"] == "ready"
+
+
+def test_application_resume_reference_survives_marking_reviewed(rb_env):
+    """The exact-file reference (PDF hash) stays valid after the version is marked reviewed (manifest rewritten)."""
+    _cli_generation(rb_env)
+    from resume_builder.config import sha256_file
+    jd = pipeline.job_dir("DemoCorp", rb_env.job)
+    pdf = jd / "v1" / "Demo_Candidate_Resume_DemoCorp.pdf"
+    data = _resumes_js(rb_env)["jobs"][str(rb_env.job)]
+    assert data["current"]["pdf_sha"] == sha256_file(pdf)
+    assert cli.main(["mark-reviewed", str(rb_env.job)]) == 0
+    conn = db.connect(rb_env.db_path)
+    ref = bridge.resume_ref(conn, rb_env.job)
+    conn.close()
+    assert ref["pdf_sha"] == sha256_file(pdf) and _resumes_js(rb_env)["jobs"][str(rb_env.job)]["current"]["pdf_sha"] == ref["pdf_sha"]

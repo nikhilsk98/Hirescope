@@ -27,9 +27,9 @@ def validation_md(rep: Report, attempts: list[dict], repairs: list[str], font_us
 
 
 # --- coverage ------------------------------------------------------------------------------------------------
-COVERAGE_DEFINITION = ("Internal coverage measure, not an ATS score: the share of the JD's required and preferred "
-                       "keyword weight (HireScope keyword engine) that appears in the final resume text. It is not "
-                       "a prediction of passing any applicant tracking system.")
+COVERAGE_DEFINITION = ("Internal coverage measure, not an ATS score: the share of {basis} keyword weight "
+                       "(HireScope keyword engine) that appears in the final resume text. It is not a prediction of "
+                       "passing any applicant tracking system.")
 
 
 def resume_text(c, bank) -> str:
@@ -72,10 +72,12 @@ def coverage(c, bank, analysis: dict) -> dict:
     shown = used_evidence(c)
     reqs = [{"text": r.text, "kind": r.kind, "category": r.category, "evidence_ids": r.evidence_ids, "note": r.note,
              "represented": any(i in shown for i in r.evidence_ids)} for r in c.requirements]
+    basis = ("the JD's required and preferred" if imp is not rows
+             else "all of the JD's (it has no required/preferred sections)")
     return {
-        "definition": COVERAGE_DEFINITION,
+        "definition": COVERAGE_DEFINITION.format(basis=basis),
         "coverage_pct": round(100 * got / total, 1) if total else None,
-        "basis": "required + preferred keywords" if imp is not rows else "all JD keywords (no required/preferred)",
+        "basis": f"{basis} keywords",
         "keywords": rows,
         "missing_resume_keywords": [r["term"] for r in rows if r["supported"] and not r["represented"]],
         "missing_qualifications": [r["term"] for r in rows if not r["supported"] and not r["represented"]],

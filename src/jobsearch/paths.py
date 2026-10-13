@@ -6,7 +6,10 @@ INPUTS = ROOT / "inputs"
 CONFIG = ROOT / "config"
 # Runtime data (SQLite, JDs, logs). Override with JOBSEARCH_DATA_DIR, e.g. to keep it out of iCloud Drive.
 DATA = Path(os.environ["JOBSEARCH_DATA_DIR"]).expanduser() if os.environ.get("JOBSEARCH_DATA_DIR") else ROOT / "data"
-DASHBOARD = ROOT / "dashboard"
+# Generated dashboard data goes here; override with JOBSEARCH_DASHBOARD_DIR (with JOBSEARCH_DATA_DIR, e.g. to run against
+# a copy of your data without touching the real dashboard).
+DASHBOARD = (Path(os.environ["JOBSEARCH_DASHBOARD_DIR"]).expanduser() if os.environ.get("JOBSEARCH_DASHBOARD_DIR")
+             else ROOT / "dashboard")
 
 RESUME = INPUTS / "master_resume.md"
 PREFERENCES = INPUTS / "preferences.yaml"

@@ -93,7 +93,11 @@ def rb_env(tmp_path, monkeypatch):
         inputs_dir = inputs
     Env.inputs = inputs
     Env.data = data
-    return Env
+    yield Env
+    # every test must still be inside the DEMO sandbox at the end (a monkeypatch.undo() would silently point the
+    # rest of the test at real data)
+    assert hs_paths.DB == data / "jobs.db" and rc.MASTER_RESUME == inputs / "master_resume.md", \
+        "a test left the DEMO sandbox (monkeypatch.undo?)"
 
 
 def needs_tex():

@@ -27,7 +27,10 @@ PROPER = {"React", "Redux", "Docker", "Jenkins", "Python", "Java", "Kotlin", "Sp
           "Git", "Oracle", "Stripe", "Puppeteer", "Tailwind CSS", "Ethereum", "Azure", "Kubernetes", "Terraform",
           "Postman", "Solace", "Scala", "Rust", "Swift", "Django", "Flask", "Spark", "Hadoop", "Snowflake", "Redis"}
 FIRST_PERSON = re.compile(r"\b(I|my|me|we|our)\b")
-PRESENT_3RD = re.compile(r"^(?:[A-Z][a-z]+s)\b")   # "Builds", "Designs" (present tense)
+VERBS = {"build", "design", "develop", "implement", "create", "manage", "lead", "optimize", "migrate", "automate",
+         "deploy", "engineer", "integrate", "maintain", "write", "test", "improve", "reduce", "deliver", "architect",
+         "collaborate", "analyze", "own", "drive", "support", "monitor", "refactor", "configure", "launch", "ship"}
+PRESENT_3RD = re.compile(r"^([A-Z][a-z]+?)e?s\b")   # "Builds", "Designs", "Manages" (present tense)
 CHECKLIST = [
     "Relevance: does each bullet earn its place for THIS job? Is the strongest evidence for the JD's required "
     "skills near the top of each role and of the resume?",
@@ -70,7 +73,8 @@ def lint(c: Content, bank: Bank, settings: Settings, analysis: dict | None = Non
         if FIRST_PERSON.search(t):
             out.append({"where": b.id, "rule": "first person", "detail": "no I / my / we"})
         e = bank.entries.get(eid)
-        if e and e.end != "present" and PRESENT_3RD.match(t) and not re.match(r"^(?:Process|Access|Address)\b", t):
+        m3 = PRESENT_3RD.match(t)
+        if e and e.end != "present" and m3 and (m3.group(1).lower() in VERBS or m3.group(1).lower() + "e" in VERBS):
             out.append({"where": b.id, "rule": "tense", "detail": "past role: use past tense"})
         if not terms_in(t) and sec == "experience":
             out.append({"where": b.id, "rule": "no technology", "detail": "name the technology used, if the evidence does"})
@@ -96,7 +100,7 @@ def lint(c: Content, bank: Bank, settings: Settings, analysis: dict | None = Non
     v = vocab()
     for _s, _e, b in bullets:
         for canon in terms_in(b.text):
-            if not (re.search(r".[A-Z]", canon) or "." in canon or canon in PROPER):
+            if not (re.search(r"[a-z][A-Z]|[A-Z]{2,}", canon) or "." in canon or canon in PROPER):
                 continue
             forms = [f for f in v.aliases.get(canon, (canon,)) if f.lower() == canon.lower()]
             for m in re.finditer(rf"(?<![\w.]){re.escape(canon)}(?![\w])", b.text, re.I):

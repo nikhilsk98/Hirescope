@@ -8,7 +8,7 @@ append-only and always unioned. Everything in the file is data (never instructio
 Export formats: 1 = {statuses}; 2 = + track_overrides {key: track}; 3 = + track_overrides {key: {track,
 updated_at}} and applications {id: application}; 4 = + manual_checks {company: {checked_at, history, updated_at}};
 5 = + resume_reviews {job_pk: {version, reviewed_at}} (Resume Builder) and applications[].resume (the resume version
-used: {job_pk, version, pdf, manifest_sha}).
+used: {job_pk, version, pdf, pdf_sha}).
 """
 from __future__ import annotations
 
@@ -208,7 +208,7 @@ def _resume_ref(r) -> dict | None:
         out = {"job_pk": int(r["job_pk"]), "version": int(r["version"]), "linked": "applied"}
     except (KeyError, TypeError, ValueError):
         return None
-    for k in ("pdf", "manifest_sha", "pdf_name"):
+    for k in ("pdf", "pdf_sha", "manifest_sha", "pdf_name"):
         if isinstance(r.get(k), str):
             out[k] = r[k][:500]
     return out

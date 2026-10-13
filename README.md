@@ -441,6 +441,10 @@ the next request build a new version.
   files, an edit whose evidence changed since) are flagged and block "ready" instead of being overwritten;
   `prepare --discard-edits` drops them on purpose. The edited version itself is never touched.
 - One run per job at a time (job lock; a second run says another is in progress).
+- Each build saves a version, also within one generation (a rebuild after tightening a bullet is `v<N+1>`). A
+  generation allows 3 builds; a 4th is refused without building anything (`prepare --regenerate` starts a new one).
+- Trying things against a copy of your data: `JOBSEARCH_DATA_DIR=/path/copy JOBSEARCH_DASHBOARD_DIR=/path/dash
+  python -m resume_builder …` (the real database, resumes and dashboard stay untouched).
 
 ### Evidence interview
 `python -m resume_builder interview <id>` lists up to 5 questions (requirements your inputs may not describe, strong

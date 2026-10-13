@@ -33,6 +33,12 @@ def _conn(db_path: Path | None = None):
     return db.connect(db_path or hs_paths.DB)
 
 
+def _now_us() -> str:
+    """Microseconds: a status set right after a build (same second as its manifest) still sorts after it."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
+
+
 def set_status(job_pk: int, status: str, message: str | None = None, db_path: Path | None = None) -> None:
     if status not in STATUSES:
         raise ValueError(f"unknown resume status {status}")
@@ -42,7 +48,7 @@ def set_status(job_pk: int, status: str, message: str | None = None, db_path: Pa
             conn.execute(
                 "INSERT INTO resume_status (job_pk, status, message, updated_at) VALUES (?,?,?,?) "
                 "ON CONFLICT(job_pk) DO UPDATE SET status=excluded.status, message=excluded.message, "
-                "updated_at=excluded.updated_at", (int(job_pk), status, (message or "")[:500], db.utcnow()))
+                "updated_at=excluded.updated_at", (int(job_pk), status, (message or "")[:500], _now_us()))
     finally:
         conn.close()
 
@@ -71,7 +77,8 @@ def sync_job(conn, pk: int) -> dict | None:
         f = m.get("files", {})
         summary = {"truth_unsupported": (m.get("truth") or {}).get("unsupported"), "coverage_pct": m.get("coverage_pct"),
                    "pages": (m.get("validation") or {}).get("pages"), "font": m.get("font_used"),
-                   "reasons": (m.get("failure_reasons") or [])[:6], "profile": m.get("profile")}
+                   "reasons": (m.get("failure_reasons") or [])[:6], "profile": m.get("profile"),
+                   "pdf_sha": (m.get("file_hashes") or {}).get("pdf")}
         conn.execute(
             "INSERT INTO resume_builds (job_pk, version, status, pdf_path, tex_path, manifest_path, manifest_sha, "
             "created_at, reviewed_at, summary) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(job_pk, version) DO UPDATE SET "
@@ -215,8 +222,8 @@ def resume_ref(conn, pk: int, at: str | None = None) -> dict | None:
         return None
     pick = next((r for r in rows if cur and r["version"] == cur["current_version"]), None) if not at else None
     pick = pick or rows[-1]
-    return {"job_pk": pk, "version": pick["version"], "pdf": pick["pdf_path"], "manifest_sha": pick["manifest_sha"],
-            "linked": "auto" if at else "current"}
+    return {"job_pk": pk, "version": pick["version"], "pdf": pick["pdf_path"],
+            "pdf_sha": json.loads(pick["summary"] or "{}").get("pdf_sha"), "linked": "auto" if at else "current"}
 
 
 def link_applications(conn) -> int:
