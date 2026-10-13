@@ -227,7 +227,7 @@ Built from `RESUME_BUILDER_PROMPT.md`, all 5 phases back to back. Resume here: r
 
 ## Status
 - [x] Phase 1 — core pipeline (2026-10-13)
-- [ ] Phase 2 — quality (drafter → reviewer, truth verification, reports, evidence interview)
+- [x] Phase 2 — quality (drafter → reviewer, truth verification, reports, evidence interview) (2026-10-13)
 - [ ] Phase 3 — versioning (manifests, dedupe, diff, rollback, locks, manual edits)
 - [ ] Phase 4 — HireScope integration (button, statuses, bridge, dashboard, applications, batch)
 - [ ] Phase 5 — hardening (failure tests, docs, cleanup) + final E2E, tag `resume-builder-v1.0`
@@ -292,6 +292,58 @@ settings validation, prepare → build → v1, contact details redacted, stretch
 - Inspected: page images (layout matches the template), pdftotext output (reading order, headings, bullets), links
   (mailto / tel / LinkedIn on their own text), logs and reports (no email or phone outside the resume itself).
 
+## Phase 2 report (2026-10-13)
+**Built**
+- `verify.py` — truth verification, separate from drafting, per bullet / summary / skill / talking point against the
+  evidence it cites: numbers (exact; "15+" may become "15", never the reverse; no number words), technologies
+  (HireScope vocabulary + unknown tech-looking tokens such as OSGi or gRPC; umbrella terms like CI/CD backed by a
+  concrete one), ownership (led / managed / spearheaded / architected …), scale (large-scale / millions /
+  enterprise …), outcomes (reduced / improved … only when the evidence states one). The drafter's truth pass
+  (`truth_review.json`) can only add findings. Any finding blocks "ready" (`truth.md`, `truth.json`).
+- `review.py` — rule findings from `resume_rules.md` (weak openers, filler, first person, length, repeated opening
+  verb, near-duplicates, tense, punctuation mix, keyword repetition, product-name capitalization) and the reviewer
+  packet (checklist + findings + truth check of the draft). `build` refuses content that skipped the reviewer pass;
+  the review runs once per generation.
+- `reports.py` — coverage (definition and "internal coverage measure, not an ATS score" in every report; missing
+  resume keywords kept apart from missing qualifications; requirements with category and whether they're shown),
+  change report (selection, before → after for every bullet, what was left out, reviewer changes, remaining gaps),
+  interview defense notes (2–3 talking points per bullet, from the evidence).
+- `interview.py` + `interview` / `add-evidence --confirm` — up to 5 questions (missing-evidence requirements first,
+  then strong matches with no stated scope/outcome); an answer is saved, dated, to `inputs/evidence_additions.md` only
+  with explicit confirmation; headings in answers are neutralized; the master resume is never touched.
+- JD analysis: requirement bullets without a known technology are kept when a JD has no requirement headings (Copart
+  lost "web standards / cross-browser" and "browser rendering"); 2–3-word footer bullets ("Right to Work") dropped.
+- SKILL.md: prepare → draft → review → truth pass → build → interview; references (bullet guidelines, US norms,
+  reviewer checklist).
+
+**Fixed along the way**: CI/CD flagged as two unknown acronyms (vocabulary spans are now excluded from the
+unknown-token check); "e-commerce" / "authentication" flagged for capitalization (only product names now); dates
+inside answers parsed as metrics ("2026-01-01" → "01"); coverage said the degree requirement wasn't shown (education
+and skills evidence now count).
+
+**Tests**: 466 passed (60 Resume Builder; 23 new: 10 kinds of unsupported claims / invented metrics caught, 5 faithful
+rewrites pass, whole-content verification incl. skills, talking points and the LLM truth pass, rule findings, keyword
+repetition, review once + build requires review, unsupported claim → failed version while the last good one stays
+current, coverage / change / defense reports, evidence interview with DEMO answers, prompt injection in a JD).
+
+**Real data** (Claude as drafter, then as a separate reviewer and truth pass):
+- Copart — Software Engineering Intern (co-op, 32534): v1 READY, v2 READY after tightening two bullets (2 of 3
+  attempts); 0 unsupported claims (39 checked); coverage 100% (keywords are all "mentioned" in this JD); 2
+  missing-evidence requirements (cross-browser, browser rendering). Warning left: one one-word last line ("50%").
+- DoorDash — Software Engineer I (full-time, 16070): v1 READY, 0 unsupported (40 checked), coverage 68%; missing
+  resume keyword "code reviews" (the bullet says "reviewing code"); missing qualifications: data structures, Kotlin.
+- Inspected: page images, extracted text, truth / coverage / changes / defense / review reports.
+
 ## Needs Nikhil
 1. Two Accenture bullets both claim a **70% reliability** gain ("processing reliability" and "distributed storage
    reliability"). If they are the same result, say which wording to keep; the drafter will not use both together.
+2. **Evidence interview** (answer any you can; I save only what you confirm):
+   - Copart: Have you worked on web standards / cross-browser compatibility (which role or project, what you did)?
+   - Copart: Have you worked on browser rendering performance (not API latency)?
+   - Copart / all: the Full-Stack E-Commerce project — any scale or outcome (users, orders, load, team size)?
+   - DoorDash: data structures beyond the Algorithms course (coursework, projects, interviews)?
+   - DoorDash: AI-powered tools in your development work (which, how you evaluate their output)?
+3. **DoorDash eligibility**: the JD asks for "no more than two years of full-time professional experience". Freelance
+   Feb 2022–Aug 2025 plus 11 months at Accenture may exceed that, depending on how freelance work counts. Your call
+   before applying (the resume itself is unchanged by this).
+

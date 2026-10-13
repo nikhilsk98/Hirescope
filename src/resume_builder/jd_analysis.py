@@ -103,12 +103,12 @@ def _jd_blocks(jd: str) -> list[tuple[str, str]]:
                                                   (RESP_HEAD.match(bare) or REQ_HEAD.search(bare)) and len(bare.split()) <= 8):
             head = bare
             continue
-        out.append((head, re.sub(r"^[•\-*·]\s+", "", ln)))
+        out.append((head, re.sub(r"^[•\-*·]\s+", "", ln), is_bullet))
     return out
 
 
 def responsibilities(jd: str) -> list[str]:
-    return [ln for h, ln in _jd_blocks(jd) if RESP_HEAD.match(h or "")][:15]
+    return [ln for h, ln, _b in _jd_blocks(jd) if RESP_HEAD.match(h or "")][:15]
 
 
 def _parse_keyword_line(line: str) -> dict | None:
@@ -207,9 +207,10 @@ def analyze(job: dict, package_text: str, bank: Bank, settings: Settings, profil
     preferred = clean(_lines(sec.get("Preferred requirements", "")))
     mentioned = []
     if not required and not preferred:
-        # no requirement sections parsed: use the JD's bullet-like lines that name a concrete skill
-        for h, ln in _jd_blocks(jd):
-            if len(ln) < 300 and not _INJ.search(ln) and terms_in(ln) and not RESP_HEAD.match(h or ""):
+        # no requirement sections parsed: the JD's bullets (outside responsibilities) and lines naming a skill
+        for h, ln, bullet in _jd_blocks(jd):
+            if len(ln) < 300 and not _INJ.search(ln) and not RESP_HEAD.match(h or "") and (
+                    terms_in(ln) or (bullet and len(ln.split()) >= 4)):   # 2-3 word bullets are links / boilerplate
                 mentioned.append(ln)
         mentioned = mentioned[:20]
     resp = clean(responsibilities(jd))

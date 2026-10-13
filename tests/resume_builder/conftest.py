@@ -99,3 +99,21 @@ def rb_env(tmp_path, monkeypatch):
 def needs_tex():
     return pytest.mark.skipif(shutil.which("tectonic") is None or shutil.which("pdftotext") is None,
                               reason="tectonic / poppler not installed")
+
+
+def reviewed_flow(rb_env, work: Path, edit=None, job=None):
+    """DEMO drafter → reviewer: draft = baseline (optionally edited), reviewer packet, reviewed content + review.json."""
+    from resume_builder import pipeline
+    from resume_builder.content_schema import dump, parse
+    c = parse((work / "baseline.json").read_text())
+    if edit:
+        edit(c)
+    c.notes.stage = "draft"
+    (work / "draft.json").write_text(dump(c))
+    pipeline.review_draft(str(job or rb_env.job))
+    c = parse((work / "draft.json").read_text())
+    c.notes.stage = "reviewed"
+    c.notes.reviewer.append("DEMO reviewer: no changes needed")
+    (work / "content.json").write_text(dump(c))
+    (work / "review.json").write_text(json.dumps({"reviewer": "DEMO", "critique": []}))
+    return c

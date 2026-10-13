@@ -12,7 +12,7 @@ from resume_builder.config import InputError, load_settings
 from resume_builder.content_schema import ContentError, dump, parse
 from resume_builder.evidence import build_bank, load_bank, metrics_in, parse_additions, parse_master
 
-from .conftest import FIX, insert_job, needs_tex
+from .conftest import FIX, insert_job, needs_tex, reviewed_flow
 
 
 # --- evidence bank -------------------------------------------------------------------------------------------
@@ -314,7 +314,7 @@ def test_overflow_triggers_trimming_in_priority_order(rb_env):
     work = pipeline.job_dir("DemoCorp", rb_env.job) / "work"
     pipeline.prepare(str(rb_env.job))
     (work / "content.json").write_text(dump(pipeline.assign_ids(c)))
-    res = pipeline.build(str(rb_env.job))
+    res = pipeline.build(str(rb_env.job), require_review=False)
     assert res["attempts"][0]["pages"] >= 2 and res["report"].pages == 1, res["attempts"]
     kinds = ["repeated" if "repeated" in r else "priority 5" if "priority 5" in r else r for r in res["repairs"]]
     assert kinds and set(kinds) <= {"repeated", "priority 5"}
@@ -395,7 +395,7 @@ def test_prepare_and_build_end_to_end(rb_env):
     assert out["work"] == str(work) and (work / "brief.md").exists()
     brief = (work / "brief.md").read_text()
     assert "DATA" in brief and "exp-demo-b1" in brief
-    shutil.copy(work / "baseline.json", work / "content.json")
+    reviewed_flow(rb_env, work)
     jd = pipeline.job_dir("DemoCorp", rb_env.job)
     with versions.JobLock(jd):
         res = pipeline.build(str(rb_env.job))

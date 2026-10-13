@@ -350,7 +350,7 @@ def load_work(jd: Path) -> tuple[dict, dict]:
 
 
 def build(ref: str, content_path: Path | None = None, db_path: Path | None = None,
-          max_attempts: int | None = None) -> dict:
+          max_attempts: int | None = None, require_review: bool = True) -> dict:
     """Validate content, then compile → validate → repair (bounded) and save the result as a new version."""
     settings = load_settings()
     from jobsearch.storage import db as hs_db
@@ -367,6 +367,10 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
     if not src.exists():
         raise InputError(f"{src} not found: write the drafted + reviewed content there first")
     c = assign_ids(parse(src.read_text(encoding="utf-8")))
+    if require_review:
+        if c.notes.stage != "reviewed" or not (jd / "work" / "review.json").exists():
+            raise ContentError("content.json has not been through the reviewer pass: run `review` on the draft, then "
+                               "write the revised content.json (notes.stage \"reviewed\") and review.json")
     if c.job_pk != job["id"]:
         raise ContentError(f"content.json is for job {c.job_pk}, not {job['id']}")
     probs = structure_problems(c, bank)
@@ -442,6 +446,16 @@ def finalize(result: dict, extra_checks: list[dict] | None = None, extra_reports
                                                    res.font_used if res else None, settings.fonts.get("preferred"))}
     if rep and rep.extracted_text:
         reps["extracted_text.txt"] = rep.extracted_text
+    q = quality(result)
+    for chk in q["checks"]:
+        if not chk["ok"]:
+            reasons.append(f"{chk['name']}: {chk['detail']}")
+    status = "ready" if not reasons and res and res.ok else "failed"
+    manifest["status"], manifest["failure_reasons"] = status, reasons
+    manifest["checks"] = [*(extra_checks or []), *q["checks"]]
+    manifest["truth"] = {"ok": q["truth"].ok, "unsupported": len(q["truth"].findings)}
+    manifest["coverage_pct"] = q["coverage"]["coverage_pct"]
+    reps.update(q["reports"])
     reps.update(extra_reports or {})
     # the caller holds the job lock (versions.JobLock) for the whole build
     vdir = versions.save_version(jd, result["build_dir"], name, dump(c), reps, manifest,
@@ -450,3 +464,79 @@ def finalize(result: dict, extra_checks: list[dict] | None = None, extra_reports
         versions.set_current(jd, int(vdir.name[1:]), "new build passed every check")
     return {"status": status, "version_dir": str(vdir), "pdf": str(vdir / name) if res and res.pdf else None,
             "reasons": reasons, "version": int(vdir.name[1:])}
+
+
+def quality(result: dict) -> dict:
+    """Truth verification (deterministic + the drafter's truth pass), reviewer record, coverage, change report and
+    interview defense notes for the final content."""
+    from . import reports, review, verify
+    c, bank, analysis, jd = result["content"], result["bank"], result["analysis"], result["job_dir"]
+    work = jd / "work"
+    llm = verify.load_llm_review(work / "truth_review.json")
+    truth = verify.verify(c, bank, llm)
+    cov = reports.coverage(c, bank, analysis)
+    lint = review.lint(c, bank, result["settings"], analysis)
+    rv = {}
+    if (work / "review.json").exists():
+        try:
+            rv = json.loads((work / "review.json").read_text(encoding="utf-8"))
+        except ValueError:
+            rv = {"critique": [{"where": "review.json", "issue": "not valid JSON", "fix": ""}]}
+    draft_findings = []
+    if (work / "draft_findings.json").exists():
+        draft_findings = json.loads((work / "draft_findings.json").read_text(encoding="utf-8"))
+    rep = {
+        "truth.md": verify.truth_md(truth, bank),
+        "truth.json": json.dumps(truth.to_json(), indent=1, ensure_ascii=False),
+        "coverage.md": reports.coverage_md(cov),
+        "coverage.json": json.dumps(cov, indent=1, ensure_ascii=False),
+        "changes.md": reports.changes_md(c, bank, analysis, result["repairs"], cov),
+        "defense.md": reports.defense_md(c, bank),
+        "review.md": reports_review(rv, draft_findings, lint),
+    }
+    checks = [{"name": "truth", "ok": truth.ok, "detail": (f"{len(truth.findings)} unsupported claim(s): " + "; ".join(
+        f"{f.where}: {f.detail}" for f in truth.findings[:4])) if not truth.ok else "every claim supported"}]
+    return {"truth": truth, "coverage": cov, "lint": lint, "reports": rep, "checks": checks}
+
+
+def reports_review(rv: dict, draft_findings: list, final_lint: list) -> str:
+    from . import review
+    out = review.review_md(rv, draft_findings) if rv else "# Reviewer pass\n\nNo reviewer pass recorded.\n"
+    out += "\n## Rule findings left on the final content\n" + ("\n".join(
+        f"- [{f['rule']}] {f['where']}: {f['detail']}" for f in final_lint) or "- none") + "\n"
+    return out
+
+
+def review_draft(ref: str, db_path: Path | None = None) -> dict:
+    """Reviewer pass input: lint + truth check of work/draft.json → work/review_packet.md. Once per generation."""
+    from . import review, verify
+    from jobsearch.storage import db as hs_db
+    from jobsearch import paths as hs_paths
+    conn = hs_db.connect(db_path or hs_paths.DB)
+    try:
+        job = jd_analysis.resolve_job(conn, ref)
+    finally:
+        conn.close()
+    jd = job_dir(job["company"], job["id"])
+    state, analysis = load_work(jd)
+    if state.get("reviewed_at"):
+        raise ContentError("the reviewer pass already ran for this generation (fixes are applied once); "
+                           "run prepare again to start a new generation")
+    work = jd / "work"
+    src = work / "draft.json"
+    if not src.exists():
+        raise InputError(f"{src} not found: the drafter writes the draft there first")
+    settings, bank = load_settings(), load_bank()
+    d = assign_ids(parse(src.read_text(encoding="utf-8")))
+    probs = structure_problems(d, bank)
+    if probs:
+        raise ContentError("draft problems:\n  - " + "\n  - ".join(probs))
+    findings = review.lint(d, bank, settings, analysis)
+    truth = verify.verify(d, bank)
+    (work / "draft.json").write_text(dump(d), encoding="utf-8")
+    (work / "draft_findings.json").write_text(json.dumps(findings, indent=1), encoding="utf-8")
+    (work / "review_packet.md").write_text(review.review_packet(d, bank, settings, analysis, findings, truth),
+                                           encoding="utf-8")
+    state["reviewed_at"] = utcnow()
+    (work / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
+    return {"packet": str(work / "review_packet.md"), "findings": findings, "truth": truth}
