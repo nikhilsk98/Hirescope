@@ -103,19 +103,21 @@ def _date(v) -> str | None:
     return v if _DATE.match(v) else None
 
 
-def readable(directory: Path) -> bool:
-    """Can this process list the folder? (macOS denies scheduled jobs ~/Downloads without Full Disk Access; Python's
-    glob would silently return nothing.)"""
+def access(directory: Path) -> str:
+    """"ok", "missing" or "blocked". macOS denies scheduled jobs ~/Downloads without Full Disk Access (even is_dir()
+    says False there), and Python's glob would silently return nothing, so the listing error is what tells."""
     try:
         os.listdir(directory)
-        return True
+        return "ok"
+    except PermissionError:
+        return "blocked"
     except OSError:
-        return False
+        return "missing"
 
 
 def newest_export(directory: Path | list[Path]) -> Path | None:
     dirs = directory if isinstance(directory, list) else [directory]
-    files = [p for d in dirs if d.is_dir() and readable(d) for p in d.glob(EXPORT_GLOB) if p.is_file()]
+    files = [p for d in dirs if access(d) == "ok" for p in d.glob(EXPORT_GLOB) if p.is_file()]
     return max(files, key=lambda p: p.stat().st_mtime) if files else None
 
 
@@ -246,7 +248,7 @@ def import_newest(conn, directory: Path | list[Path], apps_dir: Path | None, arc
     dirs = directory if isinstance(directory, list) else [directory]
     path = newest_export(dirs)
     if path is None:
-        blocked = [str(d) for d in dirs if d.is_dir() and not readable(d)]
+        blocked = [str(d) for d in dirs if access(d) == "blocked"]
         note = (f"; can't read {', '.join(blocked)} (macOS privacy protection: scheduled runs need Full Disk Access "
                 f"for that folder — save the export to {dirs[-1]} instead)") if blocked else ""
         return ImportResult(skipped_reason=f"no {EXPORT_GLOB} in {', '.join(map(str, dirs))}{note}")

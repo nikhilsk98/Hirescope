@@ -274,8 +274,8 @@ class Preferences(BaseModel):
     top_n: int = 1000                         # per track
     timezone: str = "America/New_York"
     my_companies_csv: str = "inputs/my_companies.csv"
-    # where "Export statuses" files are picked up (newest wins). ~/Downloads is a macOS-protected folder that
-    # scheduled (launchd) runs can't read without Full Disk Access; inputs/statuses/ in the repo always works.
+    # where "Export statuses" files are picked up (newest wins). ~/Downloads is macOS-protected (a scheduled run may
+    # be denied it; the Run Log then says so); inputs/statuses/ in the repo always works.
     statuses_import_dir: str | list[str] = ["~/Downloads", "inputs/statuses"]
 
     @model_validator(mode="after")

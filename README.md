@@ -372,12 +372,11 @@ Plists are rendered from `scripts/launchd/com.nikhil.jobsearch{,.quick}.plist.te
   check, backup or digest — new postings from the companies you care most about surface within ~2.5 hours.
 - **One run at a time**: `data/run.lock` (pid + start). A quick check that meets a running full run just skips; a lock
   whose process died, or older than 3 hours, is replaced.
-- **macOS permissions**: none needed for the schedule — the repo is in `~/Projects` (not a protected folder). The one
-  protected folder involved is `~/Downloads`, where browsers save **Export statuses**: scheduled runs can't read it,
-  so they also check `inputs/statuses/` (`statuses_import_dir`). Either save the export there (set your browser to
-  ask where to save downloads), or run `./scripts/run.sh` from Terminal now and then, which can read ~/Downloads.
-  The Run Log says when a folder couldn't be read. (Keeping the repo in `~/Documents` instead would need Full Disk
-  Access for `/bin/zsh`: launchd jobs fail there with "can't open input file", exit 127.)
+- **macOS permissions**: none needed for the schedule — the repo is in `~/Projects`, which isn't a protected folder.
+  (Kept in `~/Documents`, launchd jobs fail with "can't open input file", exit 127, unless `/bin/zsh` has Full Disk
+  Access.) Statuses are imported from `~/Downloads` and `inputs/statuses/` (`statuses_import_dir`, newest wins):
+  `~/Downloads` is protected, but macOS lets the venv's Python read it on this Mac (verified from a launchd job). If
+  the Run Log ever says a folder couldn't be read, save the export to `inputs/statuses/` instead.
 - **Notifications** are sent with `osascript`, so macOS lists them under **Script Editor**: allow them in System
   Settings → Notifications → Script Editor (Alerts or Banners). `notifications.enabled: false` turns them off.
 
@@ -499,7 +498,7 @@ range, saved views) is tested directly. Design-token contrast is checked against
 | LinkedIn alerts: "not set up" | add `IMAP_USER` and `IMAP_APP_PASSWORD` to `.env` (Gmail app password). "IMAP … authentication failed": regenerate the app password. 0 jobs parsed: alerts may be in another folder (`IMAP_FOLDER`) |
 | No macOS notifications | System Settings → Notifications → Script Editor (osascript) → allow; or `notifications.enabled` is false / `--no-notify` |
 | launchd runs don't happen | `./scripts/schedule.sh status`; read `data/logs/launchd-full.log`. "can't open input file" / "Operation not permitted" → the repo is in a protected folder (`~/Documents`, `~/Desktop`): keep it in `~/Projects`, or give `/bin/zsh` Full Disk Access. After moving the repo: `./scripts/setup.sh`, then `./scripts/schedule.sh install` |
-| Statuses not imported by scheduled runs | they can't read `~/Downloads`; save the export to `inputs/statuses/`, or run `./scripts/run.sh` from Terminal |
+| Statuses not imported by scheduled runs | Run Log → "Statuses import": "can't read ~/Downloads" means macOS blocked the folder; save the export to `inputs/statuses/`, or run `./scripts/run.sh` from Terminal |
 | "another run is in progress" | a run holds `data/run.lock`; it's replaced automatically when that process is gone or > 3 h old |
 | Exit code 75 | offline: nothing was fetched; the next scheduled run retries |
 | A run seems stuck | `kill -USR1 <pid>` prints every thread's stack to the run's stderr / log |

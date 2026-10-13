@@ -112,7 +112,7 @@ thresholds:
 top_n: 1000               # max non-filtered jobs per track written to the dashboard
 timezone: America/New_York
 my_companies_csv: inputs/my_companies.csv
-statuses_import_dir: [~/Downloads, inputs/statuses]   # newest export wins; scheduled runs can only read inputs/statuses (macOS protects ~/Downloads)
+statuses_import_dir: [~/Downloads, inputs/statuses]   # newest export wins; inputs/statuses always works for scheduled runs
 # --- Feedback learning (from your dashboard statuses; bounded, listed under "Learned adjustments") --------
 feedback: {enabled: true, min_evidence: 2, max_per_feature: 3, max_total: 6, weight_nudge_max: 0.25, weight_min_jobs: 5,
            positive_weights: {shortlisted: 1, package exported: 1, applied: 1, interviewing: 1, offer: 1, interested: 0.5},

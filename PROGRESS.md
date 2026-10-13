@@ -202,8 +202,9 @@ consecutive SmartRecruiters runs answered 304 for all 18 companies.
 
 ## Needs Nikhil
 1. ~~Full Disk Access for `/bin/zsh`~~ not needed: the repo moved to `~/Projects/hirescope` (2026-10-13), the schedule
-   was reinstalled and a launchd-started quick check ran successfully. Save **Export statuses** files to
-   `inputs/statuses/` (scheduled runs can't read `~/Downloads`), or run `./scripts/run.sh` from Terminal now and then.
+   was reinstalled and a launchd-started quick check ran end to end (219 of 273 OK; 1 failed: CACI's Workday answered
+   HTTP 520). Statuses import from `~/Downloads` (readable by the venv's Python under launchd, verified) and
+   `inputs/statuses/` (always readable) — use the latter if the Run Log reports a blocked folder.
 2. **Notifications**: allow Script Editor in System Settings → Notifications.
 3. Confirm `inputs/preferences.yaml → work_authorization` (needs_sponsorship: true, us_citizen: false).
 4. Optional: LinkedIn alert emails (Gmail app password in `.env`), `inputs/Connections.csv`, the USCIS H-1B CSV,
