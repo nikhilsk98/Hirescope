@@ -24,6 +24,7 @@ from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, Sour
 from .util import join_locations, parse_dt
 
 PAGE = 20
+FULL_PAGES = 100          # full runs: up to 2,000 results per search (Leidos, NVIDIA, Capital One list 1,100-1,250)
 # Role searches come from config/title_rules.yaml -> search_queries.workday (why those phrases: see that file).
 # Co-op/intern roles come from each site's own early-career facets.
 _US = {"united states of america", "united states", "usa", "us"}
@@ -118,7 +119,7 @@ class WorkdayAdapter(Adapter):
             raise SourceError(f"{company.name}: {url}: {e}") from e
         facet = _find_us_facet(first.get("facets") or [])
         applied = {facet[0]: [facet[1]]} if facet else {}
-        max_pages = 50 if ctx.full else min(ctx.max_pages, 10)
+        max_pages = FULL_PAGES if ctx.full else min(ctx.max_pages, 10)
 
         searches = [(q, applied) for q in ctx.queries.get("workday", [])]
         for param, fid, desc in _early_career_facets(first.get("facets") or []):

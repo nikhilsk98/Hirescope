@@ -217,6 +217,7 @@ def test_main_offline_and_locked(monkeypatch, tmp_path):
     monkeypatch.setattr(R.paths, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(R.paths, "DATA", tmp_path)
     monkeypatch.setattr(R.alerts, "online", lambda: False)
+    monkeypatch.setattr("time.sleep", lambda s: None)          # wait_online retries for about a minute
     assert R.main([]) == R.EX_TEMPFAIL
     monkeypatch.setattr(R.alerts, "online", lambda: True)
     with RunLock(tmp_path / "state" / "run.lock"):
@@ -330,3 +331,37 @@ def test_main_end_to_end_with_mocked_sources(monkeypatch, tmp_path, cfg, greenho
     assert R.main([*args, "--dry-run"]) == 0
     c = sqlite3.connect(tmp_path / "jobs.db")
     assert c.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == before
+
+
+def test_network_wait_retries_before_giving_up(monkeypatch):
+    """A Mac waking for a scheduled run may have no network for a few seconds: retry before calling it offline."""
+    answers = iter([False, False, True])
+    monkeypatch.setattr(alerts, "online", lambda: next(answers))
+    slept = []
+    assert alerts.wait_online(attempts=5, delay_s=15, sleep=slept.append) is True and slept == [15, 15]
+    monkeypatch.setattr(alerts, "online", lambda: False)
+    slept.clear()
+    assert alerts.wait_online(attempts=3, delay_s=1, sleep=slept.append) is False and slept == [1, 1]
+
+
+def test_interrupted_runs_are_closed_without_a_summary(conn):
+    a = db.start_run(conn, False)
+    b = db.start_run(conn, False)
+    db.finish_run(conn, b, {"scope": "full"})
+    assert db.close_interrupted_runs(conn) == 1
+    row = conn.execute("SELECT started_at, finished_at, summary FROM runs WHERE id=?", (a,)).fetchone()
+    assert row[1] == row[0] and row[2] is None
+    assert [r["id"] for r in db.recent_runs(conn)] == [b]
+    assert db.close_interrupted_runs(conn) == 0
+
+
+def test_cloudflare_52x_errors_are_retried():
+    import httpx
+    from jobsearch.adapters.base import HttpClient
+    calls = []
+
+    def handler(req):
+        calls.append(1)
+        return httpx.Response(520 if len(calls) < 3 else 200, json={"ok": True})
+    c = HttpClient(retries=3, min_interval=0, transport=httpx.MockTransport(handler))
+    assert c.get_json("https://demo.example/api") == {"ok": True} and len(calls) == 3

@@ -181,8 +181,8 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     faulthandler.register(signal.SIGUSR1)  # `kill -USR1 <pid>` dumps every thread's stack to stderr
     log_file = setup_logging(args.verbose)
-    if not (args.rescore or args.dry_run) and not alerts.online():
-        log.error("offline (no network): nothing fetched; the next scheduled run will retry")
+    if not (args.rescore or args.dry_run) and not alerts.wait_online():
+        log.error("offline (no network for about a minute): nothing fetched; the next scheduled run will retry")
         return EX_TEMPFAIL
     lock = RunLock(paths.STATE_DIR / "run.lock", stale_hours=3, what="quick check" if args.quick else "run")
     try:
@@ -234,6 +234,8 @@ def _main(args, log_file: Path) -> int:
     else:
         jd_dir = paths.JD_DIR
 
+    if not args.dry_run and (n := db.close_interrupted_runs(conn)):
+        log.info("marked earlier unfinished run(s) as interrupted", extra={"runs": n})
     run_id = db.start_run(conn, args.dry_run)
     run_started = db.utcnow()
     imported = {}

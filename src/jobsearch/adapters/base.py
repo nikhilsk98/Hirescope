@@ -211,7 +211,7 @@ def safe_url(text: str) -> str:
 class HttpClient:
     """httpx wrapper: timeouts, exponential backoff with jitter, per-host spacing (thread-safe), robots.txt."""
 
-    RETRY_STATUS = {429, 500, 502, 503, 504}
+    RETRY_STATUS = {429, 500, 502, 503, 504, 520, 521, 522, 523, 524}   # 52x: Cloudflare-fronted origins (Workday)
 
     def __init__(self, timeout: float = 30.0, retries: int = 3, min_interval: float = 1.0,
                  transport: httpx.BaseTransport | None = None, host_intervals: dict[str, float] | None = None):

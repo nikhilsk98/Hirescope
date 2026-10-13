@@ -22,6 +22,18 @@ def online(timeout: float = 5.0, hosts=PROBE_HOSTS) -> bool:
     return False
 
 
+def wait_online(attempts: int = 5, delay_s: float = 15.0, sleep=None) -> bool:
+    """Online within about a minute: a Mac waking for a scheduled run often has no network for a few seconds."""
+    import time
+    sleep = sleep or time.sleep
+    for n in range(attempts):
+        if online():
+            return True
+        if n < attempts - 1:
+            sleep(delay_s)
+    return False
+
+
 def new_strong(conn, since: str, early_hours: int = 48) -> tuple[list[dict], list[dict]]:
     """(new Strong matches first seen since `since`, early birds: new Strong or Stretch matches posted within
     early_hours, best first)."""

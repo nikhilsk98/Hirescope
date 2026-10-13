@@ -705,6 +705,15 @@ def record_resume_version(conn, hash_: str, path: str) -> bool:
     return cur.rowcount == 1
 
 
+def close_interrupted_runs(conn) -> int:
+    """Runs that never finished (process killed, machine slept / crashed) get finished_at = started_at and no
+    summary, so nothing shows them as still running and nothing mistakes them for a completed run (the Run Log and the
+    last-run lookups only read runs with a summary). Called by the next run, under the run lock."""
+    with conn:
+        cur = conn.execute("UPDATE runs SET finished_at = started_at WHERE finished_at IS NULL")
+    return cur.rowcount
+
+
 def start_run(conn, dry_run: bool) -> int:
     with conn:
         return conn.execute("INSERT INTO runs (started_at, dry_run) VALUES (?, ?)", (utcnow(), int(dry_run))).lastrowid
