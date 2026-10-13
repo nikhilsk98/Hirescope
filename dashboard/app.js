@@ -13,7 +13,6 @@
   const SKIP_REASONS = ["not interested in role", "location", "too senior", "too junior", "missing skills", "company",
                         "compensation", "visa/sponsorship", "start date", "duplicate", "other"];
   const TRACKS = { coop_intern: "Co-op / Intern", full_time: "Full-time", unclear: "Unclear" };
-  const PAGE = 60;
 
   // ---------- tiny DOM helpers ----------
   const $ = (s, r = document) => r.querySelector(s);
@@ -55,6 +54,7 @@
   // statuses: {jobKey: {status, skip_reason, notes, history, updated_at, ...}}; overrides: {jobKey: {track, updated_at}};
   // apps: {id: application} (see core.js). All three save to localStorage instantly and go out with Export statuses.
   const C = window.HSCore;
+  const V = window.HSView;
   let statuses = store.get(K.statuses, {});
   const overrides = {};
   for (const [k, v] of Object.entries(store.get(K.overrides, {}))) overrides[k] = typeof v === "string" ? { track: v, updated_at: "1970-01-01T00:00:00Z" } : v;
@@ -145,6 +145,7 @@
   const inTrack = (j) => ui.both || trackOf(j) === ui.track || trackOf(j) === "unclear";
   const visibleJobs = () => JOBS.filter((j) => !j.filtered && inTrack(j));
   const DONE = ["applied", "skipped", "rejected", "interviewing", "offer"];
+  const TRACKED = ["applied", "interviewing", "offer", "rejected"];
   const applyQueue = () => (META.apply_today ? (ui.both ? [...(META.apply_today.coop_intern || []), ...(META.apply_today.full_time || [])] : META.apply_today[ui.track] || []) : [])
     .map((id) => BY_ID.get(id)).filter((j) => j && !DONE.includes(statusOf(j))).slice(0, (ui.both ? 2 : 1) * UI_CFG.apply_today_size);
 
@@ -154,6 +155,7 @@
     { id: "all", label: "All Jobs", ic: "▤", jobs: () => visibleJobs() },
     { id: "mine", label: "My Companies", ic: "♥", jobs: () => visibleJobs().filter((j) => j.my_company) },
     { id: "applications", label: "My Applications", ic: "▦", group: "Mine", special: true, count: () => appsInTrack().length },
+    { id: "tracker", label: "Applied / Tracker", ic: "☑", jobs: () => JOBS.filter((j) => inTrack(j) && TRACKED.includes(statusOf(j))) },
     { id: "shortlisted", label: "Shortlisted", ic: "✓", jobs: () => JOBS.filter((j) => inTrack(j) && statusOf(j) === "shortlisted") },
     { id: "followups", label: "Follow-ups Due", ic: "↻", special: true, count: () => new Set([...followupsDue(), ...ghostsDue()].map((a) => a.id)).size },
     { id: "closing", label: "Closing Soon", ic: "⏳", jobs: () => visibleJobs().filter((j) => j.deadline && daysUntil(j.deadline) >= 0 && daysUntil(j.deadline) <= UI_CFG.closing_soon_days) },
@@ -180,6 +182,7 @@
     new: ["New", "good"], fresh: ["Fresh", "good"], updated: ["Updated", "warn"], reopened: ["Reopened", "warn"],
     closing: ["Closing soon", "flag"], ghost: ["Ghost risk", "warn"], newgrad: ["New Grad", "info"], eligibility: ["Check eligibility", "warn"],
     broken: ["Broken link", "flag"], nojd: ["No JD", ""], meaning: ["Meaning match", "info"], mine: ["My Company", "info"],
+    seen: ["Seen", "seen"],
   };
   const REF = META.referrals || {};
   const RED = { sponsorship: "No sponsorship", citizenship: "US citizenship required", clearance: "Clearance required" };
@@ -209,10 +212,7 @@
     return list.filter((j) => {
       for (const f of FILTERS) { const v = st.filters[f.id]; if (v && v.length && !f.test(j, v)) return false; }
       if (ui.day && j.day !== ui.day) return false;
-      if (st.salary > 0) {
-        if (j.salary && (!j.salary.currency || j.salary.currency === "USD")) { if (j.salary.max < st.salary) return false; }
-        else if (st.salaryKnown) return false;
-      }
+      if ((st.salary || st.salaryMax || st.salaryKnown) && !V.salaryMatch(j.salary, st.salary, st.salaryMax, st.salaryKnown)) return false;
       if (q) {
         const hay = `${j.title} ${j.company} ${j.location} ${(j.terms || []).join(" ")} ${(j.ats && j.ats.top || []).join(" ")} ${(j.reasons || []).join(" ")}`.toLowerCase();
         if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
@@ -248,17 +248,29 @@
         `${s.sources_failed || 0} failed, ${s.sources_manual || 0} manual, ${s.sources_partial || 0} partial, ${s.sources_skipped || 0} not due. ` +
         `Jobs found ${s.jobs_found}, new ${s.new}, updated ${s.updated}, closed ${s.closed}.`;
     }
-    const dp = $("#day-picker");
-    dp.textContent = "";
-    dp.append(el("option", { value: "", text: "All days" }));
-    for (const d of META.days || []) dp.append(el("option", { value: d, text: d, selected: ui.day === d }));
-    dp.addEventListener("change", () => { ui.day = dp.value || null; saveUI(); renderAll(); });
+    const log = $("#log-link");
+    if (META.log_path) { log.href = "file://" + encodeURI(META.log_path); log.hidden = false; }
     const L = META.learned || {};
     const box = $("#learned"); box.textContent = "";
     box.append(...[el("h4", { text: "Learned adjustments" }), el("div", { text: L.status || "None yet." }),
       L.adjustments && L.adjustments.length ? el("ul", { class: "list-plain", style: "margin-top:6px" }, L.adjustments.map((a) => el("li", { text: a }))) : null,
       Object.keys(L.ignored || {}).length ? el("div", { style: "margin-top:6px", text: `Skips that teach nothing (not about the job itself): ${Object.entries(L.ignored).map(([k, n]) => `${k} ×${n}`).join(", ")}` }) : null,
       ...(L.suggestions || []).map((x) => el("div", { class: "banner warn", style: "margin-top:6px", text: x }))].filter(Boolean));
+  }
+  // day tabs: the most recent days first-seen as tabs, older days in a dropdown
+  const dayLabel = (d) => (d === today() ? "Today" : (() => { try { return new Date(d + "T12:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }); } catch (e) { return d; } })());
+  function renderDayTabs() {
+    const box = $("#day-tabs"); box.textContent = "";
+    const { recent, older } = V.dayTabs(META.days || [], 4);
+    const tab = (d, label) => el("button", { class: "day-tab", type: "button", "aria-pressed": String((ui.day || null) === d), title: d ? `Jobs first seen on ${d}` : "Every day",
+      onclick: () => { ui.day = d; saveUI(); renderAll(); } }, label);
+    box.append(el("span", { class: "muted day-lbl", text: "First seen" }), tab(null, "All days"), ...recent.map((d) => tab(d, dayLabel(d))));
+    if (older.length) {
+      const sel = el("select", { class: "day-older" + (older.includes(ui.day) ? " active" : ""), "aria-label": "Older days" },
+        el("option", { value: "", text: older.includes(ui.day) ? "Older…" : `Older (${older.length})…` }), older.map((d) => el("option", { value: d, text: d, selected: ui.day === d })));
+      sel.addEventListener("change", () => { ui.day = sel.value || null; saveUI(); renderAll(); });
+      box.append(sel);
+    }
   }
   // unsynced = changed in this browser after the last export and after SQLite's copy (sync.js) of the same item
   const SYNC_AT = (() => {
@@ -345,7 +357,7 @@
 
   // ---------- filter chips ----------
   let openPop = null;
-  const closePop = () => { if (openPop) { openPop.remove(); openPop = null; } };
+  const closePop = () => { if (openPop) { openPop.remove(); openPop = null; const b = $("#saved-btn"); if (b) b.setAttribute("aria-expanded", "false"); } };
   document.addEventListener("click", (e) => { if (openPop && !openPop.contains(e.target) && !e.target.closest(".filter-chip")) closePop(); });
   function renderFilters(base) {
     const box = $("#filters"); box.textContent = "";
@@ -359,34 +371,40 @@
       box.append(wrap);
     }
     box.append(salaryChip(base));
-    if (FILTERS.some((f) => (st.filters[f.id] || []).length) || st.q || ui.day || st.salary) {
-      box.append(el("button", { class: "btn small ghost", type: "button", onclick: () => { st.filters = {}; st.q = ""; st.salary = 0; st.salaryKnown = false; $("#q").value = ""; ui.day = null; $("#day-picker").value = ""; saveUI(); renderAll(); } }, "Clear all"));
+    if (FILTERS.some((f) => (st.filters[f.id] || []).length) || st.q || ui.day || st.salary || st.salaryMax || st.salaryKnown) {
+      box.append(el("button", { class: "btn small ghost", type: "button", onclick: () => { st.filters = {}; st.q = ""; st.salary = 0; st.salaryMax = 0; st.salaryKnown = false; $("#q").value = ""; ui.day = null; saveUI(); renderAll(); } }, "Clear all"));
     }
   }
-  const money = (n) => `$${Math.round(n / 1000)}k`;
+  const SAL_MAX = 400000, SAL_STEP = 10000;
   function salaryChip(base) {
     const st = tstate();
     const wrap = el("div", { class: "filter-wrap" });
     const known = base.filter((j) => j.salary && (!j.salary.currency || j.salary.currency === "USD"));
-    const btn = el("button", { class: "filter-chip" + (st.salary ? " active" : ""), type: "button", "aria-haspopup": "true",
+    const on = !!(st.salary || st.salaryMax || st.salaryKnown);
+    const btn = el("button", { class: "filter-chip" + (on ? " active" : ""), type: "button", "aria-haspopup": "true",
       onclick: (e) => {
         e.stopPropagation(); const was = openPop && openPop.dataset.f === "salary"; closePop(); if (was) return;
-        const pop = el("div", { class: "popover salary-pop", role: "dialog", "aria-label": "Salary" }); pop.dataset.f = "salary";
-        const out = el("output", { text: st.salary ? `at least ${money(st.salary)}` : "any" });
-        const range = el("input", { type: "range", min: 0, max: 300000, step: 10000, value: st.salary || 0, "aria-label": "Minimum salary (top of range)" });
+        const pop = el("div", { class: "popover salary-pop", role: "dialog", "aria-label": "Salary range" }); pop.dataset.f = "salary";
+        const lo = el("input", { type: "range", min: 0, max: SAL_MAX, step: SAL_STEP, value: st.salary || 0, "aria-label": "Minimum salary" });
+        const hi = el("input", { type: "range", min: 0, max: SAL_MAX, step: SAL_STEP, value: st.salaryMax || SAL_MAX, "aria-label": "Maximum salary" });
+        const out = el("output");
         const chk = el("input", { type: "checkbox", checked: !!st.salaryKnown });
-        const apply = () => { st.salary = Number(range.value); st.salaryKnown = chk.checked; saveUI(); renderCounts(); renderList(true); btn.classList.toggle("active", !!st.salary);
+        const vals = () => { let a = Number(lo.value), b = Number(hi.value); if (a > b) [a, b] = [b, a]; return [a, b >= SAL_MAX ? 0 : b]; };
+        const show = () => { const [a, b] = vals(); out.textContent = V.salaryLabel(a, b) || "any"; };
+        const apply = () => { const [a, b] = vals(); st.salary = a; st.salaryMax = b; st.salaryKnown = chk.checked; saveUI(); renderCounts(); renderList(true);
+          btn.classList.toggle("active", !!(a || b || chk.checked)); btn.textContent = salaryText(st);
           const w = [...document.querySelectorAll("#filters .filter-wrap")][FILTERS.length]; if (w && !w.contains(pop)) { w.append(pop); openPop = pop; } };
-        range.addEventListener("input", () => { out.textContent = Number(range.value) ? `at least ${money(Number(range.value))}` : "any"; });
-        range.addEventListener("change", apply); chk.addEventListener("change", apply);
-        pop.append(el("div", { class: "muted", style: "font-size:12px;margin-bottom:6px", text: `Top of the posted range (USD). ${known.length.toLocaleString()} of ${base.length.toLocaleString()} jobs state a salary.` }),
-          range, el("div", { style: "font-size:13px;margin:4px 0 8px" }, "Salary ", out),
+        for (const r of [lo, hi]) { r.addEventListener("input", show); r.addEventListener("change", apply); }
+        chk.addEventListener("change", apply); show();
+        pop.append(el("div", { class: "muted", style: "font-size:12px;margin-bottom:6px", text: `Posted range (USD) overlapping your range. ${known.length.toLocaleString()} of ${base.length.toLocaleString()} jobs state a salary.` }),
+          el("div", { class: "dual-range" }, lo, hi), el("div", { style: "font-size:13px;margin:4px 0 8px" }, "Salary ", out),
           el("label", null, chk, "Hide jobs that don't state a salary"));
         wrap.append(pop); openPop = pop;
-      } }, st.salary ? `Salary ≥ ${money(st.salary)}` : "Salary ▾");
+      } }, salaryText(st));
     wrap.append(btn);
     return wrap;
   }
+  const salaryText = (st) => { const l = V.salaryLabel(st.salary, st.salaryMax); return l ? `Salary ${l}` : st.salaryKnown ? "Salary: stated only" : "Salary ▾"; };
   function openPopover(wrap, f, base) {
     const st = tstate();
     const sel = new Set(st.filters[f.id] || []);
@@ -421,13 +439,25 @@
         svg("circle", { cx: size / 2, cy: size / 2, r, fill: "none", "stroke-width": 5, class: label || "Weak", "stroke-linecap": "round", "stroke-dasharray": `${(c * v) / 100} ${c}` })),
       el("span", { class: "v", text: score == null ? "—" : Math.round(score) }));
   }
+  // inline SVG bars (all charts are SVG; no chart library)
+  function svgBar(frac, cls, w = 100, h = 8) {
+    const v = Math.max(0, Math.min(1, frac || 0));
+    return svg("svg", { class: "sbar", viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: "none", "aria-hidden": "true" },
+      svg("rect", { x: 0, y: 0, width: w, height: h, rx: h / 2, class: "sbar-track" }),
+      v ? svg("rect", { x: 0, y: 0, width: Math.max(h, w * v), height: h, rx: h / 2, class: `sbar-fill ${cls || ""}` }) : "");
+  }
+  function segBar(parts, w = 72, h = 6) {
+    const tot = parts.reduce((a, [n]) => a + n, 0) || 1; let x = 0;
+    const g = svg("svg", { class: "segbar", width: w, height: h, viewBox: `0 0 ${w} ${h}`, "aria-hidden": "true" },
+      svg("rect", { x: 0, y: 0, width: w, height: h, rx: 3, class: "sbar-track" }));
+    for (const [n, cls] of parts) { if (!n) continue; const pw = (w * n) / tot; g.append(svg("rect", { x, y: 0, width: pw, height: h, class: cls })); x += pw; }
+    return g;
+  }
   function atsMeter(j) {
     const a = j.ats; if (!a) return el("span", { class: "ats muted", text: "ATS —" });
-    const tot = a.m + a.s + a.x || 1;
     const tip = a.top && a.top.length ? `Top missing required keywords: ${a.top.join(", ")}` : "No missing required keywords";
     return el("span", { class: "ats", title: `${tip}\n${META.ats_note || ""}` },
-      el("span", { class: "segbar", "aria-hidden": "true" }, el("span", { class: "m", style: `width:${(a.m / tot) * 100}%` }),
-        el("span", { class: "s", style: `width:${(a.s / tot) * 100}%` }), el("span", { class: "x", style: `width:${(a.x / tot) * 100}%` })),
+      segBar([[a.m, "m"], [a.s, "s"], [a.x, "x"]]),
       `ATS ${Math.round(a.c ?? 0)}%`, a.rt ? el("span", { class: "muted", text: ` · Required ${a.rh}/${a.rt}` }) : null);
   }
   function badgesOf(j) {
@@ -456,11 +486,20 @@
           (j.terms || []).length ? el("span", { text: j.terms.join(", ") }) : null,
           j.deadline ? el("span", { text: `Apply by ${fmtDate(j.deadline)}` }) : null,
           j.salary ? el("span", { text: `${j.salary.currency || ""} ${j.salary.min.toLocaleString()}–${j.salary.max.toLocaleString()}` }) : null,
-          j.filtered ? el("span", { class: "err", text: (j.reasons || []).join("; ") }) : atsMeter(j))),
-      el("div", { class: "card-side" }, j.filtered ? el("span", { class: "chip", text: "Filtered" }) : ring(j.score, j.label)));
+          j.filtered ? el("span", { class: "err", text: (j.reasons || []).join("; ") }) : atsMeter(j),
+          !j.filtered && (j.similar || []).length ? el("button", { class: "link-btn", type: "button", title: "Open the nearest similar open roles",
+            onclick: (e) => { e.stopPropagation(); openPanel(j.id, "Similar"); }, onkeydown: (e) => e.stopPropagation() }, `More like this (${j.similar.length})`) : null)),
+      el("div", { class: "card-side" }, j.filtered ? el("span", { class: "chip", text: "Filtered" }) : ring(j.score, j.label), moveButtons(j)));
     if (selectedId === j.id) c.classList.add("selected");
     if (picked.has(j.id)) c.classList.add("picked");
     return c;
+  }
+  // Unclear jobs: one-click Move to Co-op / Full-time right on the card (saved as an override, respected by later runs)
+  function moveButtons(j) {
+    if (trackOf(j) !== "unclear") return null;
+    const b = (t, label) => el("button", { class: "btn small", type: "button", title: `Move to ${TRACKS[t]} (saved)`,
+      onclick: (e) => { e.stopPropagation(); setTrack(j, t); }, onkeydown: (e) => e.stopPropagation() }, label);
+    return el("div", { class: "move-btns", role: "group", "aria-label": "Move this Unclear job" }, b("coop_intern", "→ Co-op"), b("full_time", "→ Full-time"));
   }
   // bulk selection
   const picked = new Set();
@@ -503,31 +542,69 @@
     download(`hirescope-jobs-${today()}.csv`, rows.join("\r\n") + "\r\n", "text/csv;charset=utf-8");
     toast(`Exported ${jobs.length} jobs`);
   }
-  const COLS = [
-    ["", (j) => selBox(j), null, "pickcol"],
-    ["Score", (j) => (j.score == null ? "—" : Math.round(j.score)), "overall", "num"],
-    ["Role", (j) => el("div", null, el("div", { class: "title", text: j.title }), el("div", { class: "muted", text: j.company })), "company", "role"],
-    ["Track", (j) => el("span", { class: `chip ${trackOf(j)}`, text: TRACKS[trackOf(j)] }), null],
-    ["Label", (j) => (j.label ? el("span", { class: `chip ${j.label}`, text: j.label }) : "—"), null],
-    ["Level", (j) => j.level, null],
-    ["Location", (j) => el("span", { title: j.location, text: j.location }), null, "loc"],
-    ["ATS", (j) => atsMeter(j), "ats", "nowrap"],
-    ["Match", (j) => (j.qual == null ? "—" : Math.round(j.qual)), "match", "num"],
-    ["Posted", (j) => (j.posted ? j.posted : j.discovered ? "found " + j.first_seen.slice(0, 10) : "unknown"), "newest", "nowrap"],
-    ["Deadline", (j) => j.deadline || "", "deadline", "nowrap"],
-    ["Status", (j) => statusOf(j) || "", null],
+  const COLS = [   // [header, cell, sort key, class, width]
+    ["", (j) => selBox(j), null, "pickcol", "36px"],
+    ["Score", (j) => (j.score == null ? "—" : Math.round(j.score)), "overall", "num", "64px"],
+    ["Role", (j) => el("div", null, el("div", { class: "title", text: j.title }), el("div", { class: "muted", text: j.company })), "company", "role", null],
+    ["Track", (j) => el("span", { class: `chip ${trackOf(j)}`, text: TRACKS[trackOf(j)] }), null, "", "112px"],
+    ["Label", (j) => (j.label ? el("span", { class: `chip ${j.label}`, text: j.label }) : "—"), null, "", "84px"],
+    ["Level", (j) => j.level, null, "", "84px"],
+    ["Location", (j) => el("span", { title: j.location, text: j.location }), null, "loc", "180px"],
+    ["ATS", (j) => atsMeter(j), "ats", "nowrap", "200px"],
+    ["Match", (j) => (j.qual == null ? "—" : Math.round(j.qual)), "match", "num", "64px"],
+    ["Posted", (j) => (j.posted ? j.posted : j.discovered ? "found " + j.first_seen.slice(0, 10) : "unknown"), "newest", "nowrap", "104px"],
+    ["Deadline", (j) => j.deadline || "", "deadline", "nowrap", "96px"],
+    ["Status", (j) => statusOf(j) || "", null, "", "104px"],
   ];
+  const row = (j) => el("tr", { class: (selectedId === j.id ? "selected" : "") + (picked.has(j.id) ? " picked" : ""), "data-id": j.id, onclick: () => openPanel(j.id) },
+    COLS.map(([, f, , cls]) => el("td", { class: cls || "" }, f(j))));
   function table(list) {
     const st = tstate();
     const head = el("tr", null, COLS.map(([h, , sk]) => el("th", { scope: "col", "aria-sort": sk && st.sort === sk ? "descending" : null, title: sk ? "Sort" : null, "aria-label": h || "Select",
       onclick: () => { if (sk) { st.sort = sk; saveUI(); renderList(); } } }, h, sk && st.sort === sk ? " ↓" : "")));
-    const body = el("tbody");
-    for (const j of list) body.append(el("tr", { class: (selectedId === j.id ? "selected" : "") + (picked.has(j.id) ? " picked" : ""), "data-id": j.id, onclick: () => openPanel(j.id) },
-      COLS.map(([, f, , cls]) => el("td", { class: cls || "" }, f(j)))));
-    return el("div", { class: "table-wrap" }, el("table", { class: "grid" }, el("thead", null, head), body));
+    const padTop = el("tr", { class: "vpad", "aria-hidden": "true" }, el("td", { colspan: COLS.length }));
+    const padBot = el("tr", { class: "vpad", "aria-hidden": "true" }, el("td", { colspan: COLS.length }));
+    const body = el("tbody", null, padTop, padBot);
+    const tbl = el("table", { class: "grid vgrid" }, el("colgroup", null, COLS.map((c) => el("col", { style: c[4] ? `width:${c[4]}` : null }))), el("thead", null, head), body);
+    const root = el("div", { class: "table-wrap" }, tbl);
+    return { root, mount: () => virtualize(root, padTop, padBot, list, row, 52, 0,
+      (a, b) => { padTop.firstChild.style.height = `${a}px`; padBot.firstChild.style.height = `${b}px`; }) };
   }
 
-  let current = []; let shown = 0; let selectedId = null; let observer = null;
+  // ---------- list virtualization: only the rows in (and near) the viewport exist in the DOM ----------
+  // Heights are estimated, then measured as rows render (view.js Heights); spacers keep the scroll height exact.
+  function virtualize(root, padTop, padBot, items, render, estimate, gap, setPads) {
+    const H = new V.Heights(items.length, estimate + gap);
+    let s0 = -1, e0 = -1, raf = 0, dead = false;
+    const listTop = () => root.getBoundingClientRect().top + window.scrollY;
+    const draw = (force) => {
+      raf = 0; if (dead) return;
+      const [s, e] = V.visibleRange(H, window.scrollY - listTop(), window.innerHeight, 8);
+      if (!force && s === s0 && e === e0) return;
+      s0 = s; e0 = e;
+      while (padTop.nextSibling && padTop.nextSibling !== padBot) padTop.nextSibling.remove();
+      const frag = document.createDocumentFragment();
+      for (let i = s; i < e; i++) { const n = render(items[i]); n.dataset.vi = String(i); frag.append(n); }
+      padBot.before(frag);
+      for (let n = padTop.nextSibling; n && n !== padBot; n = n.nextSibling) H.set(Number(n.dataset.vi), n.getBoundingClientRect().height + gap);
+      setPads(H.offsetOf(s), H.total() - H.offsetOf(e));
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(() => draw(false)); };
+    window.addEventListener("scroll", onScroll, { passive: true }); window.addEventListener("resize", onScroll);
+    draw(true);
+    return {
+      destroy() { dead = true; window.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onScroll); if (raf) cancelAnimationFrame(raf); },
+      ensureVisible(i) {
+        if (i < 0 || i >= items.length) return;
+        const y = listTop() + H.offsetOf(i), h = H.h[i], cur = window.scrollY, vh = window.innerHeight;
+        if (y < cur + 120 || y + h > cur + vh - 16) window.scrollTo({ top: Math.max(0, y - vh / 3) });
+        draw(true);
+      },
+      redraw() { draw(true); },
+    };
+  }
+
+  let current = []; let selectedId = null; let vlist = null;
   function setView(id) { tstate().view = id; saveUI(); closePop(); renderAll(); }
   const modeOf = (vid) => (tstate().modes || {})[vid] || ui.mode || "cards";
   const SPECIAL = { coverage: () => renderCoverage, skillgaps: () => renderSkillGaps, applications: () => renderApplications,
@@ -540,11 +617,12 @@
     $("#list").classList.toggle("compact", ui.compact);
     $("#mode-toggle").textContent = modeOf(v.id) === "cards" ? "Table" : "Cards";
     $("#density").setAttribute("aria-pressed", String(ui.compact));
-    const box = $("#list"); box.textContent = "";
-    if (observer) observer.disconnect();
+    const box = $("#list"); box.textContent = ""; box.removeAttribute("aria-busy");
+    if (vlist) { vlist.destroy(); vlist = null; }
     writeHash();
     const special = SPECIAL[v.id];
-    for (const n of ["#sort", "#mode-toggle", "#density"]) $(n).hidden = !!special;
+    for (const n of ["#sort", "#mode-toggle", "#density", "#saved-wrap"]) $(n).hidden = !!special;
+    renderPinned(special ? null : v.id);
     if (special) {
       $("#filters").hidden = true; $("#count").textContent = "";
       special()(box); if (!keepScroll) window.scrollTo({ top: 0 }); return;
@@ -561,33 +639,44 @@
       "Weekly review: low-scored or title-filtered jobs from tier 1 and 2 companies seen in the last 7 days. Skim for false negatives and shortlist the good ones."));
     if (v.id === "apply") box.append(el("div", { class: "banner info", style: "margin:0 0 8px" },
       "Your top actionable jobs right now: Strong or Stretch, freshest first, deadline-aware, not applied or skipped."));
+    if (v.id === "tracker") box.append(el("div", { class: "banner info", style: "margin:0 0 8px" },
+      el("span", { text: "Jobs you applied to from HireScope (status applied, interviewing, offer or rejected). Stages, follow-ups, notes and applications you added yourself live in My Applications." }),
+      el("button", { class: "btn small x", type: "button", onclick: () => setView("applications") }, "Open My Applications")));
     if (!current.length) {
       const last = META.last_run ? fmtTime(META.last_run) : "never";
       const msg = v.id === "last24" ? `No new jobs in the last 24 hours — last run ${last}.` : v.id === "apply" ? "Nothing queued — you're caught up." :
-        v.id === "shortlisted" ? "Nothing shortlisted yet — press s on any job." : "No jobs match these filters.";
+        v.id === "shortlisted" ? "Nothing shortlisted yet — press s on any job." : v.id === "tracker" ? "Nothing applied yet — press a on any job (or add one in My Applications)." : "No jobs match these filters.";
       box.append(el("div", { class: "empty" }, el("b", { text: msg }), el("div", { style: "margin-top:8px" },
         el("button", { class: "btn small", type: "button", onclick: () => { st.filters = {}; st.q = ""; $("#q").value = ""; ui.day = null; saveUI(); setView("all"); } }, "Show all jobs"))));
       return;
     }
+    if (!keepScroll) window.scrollTo({ top: 0 });
     if (modeOf(v.id) === "table") {
-      box.append(table(current.slice(0, 600)));
-      if (current.length > 600) box.append(el("p", { class: "muted", text: `Showing the first 600 of ${current.length.toLocaleString()} — narrow the filters to see the rest.` }));
+      const t = table(current); box.append(t.root); vlist = t.mount();
       return;
     }
-    shown = 0;
-    const more = el("div", { class: "skeleton", "aria-hidden": "true" });
-    const page = () => {
-      const frag = document.createDocumentFragment();
-      for (const j of current.slice(shown, shown + PAGE)) frag.append(card(j));
-      shown += PAGE; more.before(frag);
-      if (shown >= current.length) { more.remove(); if (observer) observer.disconnect(); }
-    };
-    box.append(more); page();
-    if (shown < current.length) {
-      observer = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) page(); }, { rootMargin: "900px" });
-      observer.observe(more);
-    }
-    if (!keepScroll) window.scrollTo({ top: 0 });
+    const padTop = el("div", { class: "vpad", "aria-hidden": "true" }), padBot = el("div", { class: "vpad", "aria-hidden": "true" });
+    const root = el("div", { class: "vlist" }, padTop, padBot);
+    box.append(root);
+    vlist = virtualize(root, padTop, padBot, current, card, ui.compact ? 84 : 116, 8, (a, b) => { padTop.style.height = `${a}px`; padBot.style.height = `${b}px`; });
+  }
+
+  // Apply Today, pinned above the main list on the discovery views (collapsible)
+  function renderPinned(viewId) {
+    const box = $("#pinned"); box.textContent = "";
+    if (!["last24", "all", "mine"].includes(viewId)) return;
+    const q = applyQueue(); if (!q.length) return;
+    const head = el("div", { class: "pin-head" },
+      el("button", { class: "btn small ghost", type: "button", "aria-expanded": String(!ui.pinCollapsed), "aria-controls": "pin-list",
+        onclick: () => { ui.pinCollapsed = !ui.pinCollapsed; saveUI(); renderPinned(viewId); } }, ui.pinCollapsed ? "▸" : "▾"),
+      el("b", { text: `★ Apply today (${q.length})` }), el("span", { class: "muted", text: "Strong / Stretch, freshest and deadline-aware" }),
+      el("span", { class: "spacer" }), el("button", { class: "btn small", type: "button", onclick: () => setView("apply") }, "Open queue"));
+    const list = ui.pinCollapsed ? null : el("ol", { class: "pin-list", id: "pin-list" }, q.map((j) => el("li", null,
+      el("button", { class: "pin-item", type: "button", onclick: () => openPanel(j.id), "aria-label": `${j.title} at ${j.company}, score ${Math.round(j.score || 0)}` },
+        el("span", { class: `chip ${j.label}`, text: Math.round(j.score || 0) }),
+        el("span", { class: "pin-title", text: j.title }), el("span", { class: "muted pin-co", text: j.company }),
+        isFresh24(j) ? el("span", { class: "chip good", text: "Fresh" }) : null))));
+    box.append(el("section", { class: "pinned", "aria-label": "Apply today" }, head, list));
   }
 
   // ---------- skill gaps / coverage ----------
@@ -602,7 +691,7 @@
     const wrap = el("div", { class: "side-card", style: "padding:12px 16px" });
     for (const s of g.skills) {
       wrap.append(el("div", { class: "gap-row" }, el("b", { text: s.skill }),
-        el("div", { class: "hbar" }, el("span", { style: `width:${(s.jobs / max) * 100}%;background:var(--kw-miss)` })),
+        svgBar(s.jobs / max, "miss"),
         el("span", { class: "muted", text: `${s.jobs} jobs` }),
         el("div", { class: "ex" }, "e.g. ", s.examples.map((x, i) => [i ? " · " : "", el("a", { href: "#", onclick: (e) => { e.preventDefault(); openPanel(x.id); }, text: `${x.company} — ${x.title}` })]))));
     }
@@ -825,7 +914,7 @@
     const outs = list.map(C.furthest); const n = list.length || 1;
     const steps = [["Applied", list.length], ["Online Assessment+", outs.filter((o) => ["OA", "interview", "offer"].includes(o)).length],
       ["Interview+", outs.filter((o) => ["interview", "offer"].includes(o)).length], ["Offer", outs.filter((o) => o === "offer").length]];
-    return el("div", { class: "bars" }, steps.map(([k, v]) => [el("span", { class: "k", text: k }), el("div", { class: "hbar" }, el("span", { style: `width:${(100 * v) / n}%` })), el("span", { class: "v", text: v })]));
+    return el("div", { class: "bars" }, steps.map(([k, v]) => [el("span", { class: "k", text: k }), svgBar(v / n), el("span", { class: "v", text: v })]));
   }
   function breakdownTable(title, rows) {
     return el("div", { class: "section" }, el("h3", { text: title }), el("div", { class: "table-wrap" }, el("table", { class: "grid" },
@@ -926,18 +1015,33 @@
         ...[r.sources_checked, r.sources_ok, r.sources_failed, r.jobs_found, r.new, r.updated, r.closed, r.strong].map((v) => el("td", { class: "num", text: v == null ? "—" : v.toLocaleString() })))))))));
   }
 
+  // ----- modal side panels: background inert, Tab cycles inside, Esc closes, focus returns -----
+  const BACKGROUND = [".topbar", ".track-tabs", ".day-row", "#banners", "#tiles", ".layout"];
+  const setInert = (on) => { for (const sel of BACKGROUND) { const n = $(sel); if (n) n.inert = on; } };
+  const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+  function trapTab(e, root) {
+    if (e.key !== "Tab") return;
+    const f = [...root.querySelectorAll(FOCUSABLE)].filter((n) => n.getClientRects().length);
+    if (!f.length) { e.preventDefault(); root.focus(); return; }
+    const first = f[0], last = f[f.length - 1], a = document.activeElement;
+    if (e.shiftKey && (a === first || a === root || !root.contains(a))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (a === last || !root.contains(a))) { e.preventDefault(); first.focus(); }
+  }
+  $("#panel").addEventListener("keydown", (e) => trapTab(e, $("#panel")));
+  $("#drawer").addEventListener("keydown", (e) => trapTab(e, $("#drawer")));
+
   // ----- drawer -----
   let dApp = null; let dLastFocus = null;
   function openDrawer(id) {
     if (!apps[id]) return;
     if (pJob) closePanel();
     if (!dApp) dLastFocus = document.activeElement;
-    dApp = id; renderDrawer();
+    dApp = id; renderDrawer(); setInert(true);
     $("#drawer").classList.add("open"); $("#drawer").setAttribute("aria-hidden", "false"); $("#scrim").classList.add("open");
     setTimeout(() => $("#drawer").focus({ preventScroll: true }), 0);
   }
   function closeDrawer() {
-    $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); if (!pJob) $("#scrim").classList.remove("open"); dApp = null;
+    $("#drawer").classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); if (!pJob) { $("#scrim").classList.remove("open"); setInert(false); } dApp = null;
     if (dLastFocus && dLastFocus.focus && document.contains(dLastFocus)) dLastFocus.focus({ preventScroll: true });
   }
   $("#d-close").addEventListener("click", closeDrawer);
@@ -1044,12 +1148,14 @@
 
   // ---------- detail panel ----------
   const TABS = ["Overview", "Requirements", "Keywords", "Score", "Full JD", "Similar", "Notes & History"];
-  let pTab = "Overview"; let pJob = null; let pDetail = null; let jdHighlight = null; let kwFilter = null; let lastFocus = null;
-  function openPanel(id) {
+  let pTab = "Overview"; let pJob = null; let pDetail = null; let jdHighlight = null; let jdKw = null; let kwFilter = null; let lastFocus = null;
+  function openPanel(id, tab) {
     const j = BY_ID.get(id); if (!j) return;
     if (dApp) closeDrawer();
     if (!pJob) lastFocus = document.activeElement;
-    selectedId = id; pJob = j; pDetail = null; jdHighlight = null; kwFilter = null;
+    selectedId = id; pJob = j; pDetail = null; jdHighlight = null; jdKw = null; kwFilter = null;
+    if (tab) pTab = tab;
+    setInert(true);
     for (const n of document.querySelectorAll(".card.selected, tr.selected")) n.classList.remove("selected");
     const n = document.querySelector(`[data-id="${id}"]`); if (n) n.classList.add("selected");
     $("#panel").classList.add("open"); $("#panel").setAttribute("aria-hidden", "false"); $("#scrim").classList.add("open");
@@ -1061,11 +1167,18 @@
     $("#p-tabs").textContent = "";
     renderPanelBody(el("div", { class: "skeleton" }));
     loadDetail(j).then((d) => { if (pJob === j) { pDetail = d; renderPanel(); } });
+    writeHash();
     setTimeout(() => $("#panel").focus({ preventScroll: true }), 0);
   }
   function closePanel() {
     $("#panel").classList.remove("open"); $("#panel").setAttribute("aria-hidden", "true"); $("#scrim").classList.remove("open"); pJob = null;
-    if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
+    setInert(false); writeHash();
+    // focus goes back to the job's card (scrolled into view if virtualization had unmounted it), else where it was
+    const i = current.findIndex((x) => x.id === selectedId);
+    if (vlist && i >= 0) vlist.ensureVisible(i);
+    const node = document.querySelector(`#list [data-id="${selectedId}"]`);
+    const target = node || (lastFocus && document.contains(lastFocus) ? lastFocus : null);
+    if (target && target.focus) target.focus({ preventScroll: true });
   }
   $("#p-close").addEventListener("click", closePanel); $("#scrim").addEventListener("click", () => { if (dApp) closeDrawer(); if (pJob) closePanel(); });
   function renderPanelBody(node) { const b = $("#p-body"); b.textContent = ""; b.append(node); b.scrollTop = 0; }
@@ -1073,7 +1186,7 @@
     const tabs = $("#p-tabs"); tabs.textContent = "";
     const avail = pJob.filtered || !pDetail ? ["Overview", "Notes & History"] : TABS;
     if (!avail.includes(pTab)) pTab = "Overview";
-    for (const t of avail) tabs.append(el("button", { class: "panel-tab", role: "tab", "aria-selected": String(t === pTab), type: "button", onclick: () => { pTab = t; renderPanel(); } }, t));
+    for (const t of avail) tabs.append(el("button", { class: "panel-tab", role: "tab", "aria-selected": String(t === pTab), type: "button", onclick: () => { pTab = t; renderPanel(); writeHash(); } }, t));
     const fn = { Overview: overviewTab, Requirements: reqTab, Keywords: keywordsTab, Score: scoreTab, "Full JD": jdTab, Similar: similarTab, "Notes & History": notesTab }[pTab];
     renderPanelBody(fn(pJob, pDetail || {}));
   }
@@ -1120,14 +1233,16 @@
     out.append(el("p", { class: "muted", text: META.disclaimer || "" }));
     return out;
   }
+  function setTrack(j, t) {   // a reset keeps a dated tombstone so an older export can't bring the override back
+    const k = keyOf(j); const before = overrides[k]; const inPanel = pJob === j;
+    overrides[k] = { track: t, updated_at: new Date().toISOString() }; saveOverrides();
+    toast(t ? `Moved to ${TRACKS[t]}` : "Track reset", () => { if (before) overrides[k] = before; else delete overrides[k]; saveOverrides(); renderAll(true); if (inPanel) openPanel(j.id); });
+    renderBanners(); renderAll(true); if (inPanel) openPanel(j.id);
+  }
   function trackControls(j) {
     const k = keyOf(j); const has = overrides[k] && overrides[k].track;
     if (j.track_auto !== "unclear" && !has) return null;
-    const set = (t) => {   // a reset keeps a dated tombstone so an older export can't bring the override back
-      const before = overrides[k]; overrides[k] = { track: t, updated_at: new Date().toISOString() }; saveOverrides();
-      toast(t ? `Moved to ${TRACKS[t]}` : "Track reset", () => { if (before) overrides[k] = before; else delete overrides[k]; saveOverrides(); renderAll(true); openPanel(j.id); });
-      renderBanners(); renderAll(true); openPanel(j.id);
-    };
+    const set = (t) => setTrack(j, t);
     return el("span", { style: "display:inline-flex;gap:6px;margin-left:6px" },
       el("button", { class: "btn small", type: "button", onclick: () => set("coop_intern") }, "Move to Co-op"),
       el("button", { class: "btn small", type: "button", onclick: () => set("full_time") }, "Move to Full-time"),
@@ -1162,21 +1277,10 @@
     const chips = (lst) => {
       const box = el("div", { class: "kw-chips" });
       for (const k of lst.filter((x) => !kwFilter || x.status === kwFilter)) {
-        let detail = null;
-        const chip = el("button", { class: `kw ${k.status}`, type: "button", "aria-expanded": "false",
-          title: `${k.status} · ${k.section} · weight ${k.weight}${k.count > 1 ? ` · mentioned ${k.count}×` : ""}`,
-          onclick: () => {
-            const open = chip.getAttribute("aria-expanded") === "true";
-            chip.setAttribute("aria-expanded", String(!open));
-            if (detail) { detail.remove(); detail = null; }
-            if (!open) {
-              detail = el("div", { class: "kw-detail" },
-                k.status === "synonym" ? el("div", null, "Your resume says ", el("b", { text: k.resume_term }), " → JD says ", el("b", { text: k.term }), el("span", { class: "muted", text: " (use the JD's wording where it's true)" })) : null,
-                k.evidence ? el("div", null, `${k.evidence_section}: `, el("q", { text: k.evidence })) : el("div", { text: k.status === "missing" ? "Not on your resume — a gap. Only add it if you actually have the experience." : "" }),
-                el("button", { class: "btn small", type: "button", style: "margin-top:6px", onclick: () => { jdHighlight = k.term; pTab = "Full JD"; renderPanel(); } }, "Highlight in Full JD"));
-              chip.after(detail);
-            }
-          } }, el("span", { "aria-hidden": "true", text: icon[k.status] }), el("span", { class: "sr-only", text: `${k.status}: ` }), k.term);
+        const chip = el("button", { class: `kw ${k.status}`, type: "button",
+          title: `${k.status} · ${k.section} · weight ${k.weight}${k.count > 1 ? ` · mentioned ${k.count}×` : ""} — click to highlight it in the Full JD`,
+          onclick: () => { jdHighlight = k.term; jdKw = k; pTab = "Full JD"; renderPanel(); } },
+          el("span", { "aria-hidden": "true", text: icon[k.status] }), el("span", { class: "sr-only", text: `${k.status}: ` }), k.term);
         box.append(chip);
       }
       return box;
@@ -1199,9 +1303,9 @@
     const bd = d.breakdown || {}; const out = el("div");
     const block = (title, b) => {
       if (!b) return null;
-      const g = el("div", { class: "bars" }, el("span", { class: "k head", text: title }), el("div", { class: "hbar" }, el("span", { style: `width:${b.score || 0}%` })), el("span", { class: "v", text: b.score == null ? "?" : Math.round(b.score) }));
+      const g = el("div", { class: "bars" }, el("span", { class: "k head", text: title }), svgBar((b.score || 0) / 100), el("span", { class: "v", text: b.score == null ? "?" : Math.round(b.score) }));
       for (const [k, p] of Object.entries(b.parts || {})) {
-        g.append(el("span", { class: "k", text: k.replace(/_/g, " ") }), el("div", { class: "hbar" }, el("span", { style: `width:${p.score || 0}%;opacity:${p.score == null ? 0 : 1}` })),
+        g.append(el("span", { class: "k", text: k.replace(/_/g, " ") }), p.score == null ? svgBar(0) : svgBar(p.score / 100),
           el("span", { class: "v", text: p.score == null ? "?" : Math.round(p.score) }), el("span", { class: "detail", text: `${p.detail} · weight ${p.weight}` }));
       }
       return el("div", { class: "section" }, g);
@@ -1227,23 +1331,29 @@
     const hl = jdHighlight;
     const parts = [hl, ...req].filter(Boolean).sort((a, b) => b.length - a.length);
     const rx = parts.length ? new RegExp(`(${parts.map(esc).join("|")})`, "gi") : null;
-    const inline = (s) => (rx ? s.split(rx).map((piece, i) => (i % 2 ? el("mark", { class: hl && piece.toLowerCase() === hl.toLowerCase() ? "" : "kwm", text: piece }) : piece)) : [s]);
-    let ul = null; let firstReq = null;
-    const reqHead = /^(minimum|basic|required|requirements|qualifications|what you('|’)ll need|what we('|’)re looking for|you have|what you bring|to succeed|what we (require|value|need))/i;
-    for (const raw of text.split("\n")) {
-      const line = raw.trim().replace(/^#+\s*/, "");
-      if (!line) { ul = null; continue; }
-      if (line.startsWith("- ")) { if (!ul) { ul = el("ul"); out.append(ul); } ul.append(el("li", null, inline(line.slice(2)))); continue; }
-      ul = null;
-      if (line.length < 90 && !/[.!?]$/.test(line)) { const h = el("h4", null, inline(line)); if (!firstReq && reqHead.test(line)) firstReq = h; out.append(h); }
-      else out.append(el("p", null, inline(line)));
+    const inline = (str) => (rx ? str.split(rx).map((piece, i) => (i % 2 ? el("mark", { class: hl && piece.toLowerCase() === hl.toLowerCase() ? "" : "kwm", text: piece }) : piece)) : [str]);
+    const block = (b) => (b.type === "ul" ? el("ul", null, b.items.map((x) => el("li", null, inline(x)))) : el("p", null, inline(b.text)));
+    let firstReq = null; const secs = [];
+    for (const sec of V.jdSections(text)) {
+      if (!sec.heading) { out.append(...sec.blocks.map(block)); continue; }
+      const det = el("details", { class: "jd-sec", open: true }, el("summary", null, el("h4", null, inline(sec.heading))), ...sec.blocks.map(block));
+      if (!firstReq && sec.requirements) firstReq = det;
+      secs.push(det); out.append(det);
     }
+    const all = (open) => { for (const x of secs) x.open = open; };
+    const icon = { matched: "✓", synonym: "≈", missing: "✗" };
+    const kwInfo = jdKw && hl ? el("div", { class: `banner ${jdKw.status === "missing" ? "err" : jdKw.status === "synonym" ? "info" : "good"}`, style: "margin:0 0 10px" },
+      el("div", null, el("b", { text: `${icon[jdKw.status]} ${jdKw.term}` }), ` · ${jdKw.status} · ${jdKw.section}${jdKw.count > 1 ? ` · mentioned ${jdKw.count}×` : ""}`,
+        jdKw.status === "synonym" ? el("div", null, "Your resume says ", el("b", { text: jdKw.resume_term }), " → JD says ", el("b", { text: jdKw.term }), " (use the JD's wording where it's true)") : null,
+        jdKw.evidence ? el("div", null, `${jdKw.evidence_section}: `, el("q", { text: jdKw.evidence })) : jdKw.status === "missing" ? el("div", { text: "Not on your resume — a gap. Only add it if you actually have the experience." }) : null)) : null;
     const wrap = el("div", null, el("div", { class: "toolbar" },
-      firstReq ? el("button", { class: "btn small", type: "button", onclick: () => firstReq.scrollIntoView({ behavior: "smooth", block: "start" }) }, "Jump to requirements") : null,
+      firstReq ? el("button", { class: "btn small", type: "button", onclick: () => { firstReq.open = true; firstReq.scrollIntoView({ behavior: "smooth", block: "start" }); } }, "Jump to requirements") : null,
+      secs.length > 1 ? el("button", { class: "btn small ghost", type: "button", onclick: () => all(false) }, "Collapse all") : null,
+      secs.length > 1 ? el("button", { class: "btn small ghost", type: "button", onclick: () => all(true) }, "Expand all") : null,
       hl ? el("span", { class: "chip warn", text: `Highlighting “${hl}”` }) : null,
-      hl ? el("button", { class: "btn small ghost", type: "button", onclick: () => { jdHighlight = null; renderPanel(); } }, "Clear highlight") : null,
-      el("span", { class: "muted", text: "Required keywords are tinted." })), out);
-    if (hl) setTimeout(() => { const m = out.querySelector("mark:not(.kwm)"); if (m) m.scrollIntoView({ block: "center" }); }, 60);
+      hl ? el("button", { class: "btn small ghost", type: "button", onclick: () => { jdHighlight = null; jdKw = null; renderPanel(); } }, "Clear highlight") : null,
+      el("span", { class: "muted", text: "Required keywords are tinted." })), kwInfo, out);
+    if (hl) setTimeout(() => { const m = out.querySelector("mark:not(.kwm)"); if (m) { const dd = m.closest("details"); if (dd) dd.open = true; m.scrollIntoView({ block: "center" }); } }, 60);
     return wrap;
   }
   function similarTab(j) {
@@ -1275,8 +1385,9 @@
     const name = encodeURIComponent(j.company);
     const slug = j.company.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
     const cov = (META.coverage || []).find((r) => r.company === j.company);
+    const blog = safeUrl((META.eng_blogs || {})[j.company] || "");
     const links = [["Levels.fyi", `https://www.levels.fyi/companies/${slug}/salaries`], ["Glassdoor", `https://www.glassdoor.com/Search/results.htm?keyword=${name}`],
-      ["Eng blog", `https://www.google.com/search?q=${name}+engineering+blog`]];
+      blog ? ["Eng blog", blog] : ["Eng blog (search)", `https://www.google.com/search?q=${name}+engineering+blog`]];
     if (cov && safeUrl(cov.careers_url || "")) links.push(["Careers", cov.careers_url]);
     return links.map(([t, u]) => el("a", { class: "btn small ghost", href: u, target: "_blank", rel: "noopener noreferrer", title: `${t} for ${j.company}` }, t));
   }
@@ -1319,6 +1430,17 @@
     const undo = setStatus(j, { status: "skipped", skip_reason: reason || "other" });
     toast(`Skipped (${reason || "other"})`, undo); renderAll(true); if (pJob) renderActions();
   }
+  function openSkipPicker(j) {
+    const d = $("#skip-dialog");
+    $("#skip-job").textContent = `${j.title} — ${j.company}`;
+    const box = $("#skip-reasons"); box.textContent = "";
+    const pick = (r) => { d.close(); skip(j, r); };
+    SKIP_REASONS.forEach((r, i) => box.append(el("button", { class: "btn skip-reason", type: "button", onclick: () => pick(r) },
+      V.keyForIndex(i) ? el("span", { class: "kbd", text: V.keyForIndex(i) }) : null, r)));
+    d.onkeydown = (e) => { const r = V.reasonForKey(e.key, SKIP_REASONS); if (r) { e.preventDefault(); pick(r); } };
+    $("#skip-cancel").onclick = () => d.close();
+    d.showModal(); box.querySelector("button").focus();
+  }
   function exportStatuses() {
     const payload = { exported_at: new Date().toISOString(), format: 3, statuses, track_overrides: overrides, applications: apps };
     download("jobsearch-statuses.json", JSON.stringify(payload, null, 2), "application/json");
@@ -1335,6 +1457,31 @@
     toast((await copyText(cmd)) ? "Command copied — paste it in Terminal" : cmd);
   });
 
+  // ---------- saved views (per track: filters + sort + search + salary + view) ----------
+  function loadSavedView(sv) {
+    V.applyView(tstate(), sv); saveUI(); $("#q").value = tstate().q || ""; closePop(); renderAll(); toast(`View: ${sv.name}`);
+  }
+  $("#saved-btn").addEventListener("click", (e) => {
+    e.stopPropagation(); const was = openPop && openPop.dataset.f === "saved"; closePop(); if (was) return;
+    const st = tstate(); const wrap = $("#saved-wrap");
+    const pop = el("div", { class: "popover saved-pop", role: "dialog", "aria-label": "Saved views" }); pop.dataset.f = "saved";
+    const list = el("div");
+    const draw = () => {
+      list.textContent = "";
+      if (!(st.saved || []).length) list.append(el("div", { class: "muted", style: "padding:4px 6px;font-size:12px", text: `No saved views for ${TRACKS[ui.track]} yet.` }));
+      for (const sv of st.saved || []) list.append(el("div", { class: "saved-row" },
+        el("button", { class: "btn small ghost saved-load", type: "button", onclick: () => loadSavedView(sv), title: "Load this view" }, sv.name),
+        el("button", { class: "btn small ghost", type: "button", "aria-label": `Delete saved view ${sv.name}`, onclick: () => { st.saved = V.deleteView(st.saved, sv.name); saveUI(); draw(); toast(`Deleted view ${sv.name}`); } }, "✕")));
+    };
+    const name = el("input", { type: "text", placeholder: "Name this view…", maxlength: 60, "aria-label": "Saved view name" });
+    const save = () => { if (!name.value.trim()) { name.focus(); return; } st.saved = V.saveView(st.saved, name.value, st); saveUI(); toast(`Saved view “${name.value.trim()}”`); name.value = ""; draw(); };
+    name.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); save(); } });
+    draw();
+    pop.append(el("div", { class: "muted", style: "font-size:12px;margin-bottom:6px", text: "Saves this track's current view, filters, sort, search and salary range." }), list,
+      el("div", { class: "row" }, name, el("button", { class: "btn small primary", type: "button", onclick: save }, "Save current")));
+    wrap.append(pop); openPop = pop; $("#saved-btn").setAttribute("aria-expanded", "true"); setTimeout(() => name.focus(), 0);
+  });
+
   // ---------- track tabs, toolbar ----------
   for (const b of document.querySelectorAll(".track-tab")) b.addEventListener("click", () => switchTrack(b.dataset.track));
   function switchTrack(t) {
@@ -1342,6 +1489,7 @@
     const v = tstate().view;
     ui.track = t; if (onApps) tstate().view = v; saveUI();
     $("#q").value = tstate().q || ""; closePop(); renderAll();
+    for (const n of [$("#main"), $("#tiles")]) { n.classList.remove("swap-in"); void n.offsetWidth; n.classList.add("swap-in"); }
   }
   // URL hash: #coop | #fulltime [/view] [?label=Strong|Stretch&q=…&sort=newest&salary=120000]; #applications[/coop|/fulltime]
   function writeHash() {
@@ -1352,11 +1500,14 @@
       const p = new URLSearchParams();
       for (const f of FILTERS) { const vals = st.filters[f.id]; if (vals && vals.length) p.set(f.id, vals.join("|")); }
       if (st.q) p.set("q", st.q); if (st.sort && st.sort !== "overall") p.set("sort", st.sort); if (st.salary) p.set("salary", st.salary);
+      if (st.salaryMax) p.set("salary_max", st.salaryMax);
       if (st.salaryKnown) p.set("salary_known", "1");
+      if (pJob) { p.set("job", pJob.id); if (pTab !== "Overview") p.set("tab", pTab); }
       const qs = p.toString(); h = `#${tr}${v !== defaultView() || qs ? `/${v}` : ""}${qs ? `?${qs}` : ""}`;
     }
     if (location.hash !== h) history.replaceState(null, "", h);
   }
+  let bootJob = null; let bootTab = null;
   function readHash() {
     const m = /^#(coop|fulltime|applications)(?:\/([a-z0-9]+))?(?:\?(.*))?$/.exec(location.hash || ""); if (!m) return;
     if (m[1] === "applications") { if (m[2] === "coop" || m[2] === "fulltime") ui.track = m[2] === "coop" ? "coop_intern" : "full_time"; tstate().view = "applications"; return; }
@@ -1367,7 +1518,8 @@
       const p = new URLSearchParams(m[3]); st.filters = {};
       for (const f of FILTERS) if (p.get(f.id)) st.filters[f.id] = p.get(f.id).split("|");
       st.q = p.get("q") || ""; if (p.get("sort") && SORTS[p.get("sort")]) st.sort = p.get("sort");
-      st.salary = Number(p.get("salary")) || 0; st.salaryKnown = p.get("salary_known") === "1";
+      st.salary = Number(p.get("salary")) || 0; st.salaryMax = Number(p.get("salary_max")) || 0; st.salaryKnown = p.get("salary_known") === "1";
+      if (p.get("job")) { bootJob = Number(p.get("job")); bootTab = TABS.includes(p.get("tab")) ? p.get("tab") : null; }
     }
   }
   window.addEventListener("hashchange", () => { readHash(); saveUI(); $("#q").value = tstate().q || ""; renderAll(); });
@@ -1392,9 +1544,10 @@
       { kind: "Action", label: "Toggle light / dark theme", run: () => $("#theme").click() },
       { kind: "Action", label: "Cards / table", run: () => $("#mode-toggle").click() },
       { kind: "Action", label: "Compact density", run: () => $("#density").click() },
-      { kind: "Action", label: "Clear all filters", run: () => { st.filters = {}; st.q = ""; st.salary = 0; $("#q").value = ""; ui.day = null; saveUI(); renderAll(); } },
+      { kind: "Action", label: "Clear all filters", run: () => { st.filters = {}; st.q = ""; st.salary = 0; st.salaryMax = 0; st.salaryKnown = false; $("#q").value = ""; ui.day = null; saveUI(); renderAll(); } },
       { kind: "Action", label: "Keyboard shortcuts", run: () => $("#help").showModal() },
     ];
+    for (const sv of st.saved || []) items.push({ kind: "Saved view", label: sv.name, sub: TRACKS[ui.track], run: () => loadSavedView(sv) });
     const byCo = counts(JOBS.filter((j) => !j.filtered).map((j) => j.company));
     for (const [c, n] of byCo) items.push({ kind: "Company", label: c, sub: `${n} job${n > 1 ? "s" : ""}`, run: () => { const t = tstate(); t.filters = { company: [c] }; t.q = ""; $("#q").value = ""; saveUI(); setView("all"); } });
     for (const a of liveApps()) items.push({ kind: "Application", label: a.title, sub: `${a.company} · ${STAGE_LABEL[a.stage]}`, run: () => openDrawer(a.id) });
@@ -1412,7 +1565,7 @@
       const jobs = [];
       for (const j of JOBS) { if (jobs.length >= 40) break; if (!j.filtered && words.every((w) => `${j.title} ${j.company}`.toLowerCase().includes(w))) jobs.push(j); }
       items = items.concat(jobs.map((j) => ({ kind: "Job", label: j.title, sub: `${j.company} · ${TRACKS[trackOf(j)]}${j.score != null ? ` · ${Math.round(j.score)}` : ""}`, run: () => openPanel(j.id) })));
-    } else items = items.filter((x) => x.kind === "View" || x.kind === "Action");
+    } else items = items.filter((x) => x.kind === "View" || x.kind === "Action" || x.kind === "Saved view");
     palItems = items.slice(0, 60); palSel = 0; renderPaletteList();
   }
   function renderPaletteList() {
@@ -1448,6 +1601,7 @@
       const n = current[Math.max(0, Math.min(current.length - 1, (idx < 0 ? -1 : idx) + dlt))]; if (!n) return;
       selectedId = n.id;
       for (const x of document.querySelectorAll(".card.selected, tr.selected")) x.classList.remove("selected");
+      if (vlist) vlist.ensureVisible(current.indexOf(n));
       const node = document.querySelector(`#list [data-id="${n.id}"]`);
       if (node) { node.classList.add("selected"); node.scrollIntoView({ block: "nearest" }); }
       if (pJob) openPanel(n.id);
@@ -1461,7 +1615,7 @@
       case "s": if (sel) shortlist(sel); break;
       case "a": if (sel && !sel.filtered) markApplied(sel); break;
       case " ": if (sel && tag !== "button" && tag !== "a") { e.preventDefault(); togglePick(sel.id); } else return; break;
-      case "x": if (sel) skip(sel, "other"); break;
+      case "x": if (sel) openSkipPicker(sel); break;
       case "o": if (sel && safeUrl(sel.apply_url)) window.open(sel.apply_url, "_blank", "noopener"); break;
       case "g": if (sel && !sel.filtered) generate(sel); break;
       case "/": e.preventDefault(); $("#q").focus(); break;
@@ -1473,7 +1627,7 @@
   });
 
   // ---------- boot ----------
-  function renderAll(keepScroll) { renderCounts(); renderTiles(); renderList(keepScroll); }
+  function renderAll(keepScroll) { renderCounts(); renderDayTabs(); renderTiles(); renderList(keepScroll); }
   if (!["coop_intern", "full_time"].includes(ui.track)) ui.track = "full_time";
   readHash();
   $("#q").value = tstate().q || "";
@@ -1483,5 +1637,6 @@
     $("#list").append(el("div", { class: "empty" }, el("b", { text: "No jobs yet." }), el("div", { text: "Run ./scripts/run.sh, then reload this page." })));
   } else {
     renderAll();
+    if (bootJob != null && BY_ID.has(bootJob)) openPanel(bootJob, bootTab);
   }
 })();

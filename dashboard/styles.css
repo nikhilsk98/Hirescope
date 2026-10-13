@@ -82,6 +82,7 @@ textarea { height: auto; padding: var(--sp-2); }
 .chip.unclear { color: var(--unclear); background: var(--unclear-bg); }
 .chip.info { color: var(--info); background: var(--info-bg); } .chip.good { color: var(--strong); background: var(--strong-bg); }
 .chip.warn { color: var(--stretch); background: var(--stretch-bg); }
+.chip.seen { color: var(--text-3); background: transparent; border-color: var(--border); font-weight: 500; }
 
 /* ---------- top bar ---------- */
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: var(--sp-3); height: 56px; padding: 0 var(--sp-5);
@@ -115,6 +116,7 @@ textarea { height: auto; padding: var(--sp-2); }
 .banner { display: flex; gap: var(--sp-3); align-items: flex-start; margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-md); font-size: var(--fs-sm); }
 .banner.warn { background: var(--warn-bg); color: var(--warn); } .banner.err { background: var(--err-bg); color: var(--err); }
 .banner.info { background: var(--info-bg); color: var(--info); }
+.banner.good { background: var(--strong-bg); color: var(--strong); }
 .banner details summary { cursor: pointer; font-weight: 600; } .banner ul { margin: 6px 0 0; padding-left: 18px; }
 .banner .x { margin-left: auto; }
 .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--sp-3); padding: var(--sp-4) var(--sp-5) 0; }
@@ -181,9 +183,11 @@ textarea { height: auto; padding: var(--sp-2); }
 .ring .v { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
 .ring .track { stroke: var(--surface-2); } .ring .Strong { stroke: var(--strong); } .ring .Stretch { stroke: var(--stretch); } .ring .Weak { stroke: var(--weak); }
 .ats { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.segbar { display: flex; width: 72px; height: 6px; border-radius: 3px; overflow: hidden; background: var(--surface-2); flex: none; }
-.segbar span { display: block; height: 100%; }
-.segbar .m { background: var(--kw-match); } .segbar .s { background: var(--kw-syn); } .segbar .x { background: var(--kw-miss); }
+svg.segbar { flex: none; display: block; border-radius: 3px; overflow: hidden; }
+.segbar .m { fill: var(--kw-match); } .segbar .s { fill: var(--kw-syn); } .segbar .x { fill: var(--kw-miss); }
+/* inline SVG bars (skill gaps, funnel, score breakdown) */
+svg.sbar { display: block; width: 100%; height: 8px; }
+.sbar-track { fill: var(--surface-2); } .sbar-fill { fill: var(--accent); } .sbar-fill.miss { fill: var(--kw-miss); }
 .empty { padding: var(--sp-6); text-align: center; color: var(--text-3); background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--r-lg); }
 .empty b { color: var(--text); }
 .skeleton { height: 92px; border-radius: var(--r-lg); background: linear-gradient(90deg, var(--surface) 0%, var(--surface-2) 50%, var(--surface) 100%); background-size: 200% 100%; animation: sk 1.2s infinite; }
@@ -293,7 +297,7 @@ dialog table td { padding: 3px 10px 3px 0; font-size: var(--fs-sm); }
   .side-card { display: none; }
 }
 @media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } .card { grid-template-columns: minmax(0, 1fr) auto; } .avatar { display: none; }
-  .track-tab { font-size: var(--fs-md); padding: var(--sp-2); } #day-picker, #export-statuses { display: none; } }
+  .track-tab { font-size: var(--fs-md); padding: var(--sp-2); } #export-statuses { display: none; } }
 table.grid td.loc { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 table.grid td.role { min-width: 220px; }
 
@@ -377,3 +381,65 @@ table.grid th.num { text-align: right; }
 svg.season { width: 240px; max-width: 100%; } svg.season .cell { fill: var(--surface-2); }
 svg.season .seen { fill: var(--accent); } svg.season .pred { fill: none; stroke: var(--stretch); stroke-width: 2; }
 table.seasons td { vertical-align: middle; }
+
+/* ---------- header log link, day tabs ---------- */
+.log-link { margin-left: var(--sp-1); font-size: var(--fs-sm); }
+.day-row { padding: var(--sp-2) var(--sp-5) 0; }
+.day-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.day-lbl { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .05em; text-transform: uppercase; margin-right: var(--sp-1); }
+.day-tab { height: 26px; padding: 0 10px; border-radius: var(--r-pill); border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-size: var(--fs-sm); cursor: pointer; }
+.day-tab:hover { border-color: var(--border-strong); color: var(--text); }
+.day-tab[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.day-older { height: 26px; font-size: var(--fs-sm); border-radius: var(--r-pill); }
+.day-older.active { border-color: var(--text); }
+
+/* ---------- virtualized list / table, skeleton first paint ---------- */
+.vlist { display: block; }
+.vlist > .card { margin-bottom: var(--sp-2); }
+.vpad { display: block; }
+tr.vpad td { padding: 0 !important; border: 0 !important; background: none !important; }
+table.vgrid { table-layout: fixed; min-width: 1240px; }
+table.vgrid td.role { min-width: 0; }
+table.vgrid td { overflow: hidden; }
+.card-sk { height: 116px; margin-bottom: var(--sp-2); }
+
+/* ---------- cards: Unclear move buttons, More like this ---------- */
+.move-btns { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+.link-btn { border: 0; background: none; padding: 0; color: var(--accent); font-size: var(--fs-sm); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.link-btn:hover { color: var(--text); }
+
+/* ---------- Apply Today, pinned above the list ---------- */
+.pinned { margin-bottom: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-1); }
+.pin-head { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+.pin-head .spacer { flex: 1; }
+.pin-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: grid; gap: 2px; }
+.pin-item { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 32px; padding: 4px var(--sp-2); border: 0; border-radius: var(--r-sm); background: none; cursor: pointer; text-align: left; font-size: var(--fs-sm); color: var(--text); }
+.pin-item:hover { background: var(--surface-2); }
+.pin-title { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pin-co { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- salary range, saved views, skip picker ---------- */
+.dual-range { position: relative; height: 26px; }
+.dual-range input[type=range] { position: absolute; left: 0; right: 0; top: 4px; width: 100%; margin: 0; pointer-events: none; background: none; accent-color: var(--accent); }
+.dual-range input[type=range]::-webkit-slider-thumb { pointer-events: auto; }
+.dual-range input[type=range]::-moz-range-thumb { pointer-events: auto; }
+.saved-pop { min-width: 300px; right: 0; left: auto; }
+.saved-row { display: flex; align-items: center; gap: 4px; }
+.saved-load { flex: 1; justify-content: flex-start; overflow: hidden; text-overflow: ellipsis; }
+.saved-pop .row input { flex: 1; min-width: 0; }
+.skip-reasons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.skip-reason { justify-content: flex-start; }
+.skip-reason .kbd { margin-right: 4px; }
+
+/* ---------- Full JD: collapsible sections ---------- */
+.jd-sec > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 6px; }
+.jd-sec > summary::-webkit-details-marker { display: none; }
+.jd-sec > summary::before { content: "▾"; color: var(--text-3); font-size: 12px; width: 12px; flex: none; }
+.jd-sec:not([open]) > summary::before { content: "▸"; }
+.jd-sec > summary h4 { margin: var(--sp-3) 0 var(--sp-1); }
+
+/* ---------- track switch: smooth content transition ---------- */
+@keyframes swapIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.swap-in { animation: swapIn calc(var(--dur) * 1.4) ease-out; }
+@media (max-width: 980px) { .day-row { padding-left: var(--sp-3); padding-right: var(--sp-3); } }
+@media (max-width: 640px) { .day-lbl { display: none; } .skip-reasons { grid-template-columns: minmax(0, 1fr); } }

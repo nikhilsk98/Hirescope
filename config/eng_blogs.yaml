@@ -1,0 +1,85 @@
+# Official engineering blogs for the dashboard's "Eng blog" quick link (company -> URL).
+# Verified live 2026-10-12 (HTTP 200 after redirects, or the blog's RSS feed / a search where the site blocks
+# scripted requests). Companies not listed get a web-search link instead. Names match job company names
+# ignoring case and legal suffixes ("Stripe, Inc." = Stripe).
+Google: https://research.google/blog/
+Meta: https://engineering.fb.com/
+Apple: https://machinelearning.apple.com/
+Amazon: https://www.amazon.science/blog
+Microsoft: https://devblogs.microsoft.com/engineering-at-microsoft/
+Netflix: https://netflixtechblog.com/
+Uber: https://www.uber.com/us/en/blog/engineering/
+Airbnb: https://medium.com/airbnb-engineering
+Stripe: https://stripe.dev/blog/topic/engineering
+Spotify: https://engineering.atspotify.com/
+Pinterest: https://medium.com/pinterest-engineering
+Lyft: https://eng.lyft.com/
+DoorDash: https://careersatdoordash.com/engineering-blog/
+Instacart: https://tech.instacart.com/
+Dropbox: https://dropbox.tech/
+Slack: https://slack.engineering/
+Shopify: https://shopify.engineering/
+GitHub: https://github.blog/engineering/
+GitLab: https://about.gitlab.com/blog/categories/engineering/
+Cloudflare: https://blog.cloudflare.com/
+Datadog: https://www.datadoghq.com/blog/engineering/
+Databricks: https://www.databricks.com/blog/category/engineering
+Snowflake: https://www.snowflake.com/en/blog/engineering/
+MongoDB: https://www.mongodb.com/company/blog/channel/engineering-blog
+Elastic: https://www.elastic.co/search-labs/blog
+Confluent: https://www.confluent.io/blog/
+HubSpot: https://product.hubspot.com/blog
+Wayfair: https://www.aboutwayfair.com/careers/tech-blog
+Toast: https://technology.toasttab.com/
+Klaviyo: https://klaviyo.tech/
+Coinbase: https://www.coinbase.com/blog/landing/engineering
+Plaid: https://plaid.com/blog/tag/engineering/
+Figma: https://www.figma.com/blog/engineering/
+Notion: https://www.notion.com/blog/topic/tech
+Asana: https://asana.com/inside-asana/engineering-spotlight
+Reddit: https://www.reddit.com/r/RedditEng/
+Etsy: https://www.etsy.com/codeascraft
+Zillow: https://www.zillow.com/tech/
+LinkedIn: https://www.linkedin.com/blog/engineering
+Salesforce: https://engineering.salesforce.com/
+Atlassian: https://www.atlassian.com/blog/how-we-build
+Twilio: https://www.twilio.com/en-us/blog/developers
+Block: https://engineering.block.xyz/blog/
+PayPal: https://medium.com/paypal-tech
+Capital One: https://www.capitalone.com/tech/blog/
+Palantir: https://blog.palantir.com/
+OpenAI: https://openai.com/news/engineering/
+Anthropic: https://www.anthropic.com/engineering
+Scale AI: https://scale.com/blog
+Discord: https://discord.com/category/engineering
+Grammarly: https://www.grammarly.com/blog/engineering/
+Duolingo: https://blog.duolingo.com/hub/engineering/
+Yelp: https://engineeringblog.yelp.com/
+Zalando: https://engineering.zalando.com/
+Booking: https://medium.com/booking-com-development
+Expedia Group: https://medium.com/expedia-group-tech
+Intuit: https://medium.com/intuit-engineering
+Adobe: https://blog.developer.adobe.com/
+NVIDIA: https://developer.nvidia.com/blog/
+Qualcomm: https://www.qualcomm.com/developer/blog
+Cisco: https://blogs.cisco.com/developer
+Okta: https://developer.okta.com/blog/
+CrowdStrike: https://www.crowdstrike.com/en-us/blog/category.engineering-and-technology/
+Twitch: https://blog.twitch.tv/en/tags/engineering/
+Vercel: https://vercel.com/blog/category/engineering
+Docker: https://www.docker.com/blog/category/engineering/
+DigitalOcean: https://www.digitalocean.com/blog/tags/engineering
+Hugging Face: https://huggingface.co/blog
+Perplexity: https://research.perplexity.ai/
+Ramp: https://engineering.ramp.com/
+Brex: https://medium.com/brexeng
+Affirm: https://tech.affirm.com/
+Workday: https://medium.com/workday-engineering
+Adyen: https://medium.com/adyen
+Bloomberg: https://www.bloomberg.com/company/stories/category/technology/
+Two Sigma: https://www.twosigma.com/articles/
+Jane Street: https://blog.janestreet.com/
+Hudson River Trading: https://www.hudsonrivertrading.com/hrtbeat/
+Waymo: https://waymo.com/blog/
+DraftKings: https://medium.com/draftkings-engineering
+MathWorks: https://blogs.mathworks.com/

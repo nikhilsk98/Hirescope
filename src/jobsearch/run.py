@@ -12,12 +12,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+import yaml
+
 from . import paths
 from .adapters.base import HttpClient
 from .config import load_config
 from .extract.resume import parse_resume
 from .match.semantic import Embedder
-from .output.dashboard import coverage_rows, select_visible, write_data_js
+from .output.dashboard import coverage_rows, eng_blogs, select_visible, write_data_js
 from .output.h1b import load_h1b, match_companies
 from .output.links import check_links
 from .pipeline import compute_similar, ensure_extraction_current, run
@@ -99,6 +101,8 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
     statuses.write_sync_js(paths.SYNC_JS, statuses.sync_payload(conn))
     compute_similar(conn, Embedder(conn), shown)            # "More like this"
     jobs = db.open_jobs(conn)
+    if paths.ENG_BLOGS.exists():
+        meta["eng_blogs"] = eng_blogs({j["company"] for j in shown}, yaml.safe_load(paths.ENG_BLOGS.read_text(encoding="utf-8")) or {})
     h1b = {}
     sh = cfg.prefs.sponsorship_history
     if sh.enabled:

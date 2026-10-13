@@ -61,6 +61,8 @@ def _badges(job: dict, today: str, latest_day: str, tz: str, mine: set[str], clo
         b.append("reopened" if job.get("repost_count") else "updated")
     elif local_day(job["first_seen"], tz) == latest_day:
         b.append("new")
+    else:
+        b.append("seen")          # listed in an earlier run and unchanged since
     fh = sig.get("fresh_hours")
     if fh is not None and fh <= 48:
         b.append("fresh")
@@ -230,6 +232,14 @@ def missed_matches(jobs: list[dict], tier_of, now: datetime, limit: int = 60, ru
         elif j.get("filtered") and candidate(j, j.get("filter_reasons") or [], rules):
             picks.append((0, j["id"]))
     return [pk for _, pk in sorted(picks, reverse=True)[:limit]]
+
+
+def eng_blogs(companies, blogs: dict[str, str]) -> dict[str, str]:
+    """company (as on the jobs) -> official engineering blog URL from config/eng_blogs.yaml, matched ignoring
+    case and legal suffixes. Companies without one get a search link on the page instead."""
+    from .h1b import norm_name
+    by_norm = {norm_name(k): v for k, v in blogs.items() if isinstance(v, str) and v.startswith(("http://", "https://"))}
+    return {c: by_norm[norm_name(c)] for c in companies if norm_name(c) in by_norm}
 
 
 def coverage_rows(conn, summary, watch) -> list[dict]:

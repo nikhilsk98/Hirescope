@@ -13,6 +13,7 @@ PREFERENCES = INPUTS / "preferences.yaml"
 COMPANIES = CONFIG / "companies.yaml"
 SYNONYMS = CONFIG / "skills_synonyms.yaml"
 TITLE_RULES = CONFIG / "title_rules.yaml"
+ENG_BLOGS = CONFIG / "eng_blogs.yaml"
 
 DB = DATA / "jobs.db"
 JD_DIR = DATA / "jd"
