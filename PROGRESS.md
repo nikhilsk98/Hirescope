@@ -3,7 +3,8 @@
 Resume here: read this file and `git log --oneline` first, then continue from **In progress**.
 
 ## Current phase
-All phases (1–7) complete; the 2026-10-13 gap-closing pass (status-audit items) is done — see the last report.
+**v1.0 released (2026-10-13).** All phases (1–7) and the status-audit gap list are done; see the final report at the
+end, then "Known limitations" and "Needs Nikhil".
 
 ## Completed
 - Phase 1 — vertical slice (Greenhouse → SQLite → scoring → dashboard → job package)
@@ -152,9 +153,59 @@ pages without job data), 202 not due; 36 new, 101 closed; 6,350 visible (5,505 f
 7. Confirm GitHub `main` → I delete the local `backup-before-rewrite` branch; say "delete old branches" for the remote
    `phase1-vertical-slice` / `phase2`.
 
-## 2026-10-13 gap-closing work (one commit per group)
-- **Watchlist merge**: `inputs/watchlist_additions.csv` (81 companies) merged into My Companies — 35 already covered
-  by the seed list (7 moved to tier 1: Cohere, Vercel, Jane Street, Jump Trading, Capital One, Expedia Group, Waymo),
-  1 duplicate (Oracle), 45 added: 25 on verified boards (Greenhouse / Ashby / Lever / Workday / Eightfold), 20 marked
-  manual with the reason (Apple, Tesla, Citadel, Uber… own sites; iCIMS / Avature / Oracle / Workable). Eightfold now
-  checks robots.txt. Real run: 205 of 273 OK, 0 failed, 68 manual, 9 partial; 6,147 new jobs.
+## 2026-10-13 gap-closing work and v1.0 (final)
+Every item from the status audit was closed, one commit per group, each snapshot tested on its own:
+- **Watchlist**: 81 additions merged (35 already in the seed list, 7 moved to tier 1; Oracle a duplicate; 45 added,
+  25 on verified boards). My Companies: 188.
+- **Dashboard**: saved views; collapsible Full JD; focus trap in the panels (Esc closes, focus returns); day tabs;
+  Seen badge; virtualized cards and table (no row cap); skeleton first paint; all charts inline SVG; salary min-max;
+  Applied / Tracker view; `x` reason picker; one-click keyword highlight with evidence; Move on Unclear cards; Apply
+  Today pinned; More like this per card; verified engineering-blog links; header log link and run summary; Type
+  filter; track-switch transition; job + tab in the URL hash.
+- **Runs / alerts**: early birds for Strong + Stretch; hiring-season notifications (once per window); exit code 1 only
+  for real failures; ETag/304 for SmartRecruiters and Amazon; 304s never reopen closed jobs and keep counting misses.
+- **Scoring**: `domains`, `years_experience` (YOE window + graded fit); "Member of Technical Staff" is not a staff
+  level; Discovered-date label tested; SimplifyJobs early-career companies score as `company_tiers.feed_tier`.
+- **Accuracy fixes found on real data**: summer-only internships on the co-op track (graduation / enrollment phrases,
+  "Spring Boot", "6-month period", "Spring/Summer 2027" lists); "graduating by X or Y"; clearance from titles and
+  structured headers (63 cleared roles were visible).
+- **Sources**: Workable, iCIMS (sitemap + JSON-LD) and Jibe careers-site JSON feeds; 15 companies moved from manual to
+  automatic; `--source X` includes My Companies whose source is known.
+- **Cleanup**: hardcoded tuning values moved to preferences; dead code and the empty `experimental/` package removed;
+  stray files deleted; README (daily use, changing preferences, what leaves your machine, permissions).
+
+**Tests**: 397 passed, line coverage 91% (`pytest --cov=jobsearch`). Visual QA screenshots (light + dark, both tabs,
+My Applications with DEMO applications, detail panel, Keywords, Full JD, Coverage, 760 px) in
+`data.nosync/screenshots/`; design tokens pass WCAG AA in both themes (tested).
+
+**Final full run** (`--all`, 2026-10-13): 467 sources, 414 OK, **0 failed**, 53 manual, 44 partial (page caps on big
+employers); 106,661 listings; 7,008 visible (6,147 full-time / 855 co-op / 6 unclear). Profile checks on real data
+all pass: no summer-only co-op roles, no graduation-window mismatches, New Grad boosted (16% of the top 200 vs 12%
+overall), 0 roles needing 7+ years, 0 senior or 5-6-year roles labeled Strong, 0 non-US, 0 full-time
+no-sponsorship / citizens-only / clearance roles, 3,515 roles in Boston / Atlanta / Seattle / SF Bay Area. A follow-up `--quick` run: 220 of 273 OK, 0 failed;
+consecutive SmartRecruiters runs answered 304 for all 18 companies.
+
+## Known limitations
+- **53 companies are manual** (reason in `config/company_aliases.yaml`, link in My Companies): own careers sites
+  whose robots.txt / terms forbid automated access or that are bot-blocked (Google, Meta, Apple, Tesla, Citadel,
+  Uber, Walmart, IBM…), job systems without a public feed (Oracle Recruiting Cloud, SuccessFactors, Avature, Taleo,
+  Paylocity, BambooHR, JazzHR, Comeet, Paycor, UKG, Njoyn, JobDiva, Kula, Dover, Pinpoint), iCIMS portals whose
+  robots.txt disallows everything, and a few companies with no public board (OM1, ChaosSearch, Auriga).
+- **Partial listings**: ~44 big employers exceed the per-keyword page caps (closures for them are verified per job).
+- **Conditional requests**: Workday, Rippling, Eightfold and Jobvite send no validators (`no-store`), so they are
+  re-listed each run (known jobs' details are not re-fetched for 7 days). Amazon's listing changes between most runs.
+- **Eightfold**: only PCSX sites; older Eightfold sites answer "Not authorized" and stay manual.
+- **LinkedIn alerts, aggregator, referral finder, H-1B history, feedback learning** are built and tested on DEMO
+  data; they need your setup (below) to run on real data. LinkedIn listings are never opened; an official ATS posting
+  of the same role takes over through dedupe.
+- **Netflix** requirement parsing works for ~44% of postings (its pages carry little structure).
+
+## Needs Nikhil
+1. **Full Disk Access for `/bin/zsh`** — required for the schedule. The launchd jobs are installed and loaded, but
+   macOS blocks them from reading the repo in `~/Documents` ("can't open input file", exit 127).
+2. **Notifications**: allow Script Editor in System Settings → Notifications.
+3. Confirm `inputs/preferences.yaml → work_authorization` (needs_sponsorship: true, us_citizen: false).
+4. Optional: LinkedIn alert emails (Gmail app password in `.env`), `inputs/Connections.csv`, the USCIS H-1B CSV,
+   `backups.dir` (e.g. iCloud Drive).
+5. Use the dashboard and **Export statuses** regularly (learning, applications in SQLite, backups).
+6. Old branches: local `backup-before-rewrite`, remote `phase1-vertical-slice` / `phase2` (say "delete old branches").
