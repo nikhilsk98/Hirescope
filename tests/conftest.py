@@ -74,3 +74,13 @@ def greenhouse_payload():
 @pytest.fixture(autouse=True)
 def no_sleep(monkeypatch):
     monkeypatch.setattr("jobsearch.adapters.base.time.sleep", lambda s: None)
+
+
+@pytest.fixture(autouse=True)
+def unfreeze_data_paths():
+    """paths.DB, JD_DIR, … are derived from paths.DATA when read. monkeypatch's undo writes them back as fixed values,
+    which would pin later tests to the real data folder: drop those after every test."""
+    yield
+    from jobsearch import paths as _p
+    for name in [*_p._UNDER_DATA, "SYNC_JS"]:
+        _p.__dict__.pop(name, None)

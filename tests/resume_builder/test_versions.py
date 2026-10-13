@@ -16,8 +16,8 @@ def full_build(env, edit=None, regenerate=False, discard_edits=False):
     out = pipeline.prepare(str(env.job), regenerate=regenerate, discard_edits=discard_edits)
     if out.get("reused"):
         return {"reused": out["reused"]}
-    jd = pipeline.job_dir("DemoCorp", env.job)
-    reviewed_flow(env, jd / "work", edit=edit)
+    jd = pipeline.job_dir("DemoCorp", env.job, "Backend Engineer Intern")
+    reviewed_flow(env, jd / pipeline.WORK, edit=edit)
     with versions.JobLock(jd):
         res = pipeline.build(str(env.job))
         fin = pipeline.finalize(res)
@@ -25,7 +25,7 @@ def full_build(env, edit=None, regenerate=False, discard_edits=False):
 
 
 def jd_of(env):
-    return pipeline.job_dir("DemoCorp", env.job)
+    return pipeline.job_dir("DemoCorp", env.job, "Backend Engineer Intern")
 
 
 pytestmark = needs_tex()
@@ -179,7 +179,7 @@ def test_unmappable_or_conflicting_edits_are_flagged_not_overwritten(rb_env):
     assert out["status"] == "failed" and any(r.startswith("manual_edit_conflicts") for r in out["reasons"])
     assert versions.current(jd)["version"] == 1
     assert "My own extra bullet" in ct.read_text()                          # never overwritten
-    brief = (jd / "work" / "brief.md").read_text()
+    brief = (jd / pipeline.WORK / "brief.md").read_text()
     assert "Hand-edit conflicts" in brief
     out2 = full_build(rb_env, regenerate=True, discard_edits=True)          # explicit choice to drop them
     assert out2["status"] == "ready" and out2["prepare"]["carried"]["discarded"]

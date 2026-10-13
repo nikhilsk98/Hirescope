@@ -1,4 +1,4 @@
-"""Content JSON → LaTeX, inside a copy of your template (inputs/resume_template.tex is never modified).
+"""Content JSON → LaTeX, inside a copy of your template (inputs/resume/resume_template.tex is never modified).
 
 The template is split into its preamble + header (kept byte for byte, except the main-font line, which gets a
 metric-compatible fallback when the preferred font is not installed) and its body, which is replaced by

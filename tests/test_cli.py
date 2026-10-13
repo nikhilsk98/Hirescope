@@ -76,7 +76,7 @@ def test_add_url_cli_manual_entry(monkeypatch, tmp_path, capsys, cfg):
     _tmp_paths(monkeypatch, tmp_path)
     (tmp_path / "inputs").mkdir()
     (tmp_path / "inputs" / "my_companies.csv").write_text("company,careers_url,notes\n")
-    prefs = cfg.prefs.model_copy(update={"my_companies_csv": "inputs/my_companies.csv"})
+    prefs = cfg.prefs.model_copy(update={"my_companies_csv": "inputs/companies/my_companies.csv"})
     monkeypatch.setattr(add_url, "load_config", lambda *a, **k: cfg.model_copy(update={"prefs": prefs}))
     monkeypatch.setattr(add_url, "Embedder", FakeEmbedder)
     monkeypatch.setattr(R, "Embedder", FakeEmbedder)

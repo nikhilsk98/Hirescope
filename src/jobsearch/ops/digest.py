@@ -1,4 +1,4 @@
-"""Weekly digest: a static HTML page in data/digests/YYYY-MM-DD.html (new Strong matches, applications sent,
+"""Weekly digest: a static HTML page in data.nosync/digests/YYYY-MM-DD.html (new Strong matches, applications sent,
 follow-ups due, top skill gaps, outcome stats, hiring seasons coming up). Written on the first run of
 `notifications.digest_weekday` (default Sunday) or with `--digest`. All text is escaped; no scripts, no network."""
 from __future__ import annotations

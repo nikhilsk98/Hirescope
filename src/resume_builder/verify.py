@@ -10,7 +10,7 @@ Deterministic checks per bullet (and the summary, skills and talking points):
   ownership     led / managed / owned / spearheaded / architected / mentored … only when the evidence says so
   scale         large-scale / high-traffic / millions / enterprise … only when the evidence says so
   outcomes      reduced / improved / increased … only when the evidence states an outcome
-The drafter's own truth pass (work/truth_review.json, written by the LLM after reading truth.md) can only add
+The drafter's own truth pass (_work/truth_review.json, written by the LLM after reading truth.md) can only add
 findings; it can't clear a deterministic one.
 """
 from __future__ import annotations

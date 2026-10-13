@@ -4,12 +4,12 @@
   prepare <job> [--profile X] [--regenerate] [--force] [--discard-edits]
                              evidence bank, JD analysis, baseline + brief for the drafter (work/); reuses the
                              current version when nothing changed (unless --regenerate)
-  review <job>               reviewer packet for work/draft.json (rule findings + truth check), once per generation
+  review <job>               reviewer packet for _work/draft.json (rule findings + truth check), once per generation
   verify <job> [--content F] truth check of a content file against the evidence it cites
   build <job> [--content F]  reviewed content → truth check, render, compile, check the PDF, repair (max 3), save v<N>
   interview <job>            evidence-interview questions for this job (answers are saved only with add-evidence)
   add-evidence --entry ID --question Q --answer A --confirm
-                             save one answer you confirmed to inputs/evidence_additions.md
+                             save one answer you confirmed to inputs/resume/evidence_additions.md
   show <job> [--bullets]     versions, the current one, locks (and bullet ids to lock)
   diff <job> [A B]           what changed between two versions (default: previous → latest)
   rollback <job> N           make v<N> current again (it must have passed every check)
@@ -114,7 +114,7 @@ def cmd_build(args) -> int:
         job = resolve_job(conn, args.job)
     finally:
         conn.close()
-    jd = pipeline.job_dir(job["company"], job["id"])
+    jd = pipeline.job_dir(job["company"], job["id"], job["title"])
     _bridge(job["id"], "validating")
     try:
         with versions.JobLock(jd):
@@ -165,7 +165,7 @@ def _job_dir(ref):
         job = resolve_job(conn, ref)
     finally:
         conn.close()
-    return job, pipeline.job_dir(job["company"], job["id"])
+    return job, pipeline.job_dir(job["company"], job["id"], job["title"])
 
 
 def cmd_review(args) -> int:
@@ -185,15 +185,15 @@ def cmd_verify(args) -> int:
     from .content_schema import parse
     from .evidence import load_bank
     job, jd = _job_dir(args.job)
-    src = Path(args.content) if args.content else jd / "work" / "content.json"
+    src = Path(args.content) if args.content else jd / pipeline.WORK / "content.json"
     c = pipeline.assign_ids(parse(src.read_text(encoding="utf-8")))
     bank = load_bank()
     probs = pipeline.structure_problems(c, bank)
-    rep = verify.verify(c, bank, verify.load_llm_review(jd / "work" / "truth_review.json"))
-    (jd / "work").mkdir(parents=True, exist_ok=True)
-    (jd / "work" / "truth.md").write_text(verify.truth_md(rep, bank), encoding="utf-8")
+    rep = verify.verify(c, bank, verify.load_llm_review(jd / pipeline.WORK / "truth_review.json"))
+    (jd / pipeline.WORK).mkdir(parents=True, exist_ok=True)
+    (jd / pipeline.WORK / "truth.md").write_text(verify.truth_md(rep, bank), encoding="utf-8")
     print(f"{'SUPPORTED' if rep.ok and not probs else 'UNSUPPORTED'}: {len(rep.checked)} item(s) checked; "
-          f"report {jd / 'work' / 'truth.md'}")
+          f"report {jd / pipeline.WORK / 'truth.md'}")
     for p_ in probs:
         print(f"  ✗ structure: {p_}")
     for f in rep.findings:
@@ -206,7 +206,7 @@ def cmd_interview(args) -> int:
     from .content_schema import parse
     from .evidence import load_bank
     job, jd = _job_dir(args.job)
-    work = jd / "work"
+    work = jd / pipeline.WORK
     if not (work / "analysis.json").exists():
         pipeline.prepare(args.job)
     analysis = json.loads((work / "analysis.json").read_text())
@@ -293,7 +293,7 @@ def cmd_show(args) -> int:
         job = resolve_job(conn, args.job)
     finally:
         conn.close()
-    jd = pipeline.job_dir(job["company"], job["id"])
+    jd = pipeline.job_dir(job["company"], job["id"], job["title"])
     out = {"job_dir": str(jd), "current": versions.current(jd), "versions": versions.versions_summary(jd),
            "locks": sorted(versions.locked_ids(versions.load_locks(jd))) + sorted(
                f"section:{k}" for k in versions.load_locks(jd)["sections"])}

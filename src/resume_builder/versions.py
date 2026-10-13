@@ -1,7 +1,8 @@
-"""Versions of a job's resume: data/resumes/<Company>_<id>/v<N>/ with the employer-facing PDF, the .tex sources,
-the content JSON, reports, page images, the compile log and a source bundle that rebuilds the same PDF.
-
-current.json points at the last version that passed every required check (a failed build never replaces it).
+"""Versions of a job's resume: generated_resumes/<Company>/<Role>_<JobID>/
+  v<N>/          the employer-facing PDF, .tex sources, content JSON, manifest, page images, compile log, source bundle
+  reports/v<N>/  truth, coverage, changes, defense, review, validation reports for that version
+  latest         symlink to the current version
+  current.json   the last version that passed every required check (a failed build never replaces it)
 """
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ class LockedError(Exception):
 
 
 class JobLock:
-    """data/resumes/<job>/.lock (pid + time). A second run on the same job stops with a clear message; a lock whose
+    """data.nosync/generated_resumes/<Company>/<Role>_<JobID>/.lock (pid + time). A second run on the same job stops with a clear message; a lock whose
     process is gone or that is older than `stale_s` is replaced."""
 
     def __init__(self, job_dir: Path, stale_s: int = 3600):
@@ -93,6 +94,19 @@ def current(job_dir: Path) -> dict | None:
         return None
 
 
+def reports_dir(vdir: Path) -> Path:
+    """<job>/reports/v<N>/ for a version folder <job>/v<N>/."""
+    return vdir.parent / "reports" / vdir.name
+
+
+def _link_latest(job_dir: Path, version: int) -> None:
+    link = job_dir / "latest"
+    tmp = job_dir / ".latest.tmp"
+    tmp.unlink(missing_ok=True)
+    tmp.symlink_to(f"v{version}")           # relative: survives moving the data folder
+    tmp.replace(link)
+
+
 def set_current(job_dir: Path, version: int, reason: str) -> dict:
     vdir = job_dir / f"v{version}"
     m = read_manifest(vdir)
@@ -103,6 +117,7 @@ def set_current(job_dir: Path, version: int, reason: str) -> dict:
     tmp = job_dir / "current.json.tmp"
     tmp.write_text(json.dumps(cur, indent=1), encoding="utf-8")
     tmp.replace(job_dir / "current.json")
+    _link_latest(job_dir, version)
     return cur
 
 
@@ -113,7 +128,7 @@ def save_version(job_dir: Path, build_dir: Path, pdf_name: str, content_json: st
     tmp = job_dir / f".v{n}.tmp"
     if tmp.exists():
         shutil.rmtree(tmp)
-    (tmp / "reports").mkdir(parents=True)
+    tmp.mkdir(parents=True)
     src = tmp / "source"
     src.mkdir()
     files = {}
@@ -142,9 +157,13 @@ def save_version(job_dir: Path, build_dir: Path, pdf_name: str, content_json: st
     if pages.exists():
         shutil.copytree(pages, tmp / "pages")
         files["pages"] = sorted(f"pages/{p.name}" for p in (tmp / "pages").glob("*.png"))
+    rtmp = job_dir / "reports" / f".v{n}.tmp"
+    if rtmp.exists():
+        shutil.rmtree(rtmp)
+    rtmp.mkdir(parents=True)
     for name, text in reports.items():
-        (tmp / "reports" / name).write_text(text, encoding="utf-8")
-    files["reports"] = sorted(f"reports/{n_}" for n_ in reports)
+        (rtmp / name).write_text(text, encoding="utf-8")
+    files["reports"] = sorted(f"../reports/v{n}/{n_}" for n_ in reports)
     fonts = src / "fonts"
     copied = []
     for f in font_files:
@@ -163,6 +182,10 @@ def save_version(job_dir: Path, build_dir: Path, pdf_name: str, content_json: st
                                 ("content", "content.json")) if v and (tmp / v).exists()}
     (tmp / "manifest.json").write_text(json.dumps(manifest, indent=1, ensure_ascii=False), encoding="utf-8")
     final = job_dir / f"v{n}"
+    rfinal = job_dir / "reports" / f"v{n}"
+    if rfinal.exists():
+        shutil.rmtree(rfinal)
+    rtmp.rename(rfinal)
     tmp.rename(final)
     return final
 

@@ -3,7 +3,7 @@
 `lint()` checks the rules in resume_rules.md that a script can check (weak openers, filler phrasing, first person,
 length, repeated opening verbs in a role, keyword stuffing, near-duplicates, tense, punctuation, technology
 capitalization). `review_packet()` gives the reviewer (a separate LLM pass, hiring-manager view) the draft, the lint
-findings and the checklist. The reviewer writes work/review.json (critique) and the revised work/content.json with
+findings and the checklist. The reviewer writes _work/review.json (critique) and the revised _work/content.json with
 notes.stage = "reviewed". Fixes are applied once: build refuses a content.json that skipped review, and a second
 review round is refused.
 """

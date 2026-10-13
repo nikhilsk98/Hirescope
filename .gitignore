@@ -6,9 +6,10 @@ __pycache__/
 .pytest_cache/
 .env
 
-# Personal inputs (commit only *.example.*)
-inputs/*
-!inputs/*.example.*
+# Personal inputs (commit only *.example.*, also inside inputs/<subfolder>/)
+inputs/**
+!inputs/**/
+!inputs/**/*.example.*
 
 # Generated / runtime data
 data

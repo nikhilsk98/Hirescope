@@ -1106,7 +1106,7 @@
       ["Jobs", `${(s2.jobs_found || 0).toLocaleString()} found · ${s2.new || 0} new · ${s2.updated || 0} updated · ${s2.closed || 0} closed`],
       ["Scored", `${(s2.scored || 0).toLocaleString()} visible · ${(s2.filtered || 0).toLocaleString()} filtered · ${s2.strong || 0} Strong`],
       ["Statuses import", im.file ? `${im.file}${im.skipped_reason ? ` — ${im.skipped_reason}` : ` — ${im.statuses_applied || 0} statuses, ${(im.apps_new || 0) + (im.apps_updated || 0)} applications merged`}` : (im.skipped_reason || "not run")],
-      ["Log file", el("span", null, el("code", { class: "mono", text: META.log_path || "data/logs/jobsearch.log" }), " ",
+      ["Log file", el("span", null, el("code", { class: "mono", text: META.log_path || "data.nosync/logs/jobsearch.log" }), " ",
         el("button", { class: "btn small ghost", type: "button", onclick: async () => toast((await copyText(META.log_path || "")) ? "Path copied" : "Clipboard unavailable") }, "Copy path"))],
     ])));
     const runs = META.runs || [];

@@ -96,7 +96,7 @@ class SponsorshipHistory(BaseModel):
     """Optional: past H-1B approvals per company from a manually downloaded USCIS Employer Data Hub CSV.
     Company history only - never job-level eligibility."""
     enabled: bool = False
-    file: str = "inputs/h1b_employer_data.csv"
+    file: str = "inputs/h1b/h1b_employer_data.csv"
 
 
 class Feedback(BaseModel):
@@ -125,7 +125,7 @@ class Aggregator(BaseModel):
 
 
 class Backups(BaseModel):
-    dir: str | None = None          # default data/backups; e.g. "~/Library/Mobile Documents/com~apple~CloudDocs/HireScope"
+    dir: str | None = None          # default data.nosync/backups; e.g. "~/Library/Mobile Documents/com~apple~CloudDocs/HireScope"
     keep: int = 14
 
 
@@ -141,7 +141,7 @@ class ManualChecks(BaseModel):
 class Notifications(BaseModel):
     enabled: bool = True
     early_bird_hours: int = 48       # "early bird": Strong matches posted within this many hours
-    digest_weekday: str = "Sunday"   # weekly digest (data/digests/) on the first run of this day
+    digest_weekday: str = "Sunday"   # weekly digest (data.nosync/digests/) on the first run of this day
     season_remind_days: int = 21     # hiring seasons: remind this many days before a predicted window
 
 
@@ -275,10 +275,10 @@ class Preferences(BaseModel):
     scoring: Scoring = Scoring()
     apply_today: ApplyToday = ApplyToday()
     health: Health = Health()
-    connections_csv: str = "inputs/Connections.csv"   # LinkedIn data export (optional): referral finder
+    connections_csv: str = "inputs/linkedin/Connections.csv"   # LinkedIn data export (optional): referral finder
     top_n: int = 1000                         # per track
     timezone: str = "America/New_York"
-    my_companies_csv: str = "inputs/my_companies.csv"
+    my_companies_csv: str = "inputs/companies/my_companies.csv"
     # where "Export statuses" files are picked up (newest wins). ~/Downloads is macOS-protected (a scheduled run may
     # be denied it; the Run Log then says so); inputs/statuses/ in the repo always works.
     statuses_import_dir: str | list[str] = ["~/Downloads", "inputs/statuses"]

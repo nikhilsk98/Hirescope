@@ -5,7 +5,7 @@
 # Fields: name, source (greenhouse | lever | ashby | workday | smartrecruiters | amazon | netflix | simplify),
 #         board (ATS token / tenant / feed URL), host + site (workday), tier (1 every run, 2 daily, 3 every
 #         3 days; preferences.company_tiers overrides), verified (date), notes.
-# Adding a company = adding one entry here (or a row in inputs/my_companies.csv for auto-detection).
+# Adding a company = adding one entry here (or a row in inputs/companies/my_companies.csv for auto-detection).
 companies:
 - name: Amazon
   source: amazon

@@ -11,7 +11,7 @@ import yaml
 from jobsearch import paths as hs_paths
 
 ROOT = hs_paths.ROOT
-INPUTS = hs_paths.INPUTS
+INPUTS = hs_paths.RESUME_INPUTS          # inputs/resume/
 MASTER_RESUME = INPUTS / "master_resume.md"
 TEMPLATE = INPUTS / "resume_template.tex"
 RULES = INPUTS / "resume_rules.md"
@@ -21,9 +21,9 @@ SKILL_DIR = ROOT / ".claude" / "skills" / "resume-builder"
 
 
 def resumes_dir() -> Path:
-    """data/resumes (data → data.nosync: gitignored and outside iCloud sync). Read at call time so tests and
+    """data.nosync/generated_resumes (gitignored, outside iCloud sync). Read at call time so tests and
     JOBSEARCH_DATA_DIR can redirect it."""
-    return hs_paths.DATA / "resumes"
+    return hs_paths.DATA / "generated_resumes"
 
 
 class InputError(Exception):
@@ -136,7 +136,7 @@ def name_from_master(first: str = "", last: str = "") -> tuple[str, str]:
                     return first or parts[0], last or parts[-1]
                 break
     raise InputError("can't tell your name for the PDF file name: put '# First Last' as the first line of "
-                     "inputs/master_resume.md, or set naming.first_name / last_name in config/resume_builder.yaml")
+                     "inputs/resume/master_resume.md, or set naming.first_name / last_name in config/resume_builder.yaml")
 
 
 def limit(settings: Settings, name: str, key: str, default: int) -> int:

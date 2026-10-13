@@ -60,7 +60,7 @@ work_authorization:       # never assumed: fill these in yourself
 
 # --- Companies (tiers) --------------------------------------------------
 # Tiers override config/companies.yaml. tier1: every run; tier2: daily; tier3: every 3 days.
-# Companies in inputs/my_companies.csv are checked every run regardless.
+# Companies in inputs/companies/my_companies.csv are checked every run regardless.
 company_tiers:
   tier1: []
   tier2: []
@@ -105,13 +105,13 @@ ghost: {age_days: 90, stale_days: 365, age_penalty: 5, repost_penalty: 4, evergr
 prefilter: {enabled: true, threshold: 0.52, margin: 0.05}
 # --- Optional: H-1B sponsorship history (USCIS Employer Data Hub CSV you download yourself) -----
 # Company history only, never job-level eligibility. Off by default.
-sponsorship_history: {enabled: false, file: inputs/h1b_employer_data.csv}
+sponsorship_history: {enabled: false, file: inputs/h1b/h1b_employer_data.csv}
 thresholds:
   strong: 70
   stretch: 50
 top_n: 1000               # max non-filtered jobs per track written to the dashboard
 timezone: America/New_York
-my_companies_csv: inputs/my_companies.csv
+my_companies_csv: inputs/companies/my_companies.csv
 statuses_import_dir: [~/Downloads, inputs/statuses]   # newest export wins; inputs/statuses always works for scheduled runs
 # --- Feedback learning (from your dashboard statuses; bounded, listed under "Learned adjustments") --------
 feedback: {enabled: true, min_evidence: 2, max_per_feature: 3, max_total: 6, weight_nudge_max: 0.25, weight_min_jobs: 5,
@@ -120,7 +120,7 @@ feedback: {enabled: true, min_evidence: 2, max_per_feature: 3, max_total: 6, wei
 # --- My Applications ---------------------------------------------------------------------------
 applications: {follow_up_days: [7, 10], ghosted_after_days: 30, same_company_window_days: 30, near_duplicate_ratio: 85}
 # LinkedIn connections export (Settings > Data privacy > Get a copy of your data > Connections). Optional.
-connections_csv: inputs/Connections.csv
+connections_csv: inputs/linkedin/Connections.csv
 # --- Optional aggregator (off by default; key in .env). Sends only these queries to the provider. -----------
 aggregator:
   enabled: false
@@ -185,5 +185,5 @@ schedule:
   full_times: ["08:00", "18:00"]   # launchd full runs, local time
   quick_hours: 2.5                 # quick checks (My Companies + tier 1) every N hours; 0 = off
 backups:
-  dir: null                        # default data/backups; e.g. "~/Library/Mobile Documents/com~apple~CloudDocs/HireScope"
+  dir: null                        # default data.nosync/backups; e.g. "~/Library/Mobile Documents/com~apple~CloudDocs/HireScope"
   keep: 14                         # daily backups kept

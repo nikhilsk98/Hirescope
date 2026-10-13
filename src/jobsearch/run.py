@@ -151,7 +151,7 @@ def parse_args(argv=None):
     p.add_argument("--company", help="only run this company (case-insensitive); works for seed, My Companies, "
                                      "or any company name (auto-detects its job system)")
     p.add_argument("--all", action="store_true", help="ignore tier schedules and check every company now")
-    p.add_argument("--watchlist", action="store_true", help="only check inputs/my_companies.csv companies")
+    p.add_argument("--watchlist", action="store_true", help="only check inputs/companies/my_companies.csv companies")
     p.add_argument("--no-link-check", action="store_true", help="skip the apply-link check")
     p.add_argument("--rescore", action="store_true", help="no fetching: re-extract and re-score stored jobs and rewrite the "
                                                           "dashboard (after editing preferences, config or the resume)")
@@ -163,12 +163,12 @@ def parse_args(argv=None):
     p.add_argument("--quick", action="store_true", help="quick check: My Companies + tier-1 only, no link check, "
                                                         "no backup/digest (what launchd runs every 2–3 hours)")
     p.add_argument("--export-excel", nargs="?", const="", metavar="FILE", type=str,
-                   help="also write an .xlsx (default data/exports/hirescope-<date>.xlsx)")
+                   help="also write an .xlsx (default data.nosync/exports/hirescope-<date>.xlsx)")
     p.add_argument("--digest", action="store_true", help="write the weekly digest now (default: first run on Sunday)")
     p.add_argument("--no-notify", action="store_true", help="no macOS notifications this run")
     p.add_argument("--no-backup", action="store_true", help="skip the daily backup this run")
     p.add_argument("--verbose", "-v", action="store_true")
-    p.add_argument("--resume", type=Path, default=paths.RESUME, help="resume markdown (default inputs/master_resume.md)")
+    p.add_argument("--resume", type=Path, default=paths.RESUME, help="resume markdown (default inputs/resume/master_resume.md)")
     p.add_argument("--prefs", type=Path, default=paths.PREFERENCES, help="preferences yaml (default inputs/preferences.yaml)")
     return p.parse_args(argv)
 
@@ -184,7 +184,7 @@ def main(argv=None) -> int:
     if not (args.rescore or args.dry_run) and not alerts.online():
         log.error("offline (no network): nothing fetched; the next scheduled run will retry")
         return EX_TEMPFAIL
-    lock = RunLock(paths.DATA / "run.lock", stale_hours=3, what="quick check" if args.quick else "run")
+    lock = RunLock(paths.STATE_DIR / "run.lock", stale_hours=3, what="quick check" if args.quick else "run")
     try:
         lock.acquire()
     except Locked as e:
@@ -320,14 +320,14 @@ def _main(args, log_file: Path) -> int:
                     s["backup"] = str(b) if b else None
                 except (OSError, sqlite3.Error) as e:
                     log.error("backup failed: %s", e)
-            dg_dir = paths.DATA / "digests"
+            dg_dir = paths.DIGESTS_DIR
             if args.digest or digest.due(today, cfg.prefs.notifications.digest_weekday, dg_dir):
                 p = digest.write(conn, dg_dir, today, seasons, tuple(cfg.prefs.applications.follow_up_days),
                                  cfg.prefs.manual_checks.remind_days, {w.company for w in watch})
                 s["digest"] = str(p)
-                notify.notify("HireScope weekly digest", f"Your week in review is ready: {p.name}", "data/digests")
+                notify.notify("HireScope weekly digest", f"Your week in review is ready: {p.name}", "data.nosync/digests")
         if args.export_excel is not None:
-            out = Path(args.export_excel) if args.export_excel else paths.DATA / "exports" / f"hirescope-{today}.xlsx"
+            out = Path(args.export_excel) if args.export_excel else paths.EXPORTS_DIR / f"hirescope-{today}.xlsx"
             s["excel"] = str(excel.export(conn, out, cfg.prefs.top_n))
             log.info("excel export: %s", s["excel"])
         if not args.rescore:

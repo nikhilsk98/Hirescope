@@ -26,7 +26,7 @@ def plan(conn, limit: int | None = None) -> dict:
     jobs = shortlisted(conn)
     todo, reuse = [], []
     for j in jobs:
-        jd = pipeline.job_dir(j["company"], j["id"])
+        jd = pipeline.job_dir(j["company"], j["id"], j["title"])
         cur = versions.current(jd) if jd.exists() else None
         (reuse if cur and not versions.detect_edits(jd / f"v{cur['version']}")["edited"] else todo).append(j)
     cap = min(limit or settings.batch_max_jobs, settings.batch_max_jobs)
@@ -60,8 +60,8 @@ def run(which: str, yes: bool, limit: int | None = None) -> int:
         except hirescope_bridge.BridgeError as e:
             print(f"Warning: {e}")
     queue = [j["id"] for j in [*p["todo"], *p["has_resume"]]]
-    (rc.resumes_dir()).mkdir(parents=True, exist_ok=True)
-    (rc.resumes_dir() / "batch_queue.json").write_text(json.dumps({"queued_at": pipeline.utcnow(), "jobs": queue},
+    (rc.resumes_dir() / "_cache").mkdir(parents=True, exist_ok=True)
+    (rc.resumes_dir() / "_cache" / "batch_queue.json").write_text(json.dumps({"queued_at": pipeline.utcnow(), "jobs": queue},
                                                                   indent=1), encoding="utf-8")
     print(f"Queued {len(queue)} job(s) (dashboard shows 'queued'). Process them in order: "
           + " ".join(str(x) for x in queue))

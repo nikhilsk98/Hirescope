@@ -309,7 +309,7 @@ def test_overflow_triggers_trimming_in_priority_order(rb_env):
     for pr in c.projects:
         fill = [i for i in bank.by_entry(pr.entry_id) if i.text.startswith("Filler")]
         pr.bullets = pr.bullets[:1] + [Bullet(text=i.text, evidence_ids=[i.id], priority=5) for i in fill[:3]]
-    work = pipeline.job_dir("DemoCorp", rb_env.job) / "work"
+    work = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern") / pipeline.WORK
     pipeline.prepare(str(rb_env.job))
     (work / "content.json").write_text(dump(pipeline.assign_ids(c)))
     res = pipeline.build(str(rb_env.job), require_review=False)
@@ -354,8 +354,11 @@ def test_employer_facing_name_and_paths(rb_env):
     assert pipeline.pdf_name(s, "Clēnera") == "Demo_Candidate_Resume_Clenera.pdf"
     assert pipeline.pdf_name(s, "Hewlett Packard Enterprise") == "Demo_Candidate_Resume_Hewlett_Packard_Enterprise.pdf"
     assert pipeline.pdf_name(s, "../../etc") == "Demo_Candidate_Resume_etc.pdf"
-    d = pipeline.job_dir("AT&T / Mobility", 42)
-    assert d.name == "AT-T-Mobility_42" and d.parent == rc.resumes_dir()
+    d = pipeline.job_dir("AT&T / Mobility", 42, "Sr. Engineer (Backend) – C++/Go!")
+    assert (d.parent.name, d.name) == ("AT-T-Mobility", "Sr-Engineer-Backend-C-Go_42")
+    assert d.parent.parent == rc.resumes_dir()
+    d.mkdir(parents=True)                                       # found again by job ID even if the title changes
+    assert pipeline.job_dir("AT&T", 42, "New title") == d
     for bad in ("../x", ".hidden", "a/b", "-rf", ""):
         with pytest.raises(InputError):
             pipeline.safe_child(d, bad)
@@ -389,12 +392,12 @@ def test_settings_validation(rb_env, tmp_path):
 @needs_tex()
 def test_prepare_and_build_end_to_end(rb_env):
     out = pipeline.prepare(str(rb_env.job))
-    work = rb_env.data / "resumes" / f"DemoCorp_{rb_env.job}" / "work"
+    work = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern") / pipeline.WORK
     assert out["work"] == str(work) and (work / "brief.md").exists()
     brief = (work / "brief.md").read_text()
     assert "DATA" in brief and "exp-demo-b1" in brief
     reviewed_flow(rb_env, work)
-    jd = pipeline.job_dir("DemoCorp", rb_env.job)
+    jd = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern")
     with versions.JobLock(jd):
         res = pipeline.build(str(rb_env.job))
         fin = pipeline.finalize(res)

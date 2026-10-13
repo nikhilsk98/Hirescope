@@ -42,13 +42,13 @@ def test_missing_or_empty_inputs_stop_with_exact_file(rb_env, which, setup, msg)
 @needs_tex()
 def test_broken_template_copy_fails_clearly_and_keeps_last_good(rb_env, capsys):
     pipeline.prepare(str(rb_env.job))
-    jd = pipeline.job_dir("DemoCorp", rb_env.job)
-    reviewed_flow(rb_env, jd / "work")
+    jd = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern")
+    reviewed_flow(rb_env, jd / pipeline.WORK)
     assert cli.main(["build", str(rb_env.job)]) == 0
     original = rc.TEMPLATE.read_bytes()
     rc.TEMPLATE.write_text(rc.TEMPLATE.read_text().replace("\\end{center}", ""))   # header block broken
     assert cli.main(["prepare", str(rb_env.job), "--regenerate"]) == 0
-    reviewed_flow(rb_env, jd / "work")
+    reviewed_flow(rb_env, jd / pipeline.WORK)
     assert cli.main(["build", str(rb_env.job)]) == 2
     err = capsys.readouterr().err
     assert "no header block" in err
@@ -81,7 +81,7 @@ def test_missing_font_without_fallback_is_a_clear_compile_error(rb_env):
 
 
 def test_corrupt_state_files_never_crash_or_count_as_valid(rb_env):
-    jd = pipeline.job_dir("DemoCorp", rb_env.job)
+    jd = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern")
     (jd / "v1").mkdir(parents=True)
     (jd / "v1" / "manifest.json").write_text("{not json")
     (jd / "current.json").write_text("{nope")
@@ -95,7 +95,7 @@ def test_corrupt_state_files_never_crash_or_count_as_valid(rb_env):
 @needs_tex()
 def test_malformed_content_json_is_rejected_with_reasons(rb_env, capsys):
     pipeline.prepare(str(rb_env.job))
-    work = pipeline.job_dir("DemoCorp", rb_env.job) / "work"
+    work = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern") / pipeline.WORK
     reviewed_flow(rb_env, work)
     c = json.loads((work / "content.json").read_text())
     c["experience"][0]["bullets"][0]["evidence_ids"] = []
@@ -113,19 +113,19 @@ def test_malformed_content_json_is_rejected_with_reasons(rb_env, capsys):
 def test_logs_and_reports_never_contain_contact_details(rb_env, caplog, capsys):
     caplog.set_level(logging.DEBUG)
     pipeline.prepare(str(rb_env.job))
-    jd = pipeline.job_dir("DemoCorp", rb_env.job)
-    reviewed_flow(rb_env, jd / "work")
+    jd = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern")
+    reviewed_flow(rb_env, jd / pipeline.WORK)
     assert cli.main(["build", str(rb_env.job)]) == 0
     out = capsys.readouterr()
     secrets = ("demo.candidate@example.com", "555) 010-0000", "+1-555-010-0000")
     for text in (out.out, out.err, caplog.text, (jd / "v1" / "compile.log").read_text(),
-                 *[p.read_text() for p in (jd / "v1" / "reports").glob("*.md")],
+                 *[p.read_text() for p in (jd / "reports" / "v1").glob("*.md")],
                  (jd / "v1" / "manifest.json").read_text()):
         assert not any(s in text for s in secrets)
 
 
 def test_lock_targets_and_job_refs_are_validated(rb_env):
-    jd = pipeline.job_dir("DemoCorp", rb_env.job)
+    jd = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern")
     jd.mkdir(parents=True)
     with pytest.raises(ValueError, match="no version yet"):
         versions.lock(jd, "../../etc/passwd")
@@ -141,7 +141,7 @@ def test_every_cli_command(rb_env, capsys):
     assert cli.main(["check"]) == 0 and "OK: tools present" in capsys.readouterr().out
     assert cli.main(["schema"]) == 0 and "evidence_ids" in json.loads(capsys.readouterr().out)["$defs"]["Bullet"]["properties"]
     assert cli.main(["prepare", j]) == 0
-    work = pipeline.job_dir("DemoCorp", rb_env.job) / "work"
+    work = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern") / pipeline.WORK
     (work / "draft.json").write_text((work / "baseline.json").read_text())
     assert cli.main(["review", j]) == 0 and "Reviewer packet" in capsys.readouterr().out
     c = json.loads((work / "draft.json").read_text())
@@ -185,7 +185,7 @@ def test_every_cli_command(rb_env, capsys):
 def test_build_attempts_are_capped_per_generation(rb_env, capsys):
     """Usage limit: 3 builds per generation; a 4th is refused before doing anything and the status stays as is."""
     pipeline.prepare(str(rb_env.job))
-    reviewed_flow(rb_env, pipeline.job_dir("DemoCorp", rb_env.job) / "work")
+    reviewed_flow(rb_env, pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern") / pipeline.WORK)
     for _ in range(3):
         assert cli.main(["build", str(rb_env.job)]) == 0
     capsys.readouterr()
@@ -195,7 +195,7 @@ def test_build_attempts_are_capped_per_generation(rb_env, capsys):
     conn = db.connect(rb_env.db_path)
     assert conn.execute("SELECT status FROM resume_status WHERE job_pk=?", (rb_env.job,)).fetchone()[0] == "ready"
     conn.close()
-    assert len(versions.version_dirs(pipeline.job_dir("DemoCorp", rb_env.job))) == 3
+    assert len(versions.version_dirs(pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern"))) == 3
 
 
 def test_jd_footer_boilerplate_and_fraud_notices_are_not_requirements_or_injections(rb_env):
@@ -233,7 +233,7 @@ def test_keywords_found_only_in_the_footer_are_dropped(rb_env):
 @needs_tex()
 def test_a_stopped_build_does_not_block_the_next_generation(rb_env):
     pipeline.prepare(str(rb_env.job))
-    reviewed_flow(rb_env, pipeline.job_dir("DemoCorp", rb_env.job) / "work")
+    reviewed_flow(rb_env, pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern") / pipeline.WORK)
     from resume_builder import render
 
     def boom(*a, **k):

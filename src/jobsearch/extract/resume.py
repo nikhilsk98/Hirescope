@@ -49,7 +49,7 @@ def _section_key(heading: str) -> str | None:
 def parse_resume(path: Path, synonyms: dict[str, list[str]]) -> Resume:
     if not path.exists():
         raise FileNotFoundError(
-            f"{path} not found. Copy inputs/master_resume.example.md to {path.name} and replace it with your resume."
+            f"{path} not found. Copy inputs/resume/master_resume.example.md to {path.name} and replace it with your resume."
         )
     text = path.read_text(encoding="utf-8")
     text = re.sub(r"<!--.*?-->", "", text, flags=re.S)

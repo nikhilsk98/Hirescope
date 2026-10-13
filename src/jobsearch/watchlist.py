@@ -1,4 +1,4 @@
-"""inputs/my_companies.csv: company, careers_url (optional), notes (optional).
+"""inputs/companies/my_companies.csv: company, careers_url (optional), notes (optional).
 
 Every row is checked on every run, regardless of tier, with full pagination. Blank lines and lines
 starting with '#' are ignored; duplicate company names keep the first row.

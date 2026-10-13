@@ -522,3 +522,33 @@ work folder + status row for an unrelated real job, removed); the dashboard data
    Copart v3, HPE v3, Centric v4, Bose v2. Nothing was marked reviewed in your real data; that's yours to do.
 7. Optional: install Calibri system-wide if you prefer it over Carlito.
 
+
+---
+
+# Folder reorganization (2026-10-13)
+**Backup first**: `~/hirescope-backup-20261013-1536/` (data.nosync.tgz 413 MB + inputs.tgz, both verified).
+
+**Moved, not regenerated** (`scripts/migrate_layout.py`, idempotent, `--dry-run`): `data` symlink removed (code points at
+`data.nosync/`); `jobs.db` → `db/`; 46,076 JD files → `jd/<Company>/` (336 no job refers to → `jd/_unassigned/`);
+`resumes/<Co>_<id>/` → `generated_resumes/<Company>/<Role>_<JobID>/` with `reports/vN/`, `latest` → current version,
+`_work/`; evidence cache → `generated_resumes/_cache/`; `packages/` → `job_packages/`; run lock → `state/`; inputs →
+`inputs/resume/`, `inputs/companies/` (+ `linkedin/`, `statuses/`, `h1b/`), preferences paths updated; the build
+prompts → `docs/prompts/`; stray `.coverage`, `.DS_Store`, `.Rhistory` files removed. SQLite: 45,785 `jd_path` rows,
+resume statuses / builds (paths rebuilt from the manifests) updated. See STRUCTURE.md.
+
+**Code**: every location in `paths.py` (data paths are derived from `DATA` when read, so redirecting it — tests,
+`JOBSEARCH_DATA_DIR` — redirects everything); JD files written into company folders; stored paths found again in
+company folders; resume folders found by job ID (title changes don't matter); SQLite waits up to 30 s for another
+writer; `setup.sh` no longer makes the symlink; `.gitignore` covers the input subfolders (only `*.example.*` tracked).
+
+**Found and fixed while testing**: a test still held the run lock at the old location, so `jobsearch.run` started a real
+run (before the derived-paths fix it was pointed at the real database: run #64 at 19:41 fetched your real sources for a
+few minutes and was stopped — 38 new jobs, JD files rewritten into the new folders; integrity check OK, nothing
+synthetic written); an autouse fixture now drops paths frozen by monkeypatch; `verify` printed the old work folder.
+
+**Checks**: 510 tests passed (5 new layout tests, incl. the migration on a DEMO copy of the old layout). Dry run
+(`--dry-run --company Copart`): database unchanged. Real quick run: 219 of 273 OK, 1 failed (Stryker's Workday: HTTP
+520, unrelated). New resume generated in the new layout (Axos Bank → `Axos-Bank/Software-Development-Intern_20970/v1`,
+`reports/v1/`, `latest → v1`; READY). Dashboard (headless Chrome): all 6 resumes show "Resume ready", previews load,
+Preview / Download PDF / Download .tex / Validation report / All reports links resolve, every apply link present; Log
+link → `data.nosync/logs/jobsearch.log`. Schedule reinstalled (new log paths) and a launchd quick check started.

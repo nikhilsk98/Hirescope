@@ -7,15 +7,12 @@ ROOT="$PWD"
 PY="${PYTHON:-$(command -v python3.12 || true)}"
 [[ -z "$PY" ]] && { echo "python3.12 not found (brew install python@3.12)"; exit 1; }
 
-# If the repo lives in an iCloud Drive-synced folder (e.g. Desktop & Documents sync), keep runtime data out
-# of iCloud: iCloud never syncs a folder whose name ends in ".nosync". A live SQLite DB must not be synced.
-in_icloud() { local d="$PWD"; while [[ "$d" != "/" ]]; do xattr -p com.apple.file-provider-domain-id "$d" 2>/dev/null \
-  | grep -q CloudDocs && return 0; d="$(dirname "$d")"; done; return 1; }
-if in_icloud && [[ ! -L data ]]; then
-  echo "Repo is in an iCloud-synced folder: storing runtime data in data.nosync/ (not synced)"
-  if [[ -d data ]]; then mv data data.nosync; else mkdir -p data.nosync; fi
-  ln -s data.nosync data
+# Runtime data always lives in data.nosync/: iCloud never syncs a folder whose name ends in ".nosync" (a live SQLite DB
+# must not be synced). Older installs had data/ (or a data -> data.nosync symlink): scripts/migrate_layout.py moves them.
+if [[ -e data && ! -L data ]]; then
+  echo "Found an old data/ folder: run  $HOME/.venvs/hirescope/bin/python scripts/migrate_layout.py  after setup"
 fi
+mkdir -p data.nosync inputs/resume inputs/companies inputs/linkedin inputs/statuses inputs/h1b
 
 # The venv lives outside the repo (default ~/.venvs/hirescope): a venv inside an iCloud-synced folder gets its
 # .pth files flagged hidden (Python 3.12 then skips them) and every file synced. Override with JOBSEARCH_VENV.
@@ -25,7 +22,7 @@ VENV="${JOBSEARCH_VENV:-$HOME/.venvs/hirescope}"
 "$VENV/bin/pip" install -q -r requirements.txt
 "$VENV/bin/pip" install -q -e .        # `python -m jobsearch.run` works from anywhere with this venv
 
-for f in preferences.yaml master_resume.md; do
+for f in preferences.yaml resume/master_resume.md companies/my_companies.csv; do
   [[ -f "inputs/$f" ]] || echo "TODO: create inputs/$f (start from inputs/${f%.*}.example.${f##*.})"
 done
 echo "Setup done. Next: source $VENV/bin/activate && python -m jobsearch.run --verbose   (or ./scripts/run.sh)"

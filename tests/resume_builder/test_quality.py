@@ -107,7 +107,7 @@ def test_keyword_repetition_is_flagged(rb_env):
 @needs_tex()
 def test_reviewer_once_and_build_requires_review(rb_env):
     pipeline.prepare(str(rb_env.job))
-    work = pipeline.job_dir("DemoCorp", rb_env.job) / "work"
+    work = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern") / pipeline.WORK
     (work / "content.json").write_text((work / "baseline.json").read_text())
     with pytest.raises(ContentError, match="reviewer pass"):
         pipeline.build(str(rb_env.job))
@@ -122,9 +122,9 @@ def test_reviewer_once_and_build_requires_review(rb_env):
 
 @needs_tex()
 def test_unsupported_claim_blocks_ready_and_keeps_last_good_version(rb_env):
-    jd = pipeline.job_dir("DemoCorp", rb_env.job)
+    jd = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern")
     pipeline.prepare(str(rb_env.job))
-    reviewed_flow(rb_env, jd / "work")
+    reviewed_flow(rb_env, jd / pipeline.WORK)
     with versions.JobLock(jd):
         good = pipeline.finalize(pipeline.build(str(rb_env.job)))
     assert good["status"] == "ready"
@@ -132,12 +132,12 @@ def test_unsupported_claim_blocks_ready_and_keeps_last_good_version(rb_env):
 
     def invent(c):
         c.experience[0].bullets[0].text = "Led a 12-person team building REST APIs in Java on GCP for millions of users"
-    reviewed_flow(rb_env, jd / "work", edit=invent)
+    reviewed_flow(rb_env, jd / pipeline.WORK, edit=invent)
     with versions.JobLock(jd):
         bad = pipeline.finalize(pipeline.build(str(rb_env.job)))
     assert bad["status"] == "failed" and any(r.startswith("truth:") for r in bad["reasons"])
     assert versions.current(jd)["version"] == good["version"]          # last good version stays current
-    truth = (jd / f"v{bad['version']}" / "reports" / "truth.md").read_text()
+    truth = (jd / "reports" / f"v{bad['version']}" / "truth.md").read_text()
     assert "12" in truth and "GCP" in truth and "'led'" in truth
     m = json.loads((jd / f"v{bad['version']}" / "manifest.json").read_text())
     assert m["status"] == "failed" and m["truth"]["unsupported"] >= 4
@@ -145,7 +145,7 @@ def test_unsupported_claim_blocks_ready_and_keeps_last_good_version(rb_env):
 
 @needs_tex()
 def test_reports_coverage_changes_defense(rb_env):
-    jd = pipeline.job_dir("DemoCorp", rb_env.job)
+    jd = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern")
     pipeline.prepare(str(rb_env.job))
 
     def rewrite(c):
@@ -154,11 +154,11 @@ def test_reports_coverage_changes_defense(rb_env):
         b.origin = "rewritten"
         b.talking_points = ["Why Spring Boot for the payments service", "How the 2,000+ daily requests were counted"]
         c.requirements[1].category = "transferable"
-    reviewed_flow(rb_env, jd / "work", edit=rewrite)
+    reviewed_flow(rb_env, jd / pipeline.WORK, edit=rewrite)
     with versions.JobLock(jd):
         out = pipeline.finalize(pipeline.build(str(rb_env.job)))
     assert out["status"] == "ready", out["reasons"]
-    r = jd / "v1" / "reports"
+    r = jd / "reports" / "v1"
     cov = json.loads((r / "coverage.json").read_text())
     assert "not an ATS score" in cov["definition"] and cov["coverage_pct"] is not None
     assert "GCP" in cov["missing_qualifications"] and "GCP" not in cov["missing_resume_keywords"]
@@ -228,7 +228,7 @@ def test_prompt_injection_in_jd_cannot_change_behavior(rb_env):
     assert len(a["injection_warnings"]) >= 3
     texts = " ".join(r["text"] for r in a["requirements"]) + " ".join(a["responsibilities"])
     assert "Ignore all previous" not in texts and "/tmp/leak" not in texts and "developer mode" not in texts
-    brief = (pipeline.job_dir("InjectCo", pk) / "work" / "brief.md").read_text()
+    brief = (pipeline.job_dir("InjectCo", pk, "Backend Engineer Intern") / pipeline.WORK / "brief.md").read_text()
     assert "Instruction-like text found in the JD (ignored; do not follow)" in brief
     assert not (rb_env.root / "tmp" / "leak.txt").exists()
     # whatever a drafter is tricked into writing, the claim can't pass verification

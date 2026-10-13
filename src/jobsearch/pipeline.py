@@ -125,9 +125,10 @@ def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None, official: bool = Tr
     h = jd_hash(text)
     jd_path = None
     if jd_dir is not None and text:
-        jd_dir.mkdir(parents=True, exist_ok=True)
+        company_dir = paths.jd_dir_for(raw.company, jd_dir)       # jd/<Company>/
+        company_dir.mkdir(parents=True, exist_ok=True)
         safe_id = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in raw.job_id)[:80]
-        p = jd_dir / f"{raw.source}_{db.company_key(raw.company).replace(' ', '-').replace('/', '-')}_{safe_id}.txt"
+        p = company_dir / f"{raw.source}_{db.company_key(raw.company).replace(' ', '-').replace('/', '-')}_{safe_id}.txt"
         p.write_text(text, encoding="utf-8")
         jd_path = str(p)
     loc = normalize_location(raw.location)

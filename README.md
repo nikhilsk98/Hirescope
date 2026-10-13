@@ -13,8 +13,8 @@ never logs in, never scrapes LinkedIn, never applies or messages anyone, and sen
 ## Quick start
 
 1. `./scripts/setup.sh` — venv in `~/.venvs/hirescope`, dependencies, editable install.
-2. Copy and edit your inputs: `inputs/preferences.yaml`, `inputs/master_resume.md` (and optionally
-   `inputs/my_companies.csv`, `inputs/Connections.csv`, `.env` for LinkedIn alert emails).
+2. Copy and edit your inputs: `inputs/preferences.yaml`, `inputs/resume/master_resume.md` (and optionally
+   `inputs/companies/my_companies.csv`, `inputs/linkedin/Connections.csv`, `.env` for LinkedIn alert emails).
 3. `./scripts/run.sh --all` — first full run (~25 min; later runs fetch only what changed).
 4. Open `dashboard/index.html`. Shortlist / skip with a reason / **Mark Applied**; **Export statuses** now and then.
 5. `./scripts/schedule.sh install` — full runs 08:00 + 18:00 and quick checks every 2.5 h.
@@ -30,28 +30,28 @@ never logs in, never scrapes LinkedIn, never applies or messages anyone, and sen
 3. Click **Export statuses** at the end of a session. The next run imports it from `~/Downloads` into SQLite (and
    backups), so nothing you did lives only in the browser.
 4. Weekly: skim **Missed Matches** (false negatives) and **Coverage** (companies to check by hand); follow up on
-   **Follow-ups Due**. A Sunday digest lands in `data/digests/`.
+   **Follow-ups Due**. A Sunday digest lands in `data.nosync/digests/`.
 
 ## How it works (data flow)
 
 | Stage | Reads | Writes |
 |---|---|---|
-| Inputs | `inputs/preferences.yaml`, `inputs/master_resume.md`, `inputs/my_companies.csv`, `config/*.yaml`, `.env` | — |
-| Import your side | newest `~/Downloads/jobsearch-statuses*.json` (dashboard export) | SQLite `jobs.user_*`, `applications`, `application_events`; `data/imports/` |
+| Inputs | `inputs/preferences.yaml`, `inputs/resume/master_resume.md`, `inputs/companies/my_companies.csv`, `config/*.yaml`, `.env` | — |
+| Import your side | newest `~/Downloads/jobsearch-statuses*.json` (dashboard export) | SQLite `jobs.user_*`, `applications`, `application_events`; `data.nosync/imports/` |
 | Plan | tier schedules, My Companies, `--quick` / `--source` / `--company` | which sources run now |
-| Fetch (parallel, polite) | employer ATS APIs, feeds, HN API, IMAP (optional) | `data/jd/*.txt`, HTTP validators (ETag) |
+| Fetch (parallel, polite) | employer ATS APIs, feeds, HN API, IMAP (optional) | `data.nosync/jd/*.txt`, HTTP validators (ETag) |
 | Extract | JD text | title/level/track/terms/location/YOE/degree/flags/deadline/keywords per job |
 | Dedupe + lifecycle | same source id → canonical ATS key → fuzzy company+title+location | new / updated / seen / closed (2 misses) |
 | Rules + score | preferences, resume, learned adjustments | filtered (with reasons) or scored: qualification + preference + bonuses − penalties |
 | Publish | SQLite | `dashboard/data.js` + `details/`, `dashboard/sync.js` (your statuses & applications) |
-| After the run | — | notifications, `data/logs/last_run_summary.txt`, daily backup, weekly digest, optional .xlsx |
+| After the run | — | notifications, `data.nosync/logs/last_run_summary.txt`, daily backup, weekly digest, optional .xlsx |
 
 ## Setup
 
 ```sh
 ./scripts/setup.sh                       # venv at ~/.venvs/hirescope, dependencies, editable install
 cp inputs/preferences.example.yaml inputs/preferences.yaml      # then edit
-cp inputs/master_resume.example.md inputs/master_resume.md      # then replace with YOUR resume
+cp inputs/resume/master_resume.example.md inputs/resume/master_resume.md      # then replace with YOUR resume
 ```
 
 `inputs/` is gitignored except the `*.example.*` files. `master_resume.md` is the only source of facts about you.
@@ -147,7 +147,7 @@ Tiers: **1** every run (deeper pagination), **2** once a day, **3** every 3 days
 company_tiers` overrides. Last-checked times are tracked per company. `--all` ignores the schedule.
 
 ### My Companies watchlist
-`inputs/my_companies.csv` (gitignored; see `inputs/my_companies.example.csv`):
+`inputs/companies/my_companies.csv` (gitignored; see `inputs/companies/my_companies.example.csv`):
 ```csv
 company,careers_url,notes
 Stripe,,
@@ -234,7 +234,7 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
   `jobsearch-statuses.json` (format 3). Each run imports the newest `jobsearch-statuses*.json` in
   `statuses_import_dir` (default `~/Downloads`; `--statuses FILE` for a specific one, `--no-import` to skip) and merges
   it into SQLite: per item, **SQLite wins unless the export's entry is newer**; application timelines are unioned.
-  Imported files are archived in `data/imports/`.
+  Imported files are archived in `data.nosync/imports/`.
 - Each run writes `dashboard/sync.js` from SQLite, and the page merges it on load (newer wins), so clearing browser
   data or opening the dashboard in another browser loses nothing that was exported.
 - **Feedback learning** (`feedback` in preferences): shortlist / package / applied / interviewing / offer are
@@ -244,7 +244,7 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
   location / level needs `min_evidence` labeled jobs, moves the score by at most `max_per_feature` per group and
   `max_total` per job, and component weights move at most ±25%. Everything learned is listed under **Learned
   adjustments** and in each job's Score tab. Learning never un-hides a filtered job; it suggests reviewing the rule.
-- **Referral finder**: put LinkedIn's official connections export at `inputs/Connections.csv` (LinkedIn → Settings →
+- **Referral finder**: put LinkedIn's official connections export at `inputs/linkedin/Connections.csv` (LinkedIn → Settings →
   Data privacy → Get a copy of your data → Connections). Companies are matched by brand (aliases, legal suffixes
   stripped); "Google Cloud" for Google is shown only as a possible match. Cards get a "Referral · N" badge. Never
   scrapes LinkedIn, never contacts anyone.
@@ -277,7 +277,7 @@ matched / synonym / missing with the resume line as evidence. Coverage measures 
 passing an ATS; missing keywords are gaps, never suggestions to add something you don't have.
 
 **Optional sponsorship history** (`sponsorship_history.enabled`, off by default): put a USCIS H-1B Employer Data
-Hub CSV you downloaded at `inputs/h1b_employer_data.csv`; matched companies show past approvals as company history,
+Hub CSV you downloaded at `inputs/h1b/h1b_employer_data.csv`; matched companies show past approvals as company history,
 never as job-level eligibility.
 
 ## Where the settings live
@@ -286,7 +286,7 @@ never as job-level eligibility.
 `inputs/preferences.example.yaml`), then `python -m jobsearch.run --rescore` to re-score stored jobs without
 fetching; the next scheduled run uses the new values too. Typical edits: `preferred_locations`, `domains`, `salary`,
 `work_authorization`, `tracks.*` windows, `yoe` / `years_experience`, `company_tiers` (tier1 = checked every run),
-`schedule.full_times`. Your resume is `inputs/master_resume.md`; it is re-read every run.
+`schedule.full_times`. Your resume is `inputs/resume/master_resume.md`; it is re-read every run.
 
 Nothing about your search is hardcoded. `inputs/preferences.yaml` (documented line by line in
 `inputs/preferences.example.yaml`) holds your profile and every tuning value: graduation date, track windows and
@@ -377,9 +377,9 @@ checks, reports, versions, HireScope statuses). It never submits applications an
    visible to other apps), the build uses **Carlito**, which is metric-compatible (same line breaks):
    `brew install --cask font-carlito`. Every validation report and manifest says which font was used.
 3. `~/.venvs/hirescope/bin/pip install -r requirements.txt` (adds `pdfplumber`).
-4. Inputs (all gitignored): `inputs/master_resume.md` (the only source of facts; its `# First Last` heading names the
-   PDF), `inputs/resume_template.tex` (your template, never modified: the build copies it and replaces its body with
-   `\input{content.tex}`), `inputs/resume_rules.md` (your writing rules). `inputs/evidence_additions.md` is created
+4. Inputs (all gitignored): `inputs/resume/master_resume.md` (the only source of facts; its `# First Last` heading names the
+   PDF), `inputs/resume/resume_template.tex` (your template, never modified: the build copies it and replaces its body with
+   `\input{content.tex}`), `inputs/resume/resume_rules.md` (your writing rules). `inputs/resume/evidence_additions.md` is created
    by the evidence interview (confirmed answers only).
 5. `~/.venvs/hirescope/bin/python -m resume_builder check` — tools, inputs, evidence bank, notes (e.g. template
    bullets that aren't in your master resume).
@@ -427,7 +427,7 @@ fallback), `compile` (timeout, image DPI), `repair.max_attempts` (≤ 3), `profi
 the next request build a new version.
 
 ### Versions, locks and hand edits
-- `data/resumes/<Company>_<id>/v<N>/`: `Nikhil_<Last>_Resume_<Company>.pdf` (job IDs only in folder names and
+- `data.nosync/generated_resumes/<Company>/<Role>_<JobID>/v<N>/`: `Nikhil_<Last>_Resume_<Company>.pdf` (job IDs only in folder names and
   manifests), `main.tex` + `content.tex`, `content.json`, `reports/`, `pages/`, `compile.log` (contact details
   redacted), `source/` (template copy, content, fonts, `BUILD.md`: rebuilds the same PDF), `manifest.json` (job, time,
   input hashes, template / rules versions, profile, track, validation, truth, coverage, tools, file hashes).
@@ -448,7 +448,7 @@ the next request build a new version.
 
 ### Evidence interview
 `python -m resume_builder interview <id>` lists up to 5 questions (requirements your inputs may not describe, strong
-matches with no stated scope). Claude asks them; an answer is saved, dated, to `inputs/evidence_additions.md` only
+matches with no stated scope). Claude asks them; an answer is saved, dated, to `inputs/resume/evidence_additions.md` only
 when you confirm it (`add-evidence … --confirm`). Your master resume is never edited.
 
 ### Troubleshooting
@@ -465,7 +465,7 @@ when you confirm it (`add-evidence … --confirm`). Your master resume is never 
 | "a generation … is in progress" | finish it with `build`, or start over with `prepare … --force` |
 | "the resume is saved, but updating HireScope failed" | `python -m resume_builder refresh` |
 | Dashboard shows no resume | refresh the page; `python -m resume_builder refresh` rewrites `dashboard/resumes.js` |
-| Preview image or PDF link doesn't open | the dashboard links `../data/resumes/…` relative to `dashboard/`: keep `data/` (or its symlink) in the repo |
+| Preview image or PDF link doesn't open | the dashboard links `../data.nosync/generated_resumes/…` relative to `dashboard/`: keep `data.nosync/` in the repo folder |
 
 ## Running on a schedule
 
@@ -482,7 +482,7 @@ Plists are rendered from `scripts/launchd/com.nikhil.jobsearch{,.quick}.plist.te
   Each request also retries with backoff, and a failed source never stops the run.
 - **Quick checks** (`--quick`): My Companies + tier-1 companies and feeds, conditional requests (ETag/304), no link
   check, backup or digest — new postings from the companies you care most about surface within ~2.5 hours.
-- **One run at a time**: `data/run.lock` (pid + start). A quick check that meets a running full run just skips; a lock
+- **One run at a time**: `data.nosync/state/run.lock` (pid + start). A quick check that meets a running full run just skips; a lock
   whose process died, or older than 3 hours, is replaced.
 - **macOS permissions**: none needed for the schedule — the repo is in `~/Projects`, which isn't a protected folder.
   (Kept in `~/Documents`, launchd jobs fail with "can't open input file", exit 127, unless `/bin/zsh` has Full Disk
@@ -493,38 +493,42 @@ Plists are rendered from `scripts/launchd/com.nikhil.jobsearch{,.quick}.plist.te
   Settings → Notifications → Script Editor (Alerts or Banners). `notifications.enabled: false` turns them off.
 
 ### After every run
-- **Run summary**: printed, logged, and saved to `data/logs/last_run_summary.txt` (coverage, new / updated / closed,
+- **Run summary**: printed, logged, and saved to `data.nosync/logs/last_run_summary.txt` (coverage, new / updated / closed,
   per-track counts, new Strong matches, health alerts, reopened roles, backup).
 - **Notifications** (`notifications.enabled`, `--no-notify`): new Strong matches with **early birds** (posted within
   `early_bird_hours`, 48), reopened roles you had shortlisted, broken-looking sources, the weekly digest.
 - **Source health**: a source that returns 0 jobs, or > 70% fewer than its recent average, is flagged (banner,
   Coverage, notification) — a broken source never looks like "no new jobs".
-- **Daily backup** (`backups.dir`, `keep: 14`): `data/backups/YYYY-MM-DD/` with a gzipped SQLite snapshot (embeddings
+- **Daily backup** (`backups.dir`, `keep: 14`): `data.nosync/backups/YYYY-MM-DD/` with a gzipped SQLite snapshot (embeddings
   cache dropped), imported status exports and saved application JDs. `python -m jobsearch.ops.backup list | now |
   restore YYYY-MM-DD` (restore keeps the current DB as `jobs.db.before-restore-…`). `--no-backup` skips it.
 - **Weekly digest**: on the first run of `notifications.digest_weekday` (Sunday), or `--digest`:
-  `data/digests/YYYY-MM-DD.html` — new Strong matches, applications sent, follow-ups due, skill gaps, outcome stats,
+  `data.nosync/digests/YYYY-MM-DD.html` — new Strong matches, applications sent, follow-ups due, skill gaps, outcome stats,
   hiring seasons coming up.
 - **Hiring seasons**: dashboard view of when each company first posted co-op/intern and new-grad roles each year (from
   your DB history), the predicted next window, and a reminder ~3 weeks before it when nothing is posted yet.
-- **Excel**: `--export-excel [FILE]` writes `data/exports/hirescope-<date>.xlsx` (jobs per track, applications,
+- **Excel**: `--export-excel [FILE]` writes `data.nosync/exports/hirescope-<date>.xlsx` (jobs per track, applications,
   coverage; links clickable, text never turned into formulas).
 
 ## Data & storage
 
 | Path | Contents |
 |---|---|
-| `data/jobs.db` | SQLite: `jobs`, `job_sources` (per-source presence), `applications`, `application_events`, `runs`, `source_status`, `embeddings` cache, `resume_versions` |
-| `data/jd/` | full JD text per posting |
-| `data/logs/jobsearch.log` | JSON-lines log, rotated at 2 MB × 5 |
-| `data/applications/` | saved JD copies for your applications |
-| `data/imports/` | archived dashboard exports that were imported |
-| `data/backups/` | daily backups (last 14) |
-| `data/digests/`, `data/exports/` | weekly digest pages, Excel exports |
-| `data/run.lock`, `data/logs/last_run_summary.txt` | run lock, last run's summary |
+| `data.nosync/db/jobs.db` | SQLite: `jobs`, `job_sources` (per-source presence), `applications`, `application_events`, `runs`, `source_status`, `embeddings` cache, `resume_versions` |
+| `data.nosync/jd/<Company>/` | full JD text per posting (`_unassigned/`: files no job refers to any more) |
+| `data.nosync/job_packages/<Company>/` | job packages saved on disk (the dashboard downloads them to ~/Downloads) |
+| `data.nosync/logs/jobsearch.log` | JSON-lines log, rotated at 2 MB × 5 |
+| `data.nosync/applications/` | saved JD copies for your applications |
+| `data.nosync/imports/` | archived dashboard exports that were imported |
+| `data.nosync/backups/` | daily backups (last 14) |
+| `data.nosync/digests/`, `data.nosync/exports/` | weekly digest pages, Excel exports |
+| `data.nosync/state/run.lock`, `data.nosync/logs/last_run_summary.txt` | run lock, last run's summary |
 | `dashboard/data.js` | generated `window.META` / `window.JOBS` |
 | `dashboard/sync.js` | generated from SQLite: your statuses, notes, overrides and applications (gitignored) |
-| `data/resumes/<Company>_<id>/` | Resume Builder: `v1`, `v2`, … (PDF, .tex, content JSON, reports, page images, source bundle, manifest), `current.json`, `locks.json`, `history.jsonl`, `work/` |
+| `data.nosync/generated_resumes/<Company>/<Role>_<JobID>/` | Resume Builder: `v1`, `v2`, … (PDF, .tex, content JSON, manifest, page images, source bundle), `reports/vN/`, `latest` → current version, `current.json`, `locks.json`, `history.jsonl`, `_work/` |
+| `data.nosync/screenshots/` | dashboard screenshots from QA runs |
+
+Full map of what lives where: [STRUCTURE.md](STRUCTURE.md).
 | `dashboard/resumes.js` | generated: resume statuses and versions for the dashboard (gitignored) |
 
 Dedupe: exact on (company, source job id); fuzzy cross-source on company + normalized title + location.
@@ -608,16 +612,17 @@ range, saved views) is tested directly. Design-token contrast is checked against
 | Dashboard is empty / "No jobs yet" | run `./scripts/run.sh`; check that `dashboard/data.js` exists; reload |
 | Statuses or applications not in SQLite | click **Export statuses** (it lands in `~/Downloads`); the next run imports the newest `jobsearch-statuses*.json` — see Run Log → "Statuses import". Or `python -m jobsearch.run --statuses FILE` |
 | Lost browser data | nothing exported is lost: each run writes `dashboard/sync.js`, which the page merges on load. Older state: `python -m jobsearch.ops.backup list` / `restore DAY` |
-| A company shows as failed | Coverage tab + `data/logs/jobsearch.log`; for Greenhouse check `https://boards-api.greenhouse.io/v1/boards/<board>/jobs`; for My Companies add a `careers_url` |
+| A company shows as failed | Coverage tab + `data.nosync/logs/jobsearch.log`; for Greenhouse check `https://boards-api.greenhouse.io/v1/boards/<board>/jobs`; for My Companies add a `careers_url` |
 | "Manual check needed" | no readable job system was found, or the company is listed under `manual:` in `config/company_aliases.yaml` (the reason says which platform): open the link, use Add job by URL with `--jd-file`. If the company moves to a supported board, put that URL in `careers_url` and remove the `manual:` entry |
 | Source-health banner | a source returned 0 or far fewer jobs than usual: usually a changed board token or careers page; fix it in `config/companies.yaml` / `my_companies.csv` |
 | SimplifyJobs feed fails each autumn | the repos are renamed yearly (e.g. `Summer2028-Internships`): update the URL in `config/companies.yaml` |
 | LinkedIn alerts: "not set up" | add `IMAP_USER` and `IMAP_APP_PASSWORD` to `.env` (Gmail app password). "IMAP … authentication failed": regenerate the app password. 0 jobs parsed: alerts may be in another folder (`IMAP_FOLDER`) |
 | No macOS notifications | System Settings → Notifications → Script Editor (osascript) → allow; or `notifications.enabled` is false / `--no-notify` |
-| launchd runs don't happen | `./scripts/schedule.sh status`; read `data/logs/launchd-full.log`. "can't open input file" / "Operation not permitted" → the repo is in a protected folder (`~/Documents`, `~/Desktop`): keep it in `~/Projects`, or give `/bin/zsh` Full Disk Access. After moving the repo: `./scripts/setup.sh`, then `./scripts/schedule.sh install` |
+| launchd runs don't happen | `./scripts/schedule.sh status`; read `data.nosync/logs/launchd-full.log`. "can't open input file" / "Operation not permitted" → the repo is in a protected folder (`~/Documents`, `~/Desktop`): keep it in `~/Projects`, or give `/bin/zsh` Full Disk Access. After moving the repo: `./scripts/setup.sh`, then `./scripts/schedule.sh install` |
 | Statuses not imported by scheduled runs | Run Log → "Statuses import": "can't read ~/Downloads" means macOS blocked the folder; save the export to `inputs/statuses/`, or run `./scripts/run.sh` from Terminal |
-| "another run is in progress" | a run holds `data/run.lock`; it's replaced automatically when that process is gone or > 3 h old |
+| "another run is in progress" | a run holds `data.nosync/state/run.lock`; it's replaced automatically when that process is gone or > 3 h old |
 | Exit code 75 | offline: nothing was fetched; the next scheduled run retries |
 | A run seems stuck | `kill -USR1 <pid>` prints every thread's stack to the run's stderr / log |
 | Scores look off after editing preferences / resume | `python -m jobsearch.run --rescore` (no fetching) |
-| Repo inside iCloud Drive | `setup.sh` makes `data/` a symlink to `data.nosync/` (never synced; a live SQLite DB must not sync), or set `JOBSEARCH_DATA_DIR` |
+| Repo inside iCloud Drive | runtime data is always in `data.nosync/` (iCloud never syncs `*.nosync`; a live SQLite DB must not sync), or set `JOBSEARCH_DATA_DIR` |
+| Old layout (`data/`, flat `inputs/`) | `~/.venvs/hirescope/bin/python scripts/migrate_layout.py --dry-run`, then without `--dry-run` (back up first) |

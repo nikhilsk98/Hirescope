@@ -1,5 +1,5 @@
-"""Evidence bank: every fact the resume may use, parsed from inputs/master_resume.md (never modified) and the
-confirmed answers in inputs/evidence_additions.md. Each item has an id that tailored bullets must cite.
+"""Evidence bank: every fact the resume may use, parsed from inputs/resume/master_resume.md (never modified) and the
+confirmed answers in inputs/resume/evidence_additions.md. Each item has an id that tailored bullets must cite.
 
 master_resume.md layout (the same one HireScope's matcher reads):
   ## Experience   ### Role — Organization, Location (Mon YYYY – Mon YYYY)   - bullet ...
@@ -393,8 +393,8 @@ def load_bank(cache_dir: Path | None = None, master: Path | None = None, additio
     """The cached bank, rebuilt when master_resume.md or evidence_additions.md changes (by hash)."""
     master = master or rc.MASTER_RESUME
     additions = additions if additions is not None else rc.ADDITIONS
-    cache_dir = cache_dir or rc.resumes_dir() / "_evidence"
-    cache = cache_dir / "bank.json"
+    cache_dir = cache_dir or rc.resumes_dir() / "_cache"
+    cache = cache_dir / "evidence_bank.json"
     want = {"master_resume": sha256_file(master) if master.exists() else None,
             "evidence_additions": sha256_file(additions) if additions.exists() else "none"}
     if cache.exists():

@@ -1,4 +1,4 @@
-"""Referral finder: match your LinkedIn connections export (inputs/Connections.csv, from LinkedIn's official
+"""Referral finder: match your LinkedIn connections export (inputs/linkedin/Connections.csv, from LinkedIn's official
 "Get a copy of your data" download) to companies on the dashboard. Never scrapes LinkedIn; never contacts anyone.
 
 Matching: the connection's company and the job's company are reduced to their brand (config/company_aliases.yaml,

@@ -219,7 +219,7 @@ def test_main_offline_and_locked(monkeypatch, tmp_path):
     monkeypatch.setattr(R.alerts, "online", lambda: False)
     assert R.main([]) == R.EX_TEMPFAIL
     monkeypatch.setattr(R.alerts, "online", lambda: True)
-    with RunLock(tmp_path / "run.lock"):
+    with RunLock(tmp_path / "state" / "run.lock"):
         assert R.main(["--quick"]) == 0          # a quick check yields to a running full run
         assert R.main([]) == 3
 
@@ -297,9 +297,9 @@ def test_main_end_to_end_with_mocked_sources(monkeypatch, tmp_path, cfg, greenho
     monkeypatch.setattr(paths, "ROOT", tmp_path)
     monkeypatch.setattr(paths, "DASHBOARD", tmp_path / "dashboard")
     monkeypatch.setattr(paths, "SYNC_JS", tmp_path / "dashboard" / "sync.js")
-    (tmp_path / "inputs").mkdir()
-    (tmp_path / "inputs" / "my_companies.csv").write_text("company,careers_url,notes\nWatchCo,https://jobs.lever.co/watchco,DEMO\n")
-    prefs = cfg.prefs.model_copy(update={"statuses_import_dir": str(tmp_path / "downloads"), "my_companies_csv": "inputs/my_companies.csv"})
+    (tmp_path / "inputs" / "companies").mkdir(parents=True)
+    (tmp_path / "inputs" / "companies" / "my_companies.csv").write_text("company,careers_url,notes\nWatchCo,https://jobs.lever.co/watchco,DEMO\n")
+    prefs = cfg.prefs.model_copy(update={"statuses_import_dir": str(tmp_path / "downloads"), "my_companies_csv": "inputs/companies/my_companies.csv"})
     monkeypatch.setattr(R, "load_config", lambda *a, **k: cfg.model_copy(update={"prefs": prefs}))
     lever = [{"id": "22222222-2222-2222-2222-222222222222", "text": "Software Engineer, New Grad (DEMO)",
               "categories": {"commitment": "Full-time", "location": "Boston, MA", "allLocations": ["Boston, MA"]},

@@ -1,8 +1,8 @@
 """Orchestration: prepare (deterministic inputs for the drafter) → [LLM drafts + reviews content.json] → build
 (schema, structure, render, compile, validate, bounded repair, save a version).
 
-Work files for one job live in data/resumes/<Company>_<id>/work/; each successful or failed build is saved as
-data/resumes/<Company>_<id>/v<N>/.
+Work files for one job live in data.nosync/generated_resumes/<Company>/<Role>_<JobID>/work/; each successful or failed build is saved as
+data.nosync/generated_resumes/<Company>/<Role>_<JobID>/v<N>/.
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from . import draft, jd_analysis, render, validate
 from .config import InputError, Settings, load_settings, sha256_file
 from .content_schema import Content, ContentError, dump, parse
 from .evidence import Bank, load_bank
+from jobsearch.paths import slug as hs_slug
 
 TOOLS = {"tectonic": "brew install tectonic", "pdftotext": "brew install poppler", "pdftoppm": "brew install poppler",
          "pdffonts": "brew install poppler"}
@@ -63,8 +64,7 @@ def ascii_name(s: str) -> str:
 
 
 def company_slug(company: str, sep: str = "-") -> str:
-    parts = re.findall(r"[A-Za-z0-9]+", ascii_name(company))
-    return sep.join(parts)[:60] or "Company"
+    return hs_slug(company).replace("-", sep)
 
 
 def pdf_name(settings: Settings, company: str) -> str:
@@ -72,12 +72,20 @@ def pdf_name(settings: Settings, company: str) -> str:
     return f"{settings.first_name}_{settings.last_name}_Resume_{company_slug(company, '_')}.pdf"
 
 
-def job_dir(company: str, pk: int, root: Path | None = None) -> Path:
+WORK = "_work"          # per-job scratch for the generation in progress (brief, drafts, build dir, state)
+
+
+def job_dir(company: str, pk: int, title: str | None = None, root: Path | None = None) -> Path:
+    """generated_resumes/<Company>/<Role>_<JobID>/ — an existing folder for the job ID is found wherever it is (titles
+    can change); a new one is named from the company and title."""
     root = (root or rc.resumes_dir())
-    d = root / f"{company_slug(company)}_{int(pk)}"
+    pk = int(pk)
+    existing = sorted(root.glob(f"*/*_{pk}")) if root.exists() else []
+    existing = [d for d in existing if d.is_dir()]
+    d = existing[0] if existing else root / hs_slug(company) / f"{hs_slug(title or 'Job', 50)}_{pk}"
     rr = root.resolve() if root.exists() else root.absolute()
     if not d.absolute().resolve().is_relative_to(rr):
-        raise InputError("resume folder would be outside data/resumes")
+        raise InputError("resume folder would be outside data.nosync/generated_resumes")
     return d
 
 
@@ -263,8 +271,8 @@ def prepare(ref: str, profile: str | None = None, db_path: Path | None = None, r
     analysis = jd_analysis.analyze(job, pkg, bank, settings, profile)
     if not analysis["jd_chars"]:
         analysis["warnings"] = ["No JD text stored for this job: tailoring uses the title and keywords only."]
-    jd_dir = job_dir(job["company"], job["id"])
-    work = jd_dir / "work"
+    jd_dir = job_dir(job["company"], job["id"], job["title"])
+    work = jd_dir / WORK
     jd_dir.mkdir(parents=True, exist_ok=True)
     with versions.JobLock(jd_dir):
         old = _state(work)
@@ -468,9 +476,9 @@ def compile_and_validate(c: Content, bank: Bank, settings: Settings, build_dir: 
 
 
 def load_work(jd: Path) -> tuple[dict, dict]:
-    work = jd / "work"
+    work = jd / WORK
     if not (work / "state.json").exists():
-        raise InputError("run prepare first (no work/state.json)")
+        raise InputError("run prepare first (no _work/state.json)")
     return json.loads((work / "state.json").read_text()), json.loads((work / "analysis.json").read_text())
 
 
@@ -485,22 +493,22 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
         job = jd_analysis.resolve_job(conn, ref)
     finally:
         conn.close()
-    jd = job_dir(job["company"], job["id"])
+    jd = job_dir(job["company"], job["id"], job["title"])
     state, analysis = load_work(jd)
     bank = load_bank()
-    src = content_path or (jd / "work" / "content.json")
+    src = content_path or (jd / WORK / "content.json")
     if not src.exists():
         raise InputError(f"{src} not found: write the drafted + reviewed content there first")
     c = assign_ids(parse(src.read_text(encoding="utf-8")))
     if require_review:
-        if c.notes.stage != "reviewed" or not (jd / "work" / "review.json").exists():
+        if c.notes.stage != "reviewed" or not (jd / WORK / "review.json").exists():
             raise ContentError("content.json has not been through the reviewer pass: run `review` on the draft, then "
                                "write the revised content.json (notes.stage \"reviewed\") and review.json")
     if c.job_pk != job["id"]:
         raise ContentError(f"content.json is for job {c.job_pk}, not {job['id']}")
     from . import versions
     locks = versions.load_locks(jd)
-    carried = json.loads((jd / "work" / "carried.json").read_text()) if (jd / "work" / "carried.json").exists() else {}
+    carried = json.loads((jd / WORK / "carried.json").read_text()) if (jd / WORK / "carried.json").exists() else {}
     pins = {"bullets": {m["id"]: m for m in carried.get("manual", [])}, "entries": {}, "sections": {}}
     c, pin_notes = versions.apply_locks(c, pins)
     c, lock_notes = versions.apply_locks(c, locks)
@@ -516,7 +524,7 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
     gaps = {"entry": settings.layout.get("entry_gap_pt", 6), "education": settings.layout.get("education_gap_pt", 4)}
     attempts, log = [], [n.replace("locked", "hand-edited", 1) for n in pin_notes] + lock_notes
     used = int(state.get("attempts", 0))
-    build_dir = jd / "work" / "build"
+    build_dir = jd / WORK / "build"
     res = rep = parts = None
     for n in range(1, cap + 1):
         if used >= cap:
@@ -529,7 +537,7 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
             # a build that stops (broken template copy, missing tool) ends this generation as failed, so the next
             # prepare isn't blocked as "in progress"; the attempt still counts
             state.update(attempts=used, status="failed")
-            (jd / "work" / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
+            (jd / WORK / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
             raise
         attempts.append({"attempt": used, "ok": rep.ok, "pages": rep.pages,
                          "errors": [f"{x.name}: {x.detail}" for x in rep.errors()]})
@@ -543,7 +551,7 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
         log += fix.actions
     state["attempts"] = used
     state["status"] = "validating"
-    (jd / "work" / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
+    (jd / WORK / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
     return {"job": job, "job_dir": jd, "content": c, "compile": res, "report": rep, "parts": parts,
             "attempts": attempts, "repairs": log, "gaps": gaps, "settings": settings, "bank": bank,
             "analysis": analysis, "state": state, "build_dir": build_dir}
@@ -606,7 +614,7 @@ def finalize(result: dict, extra_checks: list[dict] | None = None, extra_reports
     manifest["dedupe_key"] = state.get("dedupe_key")
     from . import versions as _v
     manifest["locks"] = sorted(_v.locked_ids(_v.load_locks(jd)))
-    carried_p = jd / "work" / "carried.json"
+    carried_p = jd / WORK / "carried.json"
     manifest["hand_edits_carried"] = (json.loads(carried_p.read_text()).get("manual") if carried_p.exists() else []) or []
     reps.update(q["reports"])
     reps.update(extra_reports or {})
@@ -618,7 +626,7 @@ def finalize(result: dict, extra_checks: list[dict] | None = None, extra_reports
     versions._history(jd, {"at": manifest["generated_at"], "action": "built", "version": int(vdir.name[1:]),
                            "status": status})
     state["status"] = "done"
-    (jd / "work" / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
+    (jd / WORK / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
     if status == "ready":
         versions.set_current(jd, int(vdir.name[1:]), "new build passed every check")
     return {"status": status, "version_dir": str(vdir), "pdf": str(vdir / name) if res and res.pdf else None,
@@ -630,7 +638,7 @@ def quality(result: dict) -> dict:
     interview defense notes for the final content."""
     from . import reports, review, verify
     c, bank, analysis, jd = result["content"], result["bank"], result["analysis"], result["job_dir"]
-    work = jd / "work"
+    work = jd / WORK
     llm = verify.load_llm_review(work / "truth_review.json")
     truth = verify.verify(c, bank, llm)
     cov = reports.coverage(c, bank, analysis)
@@ -667,7 +675,7 @@ def reports_review(rv: dict, draft_findings: list, final_lint: list) -> str:
 
 
 def review_draft(ref: str, db_path: Path | None = None) -> dict:
-    """Reviewer pass input: lint + truth check of work/draft.json → work/review_packet.md. Once per generation."""
+    """Reviewer pass input: lint + truth check of _work/draft.json → _work/review_packet.md. Once per generation."""
     from . import review, verify
     from jobsearch.storage import db as hs_db
     from jobsearch import paths as hs_paths
@@ -676,12 +684,12 @@ def review_draft(ref: str, db_path: Path | None = None) -> dict:
         job = jd_analysis.resolve_job(conn, ref)
     finally:
         conn.close()
-    jd = job_dir(job["company"], job["id"])
+    jd = job_dir(job["company"], job["id"], job["title"])
     state, analysis = load_work(jd)
     if state.get("reviewed_at"):
         raise ContentError("the reviewer pass already ran for this generation (fixes are applied once); "
                            "run prepare again to start a new generation")
-    work = jd / "work"
+    work = jd / WORK
     src = work / "draft.json"
     if not src.exists():
         raise InputError(f"{src} not found: the drafter writes the draft there first")

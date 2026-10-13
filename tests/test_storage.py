@@ -131,7 +131,7 @@ def test_stored_paths_survive_a_repo_move(tmp_path, conn):
     jd_dir, apps_dir = tmp_path / "jd", tmp_path / "apps"
     jd_dir.mkdir(); apps_dir.mkdir()
     (jd_dir / "greenhouse_democo_1.txt").write_text("DEMO JD", encoding="utf-8")
-    old = "/Users/nobody/Documents/old-repo/data/jd/greenhouse_democo_1.txt"
+    old = "/Users/nobody/Documents/old-repo/data.nosync/jd/greenhouse_democo_1.txt"
     assert paths.stored_file(old, jd_dir) == jd_dir / "greenhouse_democo_1.txt"
     assert paths.stored_file("/nowhere/missing.txt", jd_dir) is None and paths.stored_file(None, jd_dir) is None
     conn.execute("INSERT INTO jobs (company, company_key, title, normalized_title, job_id, first_seen, last_checked, "

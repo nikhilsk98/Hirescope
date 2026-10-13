@@ -1,6 +1,6 @@
 # DEMO Candidate — EXAMPLE RESUME (not a real person)
 
-<!-- Copy to inputs/master_resume.md and replace with your real experience.
+<!-- Copy to inputs/resume/master_resume.md and replace with your real experience.
      Keep the five "## " section headings; entries are "### " headings with "- " bullets. -->
 
 ## Experience

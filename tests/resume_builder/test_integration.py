@@ -29,8 +29,8 @@ def _cli_generation(env, job=None, edit=None, regenerate=False):
     status = conn.execute("SELECT status FROM resume_status WHERE job_pk=?", (job,)).fetchone()[0]
     conn.close()
     jd = pipeline.job_dir(j["company"], job)
-    if (jd / "work" / "state.json").exists() and json.loads((jd / "work" / "state.json").read_text())["status"] == "generating":
-        reviewed_flow(env, jd / "work", edit=edit, job=job)
+    if (jd / pipeline.WORK / "state.json").exists() and json.loads((jd / pipeline.WORK / "state.json").read_text())["status"] == "generating":
+        reviewed_flow(env, jd / pipeline.WORK, edit=edit, job=job)
     return jd, status, cli.main(["build", str(job)])
 
 
@@ -80,13 +80,13 @@ def test_compile_failure_keeps_last_good_version(rb_env, capsys, monkeypatch):
     assert code == 1
     out = capsys.readouterr().out
     assert "compile_errors" in out and "current version stays v1" in out
-    assert versions.current(pipeline.job_dir("DemoCorp", rb_env.job))["version"] == 1
+    assert versions.current(pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern"))["version"] == 1
 
 
 def test_hirescope_update_failure_is_reported_and_resume_kept(rb_env, capsys, monkeypatch):
     pipeline.prepare(str(rb_env.job))
-    jd = pipeline.job_dir("DemoCorp", rb_env.job)
-    reviewed_flow(rb_env, jd / "work")
+    jd = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern")
+    reviewed_flow(rb_env, jd / pipeline.WORK)
 
     def boom(*a, **k):
         raise OSError("database is locked (DEMO)")
@@ -112,11 +112,11 @@ def test_review_from_dashboard_export_and_application_resume(rb_env):
                                               "stage": "applied", "updated_at": "2026-10-13T11:30:00Z",
                                               "job": {"source": "greenhouse", "resume": {
                                                   "job_pk": rb_env.job, "version": 1, "pdf_name": "x.pdf",
-                                                  "pdf_sha": "abc", "pdf": "../data/resumes/x.pdf"}}}}}
+                                                  "pdf_sha": "abc", "pdf": "../data.nosync/generated_resumes/x.pdf"}}}}}
     conn = db.connect(rb_env.db_path)
     res = hs_statuses.merge(conn, export, None)
     assert res.resume_reviews_applied == 1 and any("999999" in e for e in res.errors)
-    jd = pipeline.job_dir("DemoCorp", rb_env.job)
+    jd = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern")
     assert versions.read_manifest(jd / "v1")["status"] == "reviewed"
     r = json.loads(conn.execute("SELECT resume FROM applications WHERE id='app_demo_1'").fetchone()[0])
     assert r["version"] == 1 and r["linked"] == "applied"
@@ -167,7 +167,7 @@ def test_batch_shortlisted_needs_confirmation_and_queues(rb_env, capsys):
     assert "Queued 1 job(s)" in out and "over the batch cap of 1" in out
     data = _resumes_js(rb_env)["jobs"]
     assert [v["status"] for v in data.values()] == ["queued"]
-    q = json.loads((rb_env.data / "resumes" / "batch_queue.json").read_text())
+    q = json.loads((rb_env.data / "generated_resumes" / "_cache" / "batch_queue.json").read_text())
     assert len(q["jobs"]) == 1
 
 
@@ -200,7 +200,7 @@ def test_application_resume_reference_survives_marking_reviewed(rb_env):
     """The exact-file reference (PDF hash) stays valid after the version is marked reviewed (manifest rewritten)."""
     _cli_generation(rb_env)
     from resume_builder.config import sha256_file
-    jd = pipeline.job_dir("DemoCorp", rb_env.job)
+    jd = pipeline.job_dir("DemoCorp", rb_env.job, "Backend Engineer Intern")
     pdf = jd / "v1" / "Demo_Candidate_Resume_DemoCorp.pdf"
     data = _resumes_js(rb_env)["jobs"][str(rb_env.job)]
     assert data["current"]["pdf_sha"] == sha256_file(pdf)

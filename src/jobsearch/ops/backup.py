@@ -1,12 +1,12 @@
 """Daily backups of your data (keep the last N) and a restore command.
 
-    data/backups/YYYY-MM-DD/jobs.db.gz        SQLite snapshot (online backup API; the embeddings cache is dropped,
+    data.nosync/backups/YYYY-MM-DD/jobs.db.gz        SQLite snapshot (online backup API; the embeddings cache is dropped,
                                               it is rebuilt automatically)
-    data/backups/YYYY-MM-DD/imports/          the dashboard exports imported so far (statuses + applications)
-    data/backups/YYYY-MM-DD/applications/     saved JD copies for your applications
+    data.nosync/backups/YYYY-MM-DD/imports/          the dashboard exports imported so far (statuses + applications)
+    data.nosync/backups/YYYY-MM-DD/applications/     saved JD copies for your applications
 
     python -m jobsearch.ops.backup list | now | restore YYYY-MM-DD
-`backups.dir` in preferences moves them (e.g. to iCloud Drive). JD files under data/jd are re-fetchable and not
+`backups.dir` in preferences moves them (e.g. to iCloud Drive). JD files under data.nosync/jd are re-fetchable and not
 backed up.
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 
 def backups_dir(cfg_dir: str | None) -> Path:
     if not cfg_dir:
-        return paths.DATA / "backups"
+        return paths.BACKUPS_DIR
     p = Path(cfg_dir).expanduser()
     return p if p.is_absolute() else paths.ROOT / p
 
@@ -86,9 +86,9 @@ def restore(root: Path, day: str, db_path: Path) -> Path:
         Path(str(db_path) + side).unlink(missing_ok=True)
     tmp.replace(db_path)
     sqlite3.connect(str(db_path)).execute("PRAGMA integrity_check").fetchone()
-    for name in ("imports", "applications"):
+    for name, dest in (("imports", paths.IMPORTS_DIR), ("applications", paths.APPS_DIR)):
         if (root / day / name).is_dir():
-            shutil.copytree(root / day / name, paths.DATA / name, dirs_exist_ok=True)
+            shutil.copytree(root / day / name, dest, dirs_exist_ok=True)
     return keep or db_path
 
 

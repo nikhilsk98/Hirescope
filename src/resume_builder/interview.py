@@ -1,6 +1,6 @@
 """Evidence interview: short questions when a strong JD match lacks detail (scope, scale, outcome) or a requirement
 may be covered by experience your inputs don't describe. Only answers you explicitly confirm are saved, dated, to
-inputs/evidence_additions.md (gitignored). master_resume.md is never edited.
+inputs/resume/evidence_additions.md (gitignored). master_resume.md is never edited.
 """
 from __future__ import annotations
 

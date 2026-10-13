@@ -280,7 +280,8 @@ def company_key(name: str) -> str:
 def connect(path: Path | str) -> sqlite3.Connection:
     if str(path) != ":memory:":
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), check_same_thread=False)
+    # wait up to 30 s for another writer (a scheduled run, a Resume Builder command) instead of failing at once
+    conn = sqlite3.connect(str(path), check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     if str(path) != ":memory:":
@@ -782,15 +783,17 @@ def touch_source_id(conn, source: str, source_job_id: str, now: str | None = Non
 
 
 def repair_moved_paths(conn, jd_dir: Path, apps_dir: Path) -> int:
-    """Point stored JD / application-JD paths at their current folder after the repo or data folder moved (the
-    stored absolute path is gone but the same file name exists under the current folder). Returns rows fixed."""
+    """Point stored JD / application-JD paths at their current location after the repo or data folder moved or was
+    reorganized (the stored absolute path is gone; the same file name exists under the folder or one of its
+    subfolders, e.g. jd/<Company>/). Returns rows fixed."""
     fixed = 0
     for table, base in (("jobs", jd_dir), ("applications", apps_dir)):
         rows = conn.execute(f"SELECT rowid, jd_path FROM {table} WHERE jd_path IS NOT NULL").fetchall()
-        updates = []
-        for rowid, p in rows:
-            if Path(p).parent != base and not Path(p).exists() and (base / Path(p).name).exists():
-                updates.append((str(base / Path(p).name), rowid))
+        missing = [(rowid, p) for rowid, p in rows if not Path(p).exists()]
+        if not missing or not base.exists():
+            continue
+        index = {f.name: f for f in base.rglob("*.txt")}
+        updates = [(str(index[Path(p).name]), rowid) for rowid, p in missing if Path(p).name in index]
         if updates:
             with conn:
                 conn.executemany(f"UPDATE {table} SET jd_path=? WHERE rowid=?", updates)

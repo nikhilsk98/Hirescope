@@ -1,4 +1,4 @@
-# Company name resolution for inputs/my_companies.csv (and any company name).
+# Company name resolution for inputs/companies/my_companies.csv (and any company name).
 # Legal entity names, old names and acquired companies -> the brand that recruits today.
 # Rows that resolve to the same brand are merged (their notes and careers URLs are kept).
 # Only well-established facts belong here; anything uncertain goes under `manual` with a note.
@@ -41,7 +41,7 @@ aliases:
 
 # Always "Manual check needed" (never probed): names that can't be mapped to a current employer, and employers
 # whose jobs live somewhere HireScope can't read. Keys are CSV names or brands; the careers_url in
-# inputs/my_companies.csv is the page to check by hand. Platforms checked live 2026-10-12.
+# inputs/companies/my_companies.csv is the page to check by hand. Platforms checked live 2026-10-12.
 manual:
   "Endure Digital Intermediate Holdings, Inc.": "Current employer not confirmed: probably Newfold Digital (Endurance International + Web.com, announced as 'Endure Digital'); the careers_url is Newfold's Workday board — confirm before relying on it."
   "GetGo Investment LLC": "Current employer not confirmed: probably GoTo (GetGo was the Citrix unit merged into LogMeIn, now GoTo); the careers_url is GoTo's Workday board — confirm before relying on it."

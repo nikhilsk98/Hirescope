@@ -163,7 +163,7 @@ def main() -> int:
         name, c = item
         f = c["fields"] or probe(http, name)
         if not f:
-            return name, c, None, False, "no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site - add it to inputs/my_companies.csv with its careers URL)", None
+            return name, c, None, False, "no ATS board found (name probes on Greenhouse/Ashby/Lever/SmartRecruiters failed; likely a custom or Workday site - add it to inputs/companies/my_companies.csv with its careers URL)", None
         ok, why, n = verify(http, f)
         if not ok and c["fields"] and not c["curated"]:
             return name, c, f, False, why, n
@@ -228,7 +228,7 @@ def main() -> int:
 # Fields: name, source (greenhouse | lever | ashby | workday | smartrecruiters | amazon | netflix | simplify),
 #         board (ATS token / tenant / feed URL), host + site (workday), tier (1 every run, 2 daily, 3 every
 #         3 days; preferences.company_tiers overrides), verified (date), notes.
-# Adding a company = adding one entry here (or a row in inputs/my_companies.csv for auto-detection).
+# Adding a company = adding one entry here (or a row in inputs/companies/my_companies.csv for auto-detection).
 """
     body = yaml.safe_dump({"companies": feeds + companies}, sort_keys=False, allow_unicode=True, width=120)
     args.out.write_text(header + body, encoding="utf-8")

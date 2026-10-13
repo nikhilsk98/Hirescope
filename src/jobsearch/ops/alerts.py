@@ -79,7 +79,7 @@ def send(summary: dict, early_hours: int = 48) -> list[str]:
 
 
 def summary_text(s: dict) -> str:
-    """Human-readable run summary (also written to data/logs/last_run_summary.txt)."""
+    """Human-readable run summary (also written to data.nosync/logs/last_run_summary.txt)."""
     lines = [f"HireScope run ({s.get('scope', 'full')}) finished {datetime.now().astimezone():%Y-%m-%d %H:%M}",
              f"  coverage: {s.get('sources_ok', 0)} of {s.get('sources_checked', 0)} sources OK · "
              f"{s.get('sources_failed', 0)} failed · {s.get('sources_manual', 0)} manual · "

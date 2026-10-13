@@ -5,7 +5,7 @@ job status (shortlisted / package exported / applied …): when a resume becomes
 is not yet further along to "package exported" (in the browser, where your latest status lives).
 
 dashboard/resumes.js (window.RESUMES) is written after every Resume Builder command and every HireScope run, with
-relative links (../data/resumes/…) so the page works from file:// with no server. A page refresh shows the new state.
+relative links (../data.nosync/generated_resumes/…) so the page works from file:// with no server. A page refresh shows the new state.
 """
 from __future__ import annotations
 
@@ -61,10 +61,10 @@ def _job(conn, pk: int) -> dict:
 
 
 def sync_job(conn, pk: int) -> dict | None:
-    """Mirror data/resumes/<job>/v*/manifest.json into resume_builds + resume_status for one job."""
+    """Mirror data.nosync/generated_resumes/<Company>/<Role>_<JobID>/v*/manifest.json into resume_builds + resume_status for one job."""
     from .pipeline import job_dir
     j = _job(conn, pk)
-    jd = job_dir(j["company"], pk)
+    jd = job_dir(j["company"], pk, j["title"])
     vs = versions.version_dirs(jd) if jd.exists() else []
     cur = versions.current(jd) if jd.exists() else None
     latest = None
@@ -83,7 +83,8 @@ def sync_job(conn, pk: int) -> dict | None:
             "INSERT INTO resume_builds (job_pk, version, status, pdf_path, tex_path, manifest_path, manifest_sha, "
             "created_at, reviewed_at, summary) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(job_pk, version) DO UPDATE SET "
             "status=excluded.status, reviewed_at=excluded.reviewed_at, summary=excluded.summary, "
-            "manifest_sha=excluded.manifest_sha",
+            "manifest_sha=excluded.manifest_sha, pdf_path=excluded.pdf_path, tex_path=excluded.tex_path, "
+            "manifest_path=excluded.manifest_path",
             (pk, m["version"], m.get("status"), str(v / f["pdf"]) if f.get("pdf") else None, str(v / f.get("tex", "main.tex")),
              str(v / "manifest.json"), rc.sha256_file(v / "manifest.json"), m.get("generated_at") or db.utcnow(),
              m.get("reviewed_at"), json.dumps(summary)))
@@ -141,7 +142,8 @@ def dashboard_payload(conn) -> dict:
                  "pdf_name": Path(b["pdf_path"]).name if b["pdf_path"] else None,
                  "tex": _rel(vdir / "main.tex"), "content_tex": _rel(vdir / "content.tex"),
                  "preview": _rel(vdir / "pages" / "page-1.png") if (vdir / "pages" / "page-1.png").exists() else None,
-                 "report": _rel(vdir / "reports" / "validation.md"), "reports_dir": _rel(vdir / "reports"),
+                 "report": _rel(versions.reports_dir(vdir) / "validation.md"),
+                 "reports_dir": _rel(versions.reports_dir(vdir)),
                  "manifest_sha": b["manifest_sha"], **summ}
             entry["versions"].append(v)
             if b["version"] == r["current_version"]:
@@ -195,8 +197,8 @@ def refresh_all(db_path: Path | None = None) -> int:
         root = rc.resumes_dir()
         n = 0
         if root.exists():
-            for d in root.iterdir():
-                if d.is_dir() and "_" in d.name and d.name.rsplit("_", 1)[1].isdigit():
+            for d in sorted(root.glob("*/*_*")):          # <Company>/<Role>_<JobID>
+                if d.is_dir() and d.name.rsplit("_", 1)[1].isdigit():
                     pk = int(d.name.rsplit("_", 1)[1])
                     if conn.execute("SELECT 1 FROM jobs WHERE id=?", (pk,)).fetchone():
                         sync_job(conn, pk)
@@ -248,7 +250,7 @@ def apply_reviews(conn, reviews: dict) -> tuple[int, list[str]]:
         try:
             pk, ver = int(k), int((v or {}).get("version"))
             j = _job(conn, pk)
-            jd = job_dir(j["company"], pk)
+            jd = job_dir(j["company"], pk, j["title"])
             m = versions.read_manifest(jd / f"v{ver}")
             if m.get("status") == "reviewed":
                 continue
