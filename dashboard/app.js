@@ -9,7 +9,8 @@
   const BY_ID = new Map(JOBS.map((j) => [j.id, j]));
   const K = { statuses: "jobsearch.statuses.v1", overrides: "jobsearch.trackOverrides.v1", theme: "jobsearch.theme", apps: "jobsearch.applications.v1",
               ui: "jobsearch.ui.v2", exported: "jobsearch.lastExport", tip: "jobsearch.tipDismissed.v2",
-              manual: "jobsearch.manualChecks.v1" };
+              manual: "jobsearch.manualChecks.v1", resumeReviews: "jobsearch.resumeReviews.v1",
+              resumeQueued: "jobsearch.resumeQueued.v1", resumeMapped: "jobsearch.resumeMapped.v1" };
   const STATUSES = ["", "interested", "shortlisted", "package exported", "applied", "interviewing", "offer", "rejected", "skipped"];
   const SKIP_REASONS = ["not interested in role", "location", "too senior", "too junior", "missing skills", "company",
                         "compensation", "visa/sponsorship", "start date", "duplicate", "other"];
@@ -57,6 +58,21 @@
   const C = window.HSCore;
   const V = window.HSView;
   let statuses = store.get(K.statuses, {});
+  // Resume Builder (dashboard/resumes.js from SQLite): status + versions per HireScope job id. "Mark reviewed" saves here
+  // and goes out with Export statuses (format 5); "Generate Resume" copies the command and shows "queued" locally.
+  const RES = ((window.RESUMES || {}).jobs) || {};
+  const resumeReviews = store.get(K.resumeReviews, {});
+  const resumeQueued = store.get(K.resumeQueued, {});
+  const resumeOf = (j) => RES[String(j.id)] || null;
+  function resumeStatus(j) {
+    const r = resumeOf(j); const q = resumeQueued[j.id];
+    const rv = resumeReviews[j.id];
+    if (q && (!r || String(q) > String(r.updated_at || ""))) return "queued";
+    if (r && r.current && rv && rv.version === r.current.version && r.status === "ready") return "reviewed";
+    return r ? r.status : "";
+  }
+  const RESUME_CHIP = { queued: ["Resume queued", "info"], generating: ["Resume: generating", "info"], validating: ["Resume: validating", "info"],
+    ready: ["Resume ready", "good"], reviewed: ["Resume reviewed ✓", "good"], failed: ["Resume failed", "flag"] };
   const overrides = {};
   for (const [k, v] of Object.entries(store.get(K.overrides, {}))) overrides[k] = typeof v === "string" ? { track: v, updated_at: "1970-01-01T00:00:00Z" } : v;
   let apps = store.get(K.apps, {});
@@ -102,6 +118,20 @@
     store.set(K.statuses, statuses);
     renderBanners();
     return () => { if (before) statuses[k] = before; else delete statuses[k]; store.set(K.statuses, statuses); renderBanners(); renderAll(true); if (pJob) renderActions(); };
+  }
+
+  // A resume that became ready moves its job to "package exported" when you haven't gone further (once per version,
+  // so changing the status back afterwards sticks).
+  function mapResumeStatuses() {
+    const done = store.get(K.resumeMapped, {}); let n = 0;
+    for (const [pk, r] of Object.entries(RES)) {
+      const j = BY_ID.get(Number(pk)); const v = r.current && r.current.version;
+      if (!j || !v || !["ready", "reviewed"].includes(r.status) || done[pk] === v) continue;
+      done[pk] = v;
+      if (["", "interested", "shortlisted"].includes(statusOf(j))) { setStatus(j, { status: "package exported", package: r.current.pdf_name || "" }); n++; }
+    }
+    store.set(K.resumeMapped, done);
+    return n;
   }
 
   // ---------- theme ----------
@@ -163,6 +193,7 @@
     { id: "applications", label: "My Applications", ic: "▦", group: "Mine", special: true, count: () => appsInTrack().length },
     { id: "tracker", label: "Applied / Tracker", ic: "☑", jobs: () => JOBS.filter((j) => inTrack(j) && TRACKED.includes(statusOf(j))) },
     { id: "shortlisted", label: "Shortlisted", ic: "✓", jobs: () => JOBS.filter((j) => inTrack(j) && statusOf(j) === "shortlisted") },
+    { id: "resumes", label: "Resumes", ic: "✎", jobs: () => JOBS.filter((j) => inTrack(j) && resumeStatus(j)) },
     { id: "followups", label: "Follow-ups Due", ic: "↻", special: true, count: () => new Set([...followupsDue(), ...ghostsDue()].map((a) => a.id)).size },
     { id: "closing", label: "Closing Soon", ic: "⏳", jobs: () => visibleJobs().filter((j) => j.deadline && daysUntil(j.deadline) >= 0 && daysUntil(j.deadline) <= UI_CFG.closing_soon_days) },
     { id: "skillgaps", label: "Skill Gaps", ic: "◔", group: "Insights", special: true, count: () => ((META.skill_gaps || {})[`${ui.track}:30`] || { skills: [] }).skills.length },
@@ -490,6 +521,7 @@
     for (const [, v] of Object.entries(RED).filter(([k, v]) => (j.flags || {})[k] === v)) out.push(el("span", { class: "chip flag", text: v }));
     const ref = REF[j.company]; if (ref && ref.count) out.push(el("span", { class: "chip info", title: `You know ${ref.count} ${ref.count > 1 ? "people" : "person"} here (LinkedIn connections export)`, text: `Referral · ${ref.count}` }));
     const st = statusOf(j); if (st) out.push(el("span", { class: "chip", text: `● ${st}` }));
+    const rs = resumeStatus(j); if (rs && RESUME_CHIP[rs]) out.push(el("span", { class: `chip ${RESUME_CHIP[rs][1]}`, title: (resumeOf(j) || {}).message || "", text: RESUME_CHIP[rs][0] }));
     return out;
   }
   const postedText = (j) => (j.posted ? `Posted ${fmtDate(j.posted)}` : j.discovered ? `Discovered ${fmtTime(j.first_seen)} (posting date unknown)` : "Posting date unknown");
@@ -857,7 +889,8 @@
     const st = statuses[keyOf(j)] || {};
     const t = trackOf(j) === "unclear" ? ui.track : trackOf(j);
     const a = C.newApp({ job_key: keyOf(j), company: j.company, title: j.title, track: t, link: safeUrl(j.apply_url) || "", source: "HireScope",
-      package: st.package || "", jd: (d && d.jd) || "", job: { source: j.source, tier: j.tier, label: j.label, score: j.score == null ? null : Math.round(j.score), level: j.level, job_id: j.job_id } });
+      package: st.package || "", jd: (d && d.jd) || "", job: { source: j.source, tier: j.tier, label: j.label, score: j.score == null ? null : Math.round(j.score), level: j.level, job_id: j.job_id,
+        resume: resumeRef(j) } });
     const undoStatus = setStatus(j, { status: "applied" });
     apps[a.id] = a; saveApps();
     toast(`Marked applied: ${j.company} (date editable in My Applications)`, () => { delete apps[a.id]; saveApps(); undoStatus(); });
@@ -1152,6 +1185,7 @@
       field("Contact", "contact", "text", { placeholder: "Recruiter / hiring manager", maxlength: 300 }), field("Referral", "referral", "text", { placeholder: "Who referred you", maxlength: 300, list: refList ? "ref-people" : null }),
       field("Application link", "link", "url", { placeholder: "https://…" }), field("Source", "source", "text", { maxlength: 200 }),
       field("Job package used", "package", "text", { maxlength: 300, placeholder: "Company_Role_JobID.md" }),
+      resumeUsed(a),
       field("Notes", "notes", "textarea", { maxlength: 20000 })), refList));
     const trackSel = el("select", { "aria-label": "Track" }, ["coop_intern", "full_time"].map((t) => el("option", { value: t, text: TRACKS[t], selected: a.track === t })));
     trackSel.addEventListener("change", () => saveApp(C.edit(apps[dApp], { track: trackSel.value }), `Moved to ${TRACKS[trackSel.value]}`));
@@ -1269,6 +1303,7 @@
     }
     const sig = d.signals || {}; const bd = d.breakdown || {};
     if (d.explanation) out.append(el("div", { class: "section" }, el("p", { style: "margin:0", text: d.explanation })));
+    out.append(resumeSection(j));
     const st = (s) => (!s || s.status === "not stated" ? "Not stated" : s.status);
     out.append(el("div", { class: "section" }, el("h3", { text: "At a glance" }), facts([
       ["Track", el("span", null, el("span", { class: `chip ${trackOf(j)}`, text: TRACKS[trackOf(j)] }), " ", el("span", { class: "muted", text: d.track_evidence || "" }), trackControls(j))],
@@ -1466,7 +1501,11 @@
   }
   function renderActions() {
     const j = pJob; if (!j) return; const box = $("#p-actions"); box.textContent = "";
-    if (!j.filtered) box.append(el("button", { class: "btn primary", type: "button", onclick: () => generate(j), title: "Download the job package (.md) and copy it (g)" }, "Generate Resume"));
+    if (!j.filtered) {
+      box.append(el("button", { class: "btn primary", type: "button", onclick: () => copyResumeCommand(j),
+        title: `Copies  claude "/resume-builder ${j.id}"  — paste it in Terminal in the HireScope folder (copy-the-command workflow) (g)` }, "Generate Resume (copy command)"));
+      box.append(el("button", { class: "btn small", type: "button", onclick: () => generate(j), title: "Download the job package (.md) and copy it" }, "Job package"));
+    }
     const apply = safeUrl(j.apply_url);
     if (apply) box.append(el("a", { class: "btn", href: apply, target: "_blank", rel: "noopener noreferrer", title: "Open application (o)" }, "Open Application"));
     box.append(el("button", { class: "btn", type: "button", "aria-pressed": String(statusOf(j) === "shortlisted"), onclick: () => shortlist(j), title: "Shortlist (s)" }, statusOf(j) === "shortlisted" ? "Shortlisted ✓" : "Shortlist"));
@@ -1482,6 +1521,69 @@
     box.append(reason, st, el("span", { class: "spacer" }));
     const li = safeUrl(j.linkedin_url); if (li) box.append(el("a", { class: "btn small ghost", href: li, target: "_blank", rel: "noopener noreferrer" }, "LinkedIn search"));
     box.append(...quickLinks(j));
+  }
+  async function copyResumeCommand(j, regenerate) {
+    const cmd = `claude "/resume-builder ${j.id}${regenerate ? " --regenerate" : ""}"`;
+    const ok = await copyText(cmd);
+    resumeQueued[j.id] = new Date().toISOString(); store.set(K.resumeQueued, resumeQueued);
+    toast(ok ? `Copied: ${cmd} — paste it in Terminal in the HireScope folder, then refresh this page when it's done` : cmd);
+    renderAll(true); if (pJob) { renderActions(); if (pTab === "Overview" && pDetail) renderPanel(); }
+  }
+  function resumeUsed(a) {
+    const r = (a.job || {}).resume;
+    if (!r) return el("div", { class: "full muted", style: "font-size:12px", text: "Resume used: none recorded (Mark Applied records the current tailored resume)" });
+    return el("div", { class: "full", style: "font-size:12px" }, "Resume used: ",
+      r.pdf ? el("a", { href: r.pdf.startsWith("/") ? "file://" + r.pdf : r.pdf, target: "_blank", rel: "noopener", text: `v${r.version} — ${r.pdf_name || r.pdf.split("/").pop()}` }) : `v${r.version}`,
+      r.linked === "auto" ? el("span", { class: "muted", text: " (matched by date)" }) : null);
+  }
+  function markResumeReviewed(j) {
+    const r = resumeOf(j); if (!r || !r.current) return;
+    resumeReviews[j.id] = { version: r.current.version, reviewed_at: new Date().toISOString() }; store.set(K.resumeReviews, resumeReviews);
+    toast(`Resume v${r.current.version} marked reviewed (saved with Export statuses)`, () => { delete resumeReviews[j.id]; store.set(K.resumeReviews, resumeReviews); renderAll(true); if (pJob) renderPanel(); });
+    renderAll(true); if (pJob) renderPanel();
+  }
+  function resumeRef(j) {
+    const r = resumeOf(j); const v = r && r.current;
+    return v ? { job_pk: j.id, version: v.version, pdf: v.pdf, pdf_name: v.pdf_name, manifest_sha: v.manifest_sha } : null;
+  }
+  function resumeSection(j) {
+    const r = resumeOf(j); const rs = resumeStatus(j);
+    const box = el("div", { class: "section" }, el("h3", { text: "Resume" }));
+    if (!r) {
+      box.append(el("p", { class: "muted", style: "margin:0 0 8px", text: rs === "queued" ? "Command copied — run it in Terminal, then refresh this page." :
+        "No tailored resume yet. Generate Resume copies a command for Claude Code (copy-the-command workflow; nothing runs from this page)." }));
+      return box;
+    }
+    const v = r.current; const latest = r.latest;
+    box.append(el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px" },
+      el("span", { class: `chip ${(RESUME_CHIP[rs] || ["", ""])[1]}`, text: (RESUME_CHIP[rs] || [rs])[0] }),
+      v ? el("span", { class: "muted", text: `v${v.version} · ${fmtTime(v.created_at)}${v.reviewed_at ? ` · reviewed ${fmtTime(v.reviewed_at)}` : ""}` }) : null));
+    if (r.message) box.append(el("div", { class: `banner ${rs === "failed" ? "err" : "info"}`, style: "margin:0 0 8px", text: r.message }));
+    if (latest && latest.status === "failed" && latest.reasons && latest.reasons.length)
+      box.append(el("ul", { class: "list-plain", style: "font-size:12px" }, latest.reasons.map((x) => el("li", { text: `✗ ${x}` }))));
+    if (v) {
+      const links = el("div", { style: "display:flex;gap:6px;flex-wrap:wrap;margin:6px 0" },
+        el("a", { class: "btn small", href: v.pdf, target: "_blank", rel: "noopener", title: "Open the PDF in a new tab" }, "Preview PDF"),
+        el("a", { class: "btn small", href: v.pdf, download: v.pdf_name || "resume.pdf" }, "Download PDF"),
+        el("a", { class: "btn small", href: v.tex, download: "main.tex", title: "The full LaTeX source (main.tex + content.tex in the version folder)" }, "Download .tex"),
+        el("a", { class: "btn small ghost", href: v.report, target: "_blank", rel: "noopener" }, "Validation report"),
+        el("a", { class: "btn small ghost", href: v.reports_dir + "/", target: "_blank", rel: "noopener", title: "Truth, coverage, change and interview-defense reports" }, "All reports"));
+      box.append(links);
+      box.append(facts([
+        ["Checks", `${v.pages || "?"} page · ${v.font || "?"} · ${v.truth_unsupported === 0 ? "0 unsupported claims" : `${v.truth_unsupported} unsupported claim(s)`}`],
+        ["Coverage", v.coverage_pct == null ? "—" : `${Math.round(v.coverage_pct)}% (internal coverage measure, not an ATS score)`],
+        ["File", v.pdf_name || ""], ["Profile", v.profile || ""]]));
+      if (v.preview) box.append(el("a", { href: v.pdf, target: "_blank", rel: "noopener", title: "Open the PDF" },
+        el("img", { src: v.preview, alt: `Page 1 of the resume for ${j.company}`, style: "width:100%;max-width:420px;border:1px solid var(--line);border-radius:6px;margin-top:6px" })));
+      const acts = el("div", { style: "display:flex;gap:6px;flex-wrap:wrap;margin-top:8px" });
+      const reviewedHere = (resumeReviews[j.id] || {}).version === v.version;
+      // review the current version even while a new generation is queued
+      if (v.status === "ready" && !reviewedHere) acts.append(el("button", { class: "btn small", type: "button", onclick: () => markResumeReviewed(j) }, "Mark reviewed"));
+      if (reviewedHere && v.status === "ready") acts.append(el("span", { class: "muted", style: "font-size:12px;align-self:center", text: "Reviewed here — saved with Export statuses" }));
+      acts.append(el("button", { class: "btn small ghost", type: "button", onclick: () => copyResumeCommand(j, true), title: "Copies the command with --regenerate (a new version)" }, "Regenerate (copy command)"));
+      box.append(acts);
+    }
+    return box;
   }
   async function generate(j) {
     const d = await loadDetail(j);
@@ -1515,8 +1617,8 @@
     d.showModal(); box.querySelector("button").focus();
   }
   function exportStatuses() {
-    const payload = { exported_at: new Date().toISOString(), format: 4, statuses, track_overrides: overrides, applications: apps,
-                      manual_checks: manualChecks };
+    const payload = { exported_at: new Date().toISOString(), format: 5, statuses, track_overrides: overrides, applications: apps,
+                      manual_checks: manualChecks, resume_reviews: resumeReviews };
     download("jobsearch-statuses.json", JSON.stringify(payload, null, 2), "application/json");
     store.set(K.exported, payload.exported_at); renderBanners(); toast("Exported jobsearch-statuses.json");
   }
@@ -1692,7 +1794,7 @@
       case " ": if (sel && tag !== "button" && tag !== "a") { e.preventDefault(); togglePick(sel.id); } else return; break;
       case "x": if (sel) openSkipPicker(sel); break;
       case "o": if (sel && safeUrl(sel.apply_url)) window.open(sel.apply_url, "_blank", "noopener"); break;
-      case "g": if (sel && !sel.filtered) generate(sel); break;
+      case "g": if (sel && !sel.filtered) copyResumeCommand(sel); break;
       case "/": e.preventDefault(); $("#q").focus(); break;
       case "?": $("#help").showModal(); break;
       case "1": switchTrack("coop_intern"); break;
@@ -1706,6 +1808,7 @@
   if (!["coop_intern", "full_time"].includes(ui.track)) ui.track = "full_time";
   readHash();
   $("#q").value = tstate().q || "";
+  mapResumeStatuses();
   renderHeader(); renderBanners();
   if (!JOBS.length) {
     renderCounts();

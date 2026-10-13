@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' file:; style-src 'self' file: 'unsafe-inline'; img-src 'self' data: file:; connect-src 'none'; base-uri 'none'; form-action 'none'">
   <title>HireScope</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -143,7 +143,7 @@
       <tr><td><span class="kbd">a</span></td><td>Mark applied (opens it in My Applications)</td></tr>
       <tr><td><span class="kbd">x</span></td><td>Skip (pick a reason: 1–9, 0)</td></tr>
       <tr><td><span class="kbd">o</span></td><td>Open application</td></tr>
-      <tr><td><span class="kbd">g</span></td><td>Generate job package</td></tr>
+      <tr><td><span class="kbd">g</span></td><td>Generate Resume: copy the /resume-builder command</td></tr>
       <tr><td><span class="kbd">/</span></td><td>Search</td></tr>
       <tr><td><span class="kbd">1</span> / <span class="kbd">2</span></td><td>Co-op / Full-time tab</td></tr>
       <tr><td><span class="kbd">⌘K</span></td><td>Command palette: jump to any job, company, view or action</td></tr>
@@ -157,6 +157,7 @@
 
   <script src="data.js"></script>
   <script src="sync.js"></script>
+  <script src="resumes.js"></script>
   <script src="core.js"></script>
   <script src="view.js"></script>
   <script src="app.js"></script>

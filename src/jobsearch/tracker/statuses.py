@@ -6,7 +6,9 @@ it: per item, SQLite wins unless the export's entry is newer (`updated_at`). App
 append-only and always unioned. Everything in the file is data (never instructions) and is stored as text.
 
 Export formats: 1 = {statuses}; 2 = + track_overrides {key: track}; 3 = + track_overrides {key: {track,
-updated_at}} and applications {id: application}; 4 = + manual_checks {company: {checked_at, history, updated_at}}.
+updated_at}} and applications {id: application}; 4 = + manual_checks {company: {checked_at, history, updated_at}};
+5 = + resume_reviews {job_pk: {version, reviewed_at}} (Resume Builder) and applications[].resume (the resume version
+used: {job_pk, version, pdf, manifest_sha}).
 """
 from __future__ import annotations
 
@@ -45,6 +47,7 @@ class ImportResult:
     statuses_unmatched: int = 0
     overrides_applied: int = 0
     manual_checks_applied: int = 0
+    resume_reviews_applied: int = 0
     apps_new: int = 0
     apps_updated: int = 0
     apps_kept_db: int = 0
@@ -127,7 +130,7 @@ def load_export(path: Path) -> dict:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or not isinstance(raw.get("statuses", {}), dict):
         raise ValueError("not a HireScope statuses export")
-    if raw.get("format", 1) not in (1, 2, 3, 4):
+    if raw.get("format", 1) not in (1, 2, 3, 4, 5):
         raise ValueError(f"unknown export format {raw.get('format')!r}")
     return raw
 
@@ -176,6 +179,14 @@ def merge(conn, payload: dict, apps_dir: Path | None, now: str | None = None) ->
     n, errs = manual_checks.merge(conn, payload.get("manual_checks") or {}, exported, _iso)
     res.manual_checks_applied, res.errors = n, [*res.errors, *errs]
 
+    if payload.get("resume_reviews"):
+        try:
+            from resume_builder.hirescope_bridge import apply_reviews
+            n, errs = apply_reviews(conn, payload["resume_reviews"] if isinstance(payload["resume_reviews"], dict) else {})
+            res.resume_reviews_applied, res.errors = n, [*res.errors, *errs]
+        except ImportError:
+            res.errors.append("resume reviews in the export, but the Resume Builder isn't installed")
+
     apps = payload.get("applications") or {}
     if isinstance(apps, list):
         apps = {a.get("id"): a for a in apps if isinstance(a, dict)}
@@ -188,6 +199,19 @@ def merge(conn, payload: dict, apps_dir: Path | None, now: str | None = None) ->
             res.errors.append(f"application {app_id}: {ex}")
     conn.commit()
     return res
+
+
+def _resume_ref(r) -> dict | None:
+    if not isinstance(r, dict):
+        return None
+    try:
+        out = {"job_pk": int(r["job_pk"]), "version": int(r["version"]), "linked": "applied"}
+    except (KeyError, TypeError, ValueError):
+        return None
+    for k in ("pdf", "manifest_sha", "pdf_name"):
+        if isinstance(r.get(k), str):
+            out[k] = r[k][:500]
+    return out
 
 
 def _merge_app(conn, app_id: str, a: dict, exported: str, apps_dir: Path | None, res: ImportResult) -> None:
@@ -205,6 +229,7 @@ def _merge_app(conn, app_id: str, a: dict, exported: str, apps_dir: Path | None,
     pk = find_job(conn, vals["job_key"]) if vals["job_key"] else None
     extra = a.get("job") if isinstance(a.get("job"), dict) else {}
     extra = {k: extra[k] for k in ("source", "tier", "label", "score", "level") if k in extra}
+    resume = _resume_ref((a.get("job") or {}).get("resume") if isinstance(a.get("job"), dict) else None)
     row = conn.execute("SELECT updated_at, jd_path FROM applications WHERE id=?", (app_id,)).fetchone()
     if row is None:
         conn.execute(
@@ -221,6 +246,8 @@ def _merge_app(conn, app_id: str, a: dict, exported: str, apps_dir: Path | None,
         res.apps_updated += 1
     else:
         res.apps_kept_db += 1
+    if resume:     # the exact resume version recorded at Mark Applied; never replaced by an empty one
+        conn.execute("UPDATE applications SET resume=? WHERE id=?", (json.dumps(resume), app_id))
 
     for ev in a.get("events") or []:
         if not isinstance(ev, dict) or not ev.get("kind"):
@@ -291,6 +318,8 @@ def applications(conn, include_deleted: bool = True, with_jd: bool = True) -> li
         a = {f: r[f] or "" for f in APP_FIELDS}
         a.update(id=r["id"], stage=r["stage"], deleted=bool(r["deleted"]), created_at=r["created_at"],
                  updated_at=r["updated_at"], events=events.get(r["id"], []), job=json.loads(r["extra"] or "{}"))
+        if r["resume"]:
+            a["job"]["resume"] = json.loads(r["resume"])
         if with_jd and (p := paths.stored_file(r["jd_path"], paths.APPS_DIR)):
             a["jd"] = p.read_text(encoding="utf-8")
         out.append(a)

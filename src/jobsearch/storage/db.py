@@ -240,6 +240,32 @@ MIGRATIONS: list[str] = [
         updated_at TEXT NOT NULL
     );
     """,
+    # 8: Resume Builder (per-job resume status + every built version; the resume version used for an application)
+    """
+    CREATE TABLE resume_status (
+        job_pk INTEGER PRIMARY KEY,
+        status TEXT NOT NULL,
+        current_version INTEGER,
+        latest_version INTEGER,
+        message TEXT,
+        job_dir TEXT,
+        updated_at TEXT NOT NULL
+    );
+    CREATE TABLE resume_builds (
+        job_pk INTEGER NOT NULL,
+        version INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        pdf_path TEXT,
+        tex_path TEXT,
+        manifest_path TEXT,
+        manifest_sha TEXT,
+        created_at TEXT NOT NULL,
+        reviewed_at TEXT,
+        summary TEXT,
+        PRIMARY KEY (job_pk, version)
+    );
+    ALTER TABLE applications ADD COLUMN resume TEXT;
+    """,
 ]
 
 

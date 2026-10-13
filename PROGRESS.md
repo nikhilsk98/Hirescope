@@ -229,7 +229,7 @@ Built from `RESUME_BUILDER_PROMPT.md`, all 5 phases back to back. Resume here: r
 - [x] Phase 1 — core pipeline (2026-10-13)
 - [x] Phase 2 — quality (drafter → reviewer, truth verification, reports, evidence interview) (2026-10-13)
 - [x] Phase 3 — versioning (manifests, dedupe, diff, rollback, locks, manual edits) (2026-10-13)
-- [ ] Phase 4 — HireScope integration (button, statuses, bridge, dashboard, applications, batch)
+- [x] Phase 4 — HireScope integration (button, statuses, bridge, dashboard, applications, batch) (2026-10-13)
 - [ ] Phase 5 — hardening (failure tests, docs, cleanup) + final E2E, tag `resume-builder-v1.0`
 
 ## Phase 1 report (2026-10-13)
@@ -373,6 +373,47 @@ guard, unique atomic version folders + PDF hash in the manifest).
   rollback v1 → v2 works. (v1 predates dedupe keys, so the first request after this phase regenerated, as expected.)
 - Copart (32534): regenerated → v3 READY (the one-word last line is gone); same request again → **REUSED v3**; diff
   v2 → v3 shows the reworded bullet.
+
+## Phase 4 report (2026-10-13)
+**Built**
+- SQLite migration 8: `resume_status` (per job: status, current / latest version, message), `resume_builds` (every
+  version: status, PDF / tex / manifest paths, manifest hash, summary), `applications.resume`.
+- `hirescope_bridge.py`: statuses queued → generating (prepare) → validating (build) → ready / failed (the message
+  says which version is still current) → reviewed; versions mirrored from the manifests; `dashboard/resumes.js`
+  (gitignored) with relative `file://` links (`../data/resumes/…`) after every command and every HireScope run;
+  `refresh` re-syncs everything. A failed HireScope update never loses the resume: the CLI says it's saved and how
+  to retry (exit 1).
+- Dashboard: **Generate Resume (copy command)** copies `claude "/resume-builder <id>"` (shortcut `g`; the old job
+  package download is now the secondary "Job package" button), "queued" until the run reports; resume chips on cards
+  and the panel; Resume section in Overview (status, version, message / failure reasons, Preview PDF, Download PDF,
+  Download .tex, Validation report, All reports, checks summary, coverage labeled "internal coverage measure, not an
+  ATS score", page-1 preview image, **Mark reviewed**, Regenerate (copy command)); a **Resumes** view; a ready resume
+  moves a job that isn't further along to HireScope's "package exported" (once per version); CSP allows `file:`
+  images only (still no network).
+- Applications: **Mark Applied** stores the exact current resume (job, version, PDF, manifest hash) on the
+  application; Export statuses **format 5** adds `resume_reviews` and the application's resume; the import stores
+  both (a later export without a resume never erases it); applications without one are linked to the version current
+  on the date applied; the drawer shows "Resume used".
+- `batch shortlisted`: counts shortlisted jobs, says which already have a current resume, prints a usage warning and
+  exits 3 until `--yes`; then queues them (dashboard "queued", `data/resumes/batch_queue.json`); cap
+  `batch.max_jobs` (15).
+
+**Fixed along the way**: `refresh` for a job with no status row left it "generating" (a placeholder looked newer than
+the build); copying the command hid **Mark reviewed** for the existing ready version; a test's `monkeypatch.undo()`
+also removed the DEMO sandbox (it ran one refresh against the real data, harmless: it synced the real resumes), now
+scoped.
+
+**Tests**: 485 passed (79 Resume Builder; 8 new: status flow + resumes.js links resolve, failed build keeps the last
+good version and says so, compile failure keeps it, HireScope update failure reported + `refresh` recovers, format-5
+import (review applied, application resume stored and never erased, back to sync.js), date-based linking, batch
+count / warning / confirmation / cap / queue, status validation + refresh after a lost status table).
+
+**Real data**: `refresh` → DoorDash v2 and Copart v3 "ready" in SQLite and `resumes.js`. Headless Chrome (throwaway
+profile, your browser data untouched): both panels show the Resume section with working preview and links (dark +
+light screenshots in `data.nosync/screenshots/rb-panel-*.png`); copy command → "queued"; Mark reviewed; Mark Applied
+recorded v2 + manifest hash; Export statuses (format 5) imported into a **scratch copy** of the data: review applied,
+application linked to v2 (your real v2 stays "ready" until you mark it). `batch shortlisted` on real data: 0
+shortlisted; on the copy with 3 shortlisted: count, 1 reusable, usage warning, exit 3 without `--yes`.
 
 ## Needs Nikhil
 1. Two Accenture bullets both claim a **70% reliability** gain ("processing reliability" and "distributed storage

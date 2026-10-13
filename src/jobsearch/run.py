@@ -115,6 +115,11 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
         except (OSError, ValueError) as e:
             log.warning("referral finder: %s: %s", conn_file, e)
     statuses.write_sync_js(paths.SYNC_JS, statuses.sync_payload(conn))
+    try:   # Resume Builder: resume statuses + versions → dashboard/resumes.js (and application links)
+        from resume_builder.hirescope_bridge import refresh_all
+        refresh_all(paths.DB)
+    except Exception as e:  # noqa: BLE001 — the job run must not fail because of resume data
+        log.warning("resume statuses not refreshed", extra={"error": str(e)[:200]})
     compute_similar(conn, Embedder(conn), shown, min_sim=cfg.prefs.scoring.similar_min)   # "More like this"
     jobs = db.open_jobs(conn)
     if paths.ENG_BLOGS.exists():

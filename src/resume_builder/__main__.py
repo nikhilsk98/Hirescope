@@ -16,6 +16,8 @@
   lock <job> TARGET          keep a bullet id, an entry (exp-…/proj-…) or section:skills|education|summary
   unlock <job> TARGET        as approved in the current version, unchanged on regeneration
   mark-reviewed <job> [N]    you reviewed/approved the current (or given) version
+  refresh                    re-sync resume statuses into HireScope and rewrite dashboard/resumes.js
+  batch shortlisted [--yes]  queue every shortlisted job (shows the count and a usage warning; --yes to start)
   schema                     the content JSON schema
 Job = the HireScope job ID (the number in the dashboard URL: #…&job=123).
 """
@@ -57,10 +59,22 @@ def cmd_check(args) -> int:
     return 0
 
 
+def _bridge(pk, status=None, message=None) -> bool:
+    """HireScope status + dashboard data; a failure here never loses the resume, and says so."""
+    from .hirescope_bridge import BridgeError, update_job
+    try:
+        update_job(pk, status, message)
+        return True
+    except BridgeError as e:
+        print(f"Warning: {e}", file=sys.stderr)
+        return False
+
+
 def cmd_prepare(args) -> int:
     out = pipeline.prepare(args.job, args.profile, regenerate=args.regenerate, force=args.force,
                            discard_edits=args.discard_edits)
     a = out["analysis"]
+    _bridge(a["job"]["pk"], None if out.get("reused") else "generating")
     if out.get("reused"):
         r = out["reused"]
         print(f"REUSED: v{r['version']} ({r['status']}) was built from the same job, inputs, settings and locks; "
@@ -100,9 +114,17 @@ def cmd_build(args) -> int:
     finally:
         conn.close()
     jd = pipeline.job_dir(job["company"], job["id"])
-    with versions.JobLock(jd):
-        res = pipeline.build(args.job, Path(args.content) if args.content else None)
-        out = pipeline.finalize(res)
+    _bridge(job["id"], "validating")
+    try:
+        with versions.JobLock(jd):
+            res = pipeline.build(args.job, Path(args.content) if args.content else None)
+            out = pipeline.finalize(res)
+    except (ContentError, CompileError, InputError) as e:
+        cur = versions.current(jd)
+        _bridge(job["id"], "failed", f"build stopped: {str(e)[:300]}"
+                + (f" (v{cur['version']} is still current)" if cur else ""))
+        raise
+    bridged = _bridge(job["id"])
     rep = res["report"]
     print(f"{out['status'].upper()}: v{out['version']} → {out['version_dir']}")
     if out["pdf"]:
@@ -115,7 +137,12 @@ def cmd_build(args) -> int:
         print(f"  ✗ {r}")
     for w in (rep.warnings() if rep else []):
         print(f"  ! {w.name}: {w.detail}")
-    return 0 if out["status"] == "ready" else 1
+    if out["status"] != "ready":
+        cur = versions.current(jd)
+        print(f"  current version stays v{cur['version']}" if cur else "  no version is current yet")
+    if bridged:
+        print("  HireScope updated (refresh the dashboard)")
+    return 0 if out["status"] == "ready" and bridged else 1
 
 
 def _job_dir(ref):
@@ -231,11 +258,19 @@ def cmd_mark_reviewed(args) -> int:
 
 
 def _bridge_refresh(job) -> None:
-    try:
-        from . import hirescope_bridge
-        hirescope_bridge.update_job(job["id"])
-    except ImportError:
-        pass
+    _bridge(job["id"])
+
+
+def cmd_refresh(args) -> int:
+    from .hirescope_bridge import refresh_all
+    n = refresh_all()
+    print(f"HireScope updated for {n} job(s) with resumes; dashboard/resumes.js rewritten.")
+    return 0
+
+
+def cmd_batch(args) -> int:
+    from . import batch
+    return batch.run(args.which, args.yes, args.limit)
 
 
 def cmd_show(args) -> int:
@@ -304,6 +339,11 @@ def main(argv=None) -> int:
         p.add_argument("target")
         if name == "lock":
             p.add_argument("--version", type=int)
+    sub.add_parser("refresh")
+    p = sub.add_parser("batch")
+    p.add_argument("which", choices=["shortlisted"])
+    p.add_argument("--yes", action="store_true", help="you confirmed the job count and the usage warning")
+    p.add_argument("--limit", type=int)
     p = sub.add_parser("mark-reviewed")
     p.add_argument("job")
     p.add_argument("version", nargs="?", type=int)
@@ -316,7 +356,8 @@ def main(argv=None) -> int:
         return {"check": cmd_check, "prepare": cmd_prepare, "build": cmd_build, "show": cmd_show,
                 "review": cmd_review, "verify": cmd_verify, "interview": cmd_interview,
                 "add-evidence": cmd_add_evidence, "diff": cmd_diff, "rollback": cmd_rollback, "lock": cmd_lock,
-                "unlock": cmd_unlock, "mark-reviewed": cmd_mark_reviewed}[args.cmd](args)
+                "unlock": cmd_unlock, "mark-reviewed": cmd_mark_reviewed, "refresh": cmd_refresh,
+                "batch": cmd_batch}[args.cmd](args)
     except (InputError, ContentError, CompileError, versions.LockedError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 2

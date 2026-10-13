@@ -63,3 +63,17 @@ scripts do everything deterministic. Run every command from the repo root with `
   pass `--discard-edits` on your own.
 - `show <job> [--bullets]`, `diff <job> [A B]`, `rollback <job> N`, `mark-reviewed <job> [N]` (only when the user says
   they reviewed it). A failed build never replaces the current version.
+
+## HireScope / dashboard
+- Every command updates HireScope's SQLite (`resume_status`, `resume_builds`) and `dashboard/resumes.js`; tell the user
+  to refresh the dashboard. If the CLI warns that the HireScope update failed, the resume is still saved: say so and
+  run `python -m resume_builder refresh`.
+- Statuses: queued → generating (prepare) → validating (build) → ready, or failed (the last good version stays
+  current). "reviewed" only when the user marks it (dashboard button + Export statuses, or `mark-reviewed`).
+
+## /resume-builder --batch shortlisted
+1. `python -m resume_builder batch shortlisted` → shows how many shortlisted jobs need a generation and a usage
+   warning. **Stop and ask the user to confirm** the count. Never pass `--yes` without that confirmation.
+2. After confirmation: `python -m resume_builder batch shortlisted --yes` queues them (dashboard: "queued").
+3. Then run the normal steps for each job ID it lists, one at a time (jobs whose resume is still valid print REUSED
+   at prepare and need nothing more). Stop and report if a job fails; don't retry beyond the 3-attempt limit.

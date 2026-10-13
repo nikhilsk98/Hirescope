@@ -21,3 +21,4 @@ dashboard/sync.js
 # coverage data (pytest --cov)
 .coverage
 htmlcov/
+dashboard/resumes.js
