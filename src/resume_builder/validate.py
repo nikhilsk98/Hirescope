@@ -5,12 +5,16 @@ Every check is {name, ok, severity, detail}. severity "error" blocks "ready"; "w
 """
 from __future__ import annotations
 
+import logging
 import re
 import statistics
 import subprocess
 import unicodedata
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+# pdfminer (inside pdfplumber) logs every PDF token at DEBUG, including mailto:/tel: links: keep it out of logs
+logging.getLogger("pdfminer").setLevel(logging.WARNING)
 
 CM = 28.3465   # PDF points per cm
 LIGATURES = {"ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st"}

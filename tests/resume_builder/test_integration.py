@@ -1,8 +1,6 @@
 """Resume Builder Phase 4: HireScope bridge (statuses, versions, dashboard data), applications, reviews, batch.
 All data is DEMO."""
 import json
-import os
-from pathlib import Path
 
 import pytest
 

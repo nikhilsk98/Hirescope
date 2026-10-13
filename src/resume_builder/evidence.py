@@ -32,7 +32,7 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 _MON = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
 DATES_RE = re.compile(rf"\(((?:Expected\s+)?{_MON}\s+\d{{4}}(?:\s*[–-]\s*(?:{_MON}\s+\d{{4}}|Present))?)\)\s*$")
 METRIC_RE = re.compile(r"(?<![\w.\-/])(\d+(?:[.,]\d+)?)(\s?%|\+|x\b|k\b|K\b|-member|-person)?")
-ADD_HEAD_RE = re.compile(r"^##\s+([a-z0-9-]+)\s+[—-]\s+(\d{4}-\d{2}-\d{2})\s+[—-]\s+(confirmed|DEMO confirmed)\s*$", re.I)
+ADD_HEAD_RE = re.compile(r"^##\s+([a-z0-9-]+)\s+[—-]\s+(\d{4}-\d{2}-\d{2})\s+[—-]\s+(confirmed)\s*$", re.I)
 BANK_VERSION = 2
 
 

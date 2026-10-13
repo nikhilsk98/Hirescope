@@ -124,7 +124,12 @@ def cmd_build(args) -> int:
         _bridge(job["id"], "failed", f"build stopped: {str(e)[:300]}"
                 + (f" (v{cur['version']} is still current)" if cur else ""))
         raise
-    bridged = _bridge(job["id"])
+    msg = None
+    if out["status"] != "ready":
+        cur = versions.current(jd)
+        msg = (f"v{out['version']} failed" + (f" (v{cur['version']} is still current)" if cur else "") + ": "
+               + "; ".join(out["reasons"]))[:480]
+    bridged = _bridge(job["id"], out["status"], msg)
     rep = res["report"]
     print(f"{out['status'].upper()}: v{out['version']} → {out['version_dir']}")
     if out["pdf"]:

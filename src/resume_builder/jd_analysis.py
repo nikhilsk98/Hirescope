@@ -24,7 +24,7 @@ from jobsearch.output.packages import parse_package, render_package
 from jobsearch.storage import db
 
 from .config import InputError, Settings, sha256_text
-from .evidence import Bank, terms_in, vocab
+from .evidence import Bank, canonical, terms_in, vocab
 
 JOB_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 
@@ -143,7 +143,6 @@ def _evidence_for(terms: list[str], bank: Bank) -> list[str]:
 
 def related_terms(term: str, bank_terms: set[str], settings: Settings | None) -> list[str]:
     """Evidenced terms in the same related_groups group as `term` (config/resume_builder.yaml)."""
-    from .evidence import canonical
     out = []
     for group in (settings.related_groups if settings else {}).values():
         canon = [canonical(g) for g in group]
@@ -220,7 +219,6 @@ def analyze(job: dict, package_text: str, bank: Bank, settings: Settings, profil
         k = _parse_keyword_line(ln)
         if not k:
             continue
-        from .evidence import canonical
         canon = canonical(k["term"])
         ok, conc = _supported(canon, bank_terms)
         k.update(canonical=canon, supported=ok, evidence_ids=_evidence_for(conc, bank)[:8],

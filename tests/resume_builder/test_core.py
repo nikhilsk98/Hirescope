@@ -1,8 +1,6 @@
 """Resume Builder Phase 1: evidence bank, JD analysis, content schema, LaTeX rendering, Tectonic, PDF validation,
 bounded repair. All data is DEMO."""
 import json
-import re
-import shutil
 
 import pytest
 
@@ -12,7 +10,7 @@ from resume_builder.config import InputError, load_settings
 from resume_builder.content_schema import ContentError, dump, parse
 from resume_builder.evidence import build_bank, load_bank, metrics_in, parse_additions, parse_master
 
-from .conftest import FIX, insert_job, needs_tex, reviewed_flow
+from .conftest import insert_job, needs_tex, reviewed_flow
 
 
 # --- evidence bank -------------------------------------------------------------------------------------------

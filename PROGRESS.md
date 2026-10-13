@@ -230,7 +230,8 @@ Built from `RESUME_BUILDER_PROMPT.md`, all 5 phases back to back. Resume here: r
 - [x] Phase 2 — quality (drafter → reviewer, truth verification, reports, evidence interview) (2026-10-13)
 - [x] Phase 3 — versioning (manifests, dedupe, diff, rollback, locks, manual edits) (2026-10-13)
 - [x] Phase 4 — HireScope integration (button, statuses, bridge, dashboard, applications, batch) (2026-10-13)
-- [ ] Phase 5 — hardening (failure tests, docs, cleanup) + final E2E, tag `resume-builder-v1.0`
+- [x] Phase 5 — hardening (failure tests, docs, cleanup) (2026-10-13)
+- [ ] Final integration + end-to-end testing, tag `resume-builder-v1.0`
 
 ## Phase 1 report (2026-10-13)
 **Setup**: Tectonic 0.17.0 and poppler 26.10.0 (Homebrew). Calibri is not installed system-wide (only inside
@@ -414,6 +415,32 @@ light screenshots in `data.nosync/screenshots/rb-panel-*.png`); copy command →
 recorded v2 + manifest hash; Export statuses (format 5) imported into a **scratch copy** of the data: review applied,
 application linked to v2 (your real v2 stays "ready" until you mark it). `batch shortlisted` on real data: 0
 shortlisted; on the copy with 3 shortlisted: count, 1 reusable, usage warning, exit 3 without `--yes`.
+
+## Phase 5 report (2026-10-13)
+**Built / changed**
+- Failure handling: missing tools named with their install command; missing / empty template, rules or master resume
+  named; a broken template copy stops the build with the reason, records "failed" and keeps the last good version;
+  compile timeout and missing fonts reported; corrupt manifests / `current.json` never crash or count as valid;
+  malformed content JSON rejected field by field; lock targets and job IDs validated.
+- Status bookkeeping: the CLI now sets the final status explicitly after every build; a status recorded after the
+  newest version (a failure that saved nothing, a run in progress) wins over the manifests; in-progress statuses
+  older than 2 h count as abandoned.
+- Privacy: **pdfminer logged every PDF token at DEBUG, including the mailto: / tel: links** (it would have put your
+  email and phone in HireScope's log on a verbose run): silenced below WARNING; a test scans the CLI output, logs,
+  compile log, reports and manifest for DEMO contact details.
+- Docs: README **Resume Builder** section (setup incl. the Calibri → Carlito fallback, use, what gets checked,
+  configuration, versions / locks / hand edits, evidence interview, troubleshooting), Tectonic's bundle download
+  added to Outbound requests, an accurate privacy note (drafting happens in your Claude Code session, so the brief
+  goes to Anthropic like any conversation), job-package / `g` key / Mark Applied wording, data table. SKILL.md: check
+  step, `--regenerate` pass-through, REUSED handling, what to report at the end.
+- Cleanup: unused imports / variables, a hard-coded font name in the validation report, an unused DEMO-only
+  additions header form, a vacuous test assertion.
+
+**Tests**: 498 passed (92 Resume Builder; 13 new incl. a walk through every CLI command). Line coverage
+`resume_builder` 93% (CLI 94%), HireScope + Resume Builder 90%.
+
+**Real data**: `check` OK on your inputs (61 evidence items, 7 entries, Carlito); `refresh` OK; no contact details in
+any log, report, manifest or `resumes.js` (only in the PDF, its .tex sources and the extracted-text report).
 
 ## Needs Nikhil
 1. Two Accenture bullets both claim a **70% reliability** gain ("processing reliability" and "distributed storage

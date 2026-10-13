@@ -34,7 +34,8 @@ def utcnow() -> str:
 def check_dependencies() -> list[str]:
     missing = [f"{t} (install: {how})" for t, how in TOOLS.items() if not shutil.which(t)]
     try:
-        import pdfplumber  # noqa: F401
+        import pdfplumber
+        del pdfplumber
     except ImportError:
         missing.append("pdfplumber (install: ~/.venvs/hirescope/bin/pip install -r requirements.txt)")
     return missing

@@ -8,7 +8,7 @@ def validation_md(rep: Report, attempts: list[dict], repairs: list[str], font_us
                   preferred_font: str | None) -> str:
     L = ["# Validation report", "", f"Result: **{'passed' if rep.ok else 'FAILED'}** · pages: {rep.pages} · "
          f"main font: {font_used or rep.font_main or '?'}"
-         + (f" (Calibri is not installed; Carlito is metric-compatible, so line breaks match)"
+         + (f" ({preferred_font} is not installed; {font_used} is metric-compatible, so line breaks match)"
             if font_used and preferred_font and font_used != preferred_font else ""), ""]
     if rep.bottom_whitespace is not None:
         L.append(f"Empty space at the bottom of page 1: {rep.bottom_whitespace:.0%}")

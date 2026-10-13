@@ -5,9 +5,9 @@ import json
 import pytest
 
 from resume_builder import config as rc
-from resume_builder import draft, interview, jd_analysis, pipeline, reports, review, verify, versions
+from resume_builder import draft, interview, jd_analysis, pipeline, review, verify, versions
 from resume_builder.config import InputError, load_settings
-from resume_builder.content_schema import Bullet, ContentError, SkillItem, dump, parse
+from resume_builder.content_schema import Bullet, ContentError, SkillItem
 from resume_builder.evidence import build_bank, load_bank
 
 from .conftest import insert_job, needs_tex, reviewed_flow

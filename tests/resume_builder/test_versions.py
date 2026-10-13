@@ -1,7 +1,6 @@
 """Resume Builder Phase 3: manifests, dedupe, versions, diff, rollback, locks, hand edits, concurrency. DEMO data."""
 import json
 import multiprocessing
-import os
 import time
 
 import pytest
@@ -83,7 +82,7 @@ def test_rollback_and_review_refuse_failed_versions(rb_env):
 
 
 def test_locked_bullet_entry_and_section_survive_regeneration(rb_env):
-    v1 = full_build(rb_env)
+    full_build(rb_env)
     jd = jd_of(rb_env)
     c1 = versions._content_of(jd / "v1")
     bid = c1.experience[0].bullets[0].id

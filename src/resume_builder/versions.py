@@ -478,7 +478,6 @@ def detect_edits(vdir: Path) -> dict:
         gi, ci = _tex_items(gt.read_text(encoding="utf-8")), _tex_items(ct.read_text(encoding="utf-8"))
         g = parse(gj.read_text(encoding="utf-8")) if gj.exists() else None
         skill_n = len(g.skills) if g else 0
-        bullet_ids = [b.id for _s, _e, b in g.all_bullets()] if g else []
         order = _bullet_order_in_tex(g) if g else []
         struct_g = re.sub(r"^\\item.*$", "", gt.read_text(encoding="utf-8"), flags=re.M)
         struct_c = re.sub(r"^\\item.*$", "", ct.read_text(encoding="utf-8"), flags=re.M)
@@ -497,7 +496,6 @@ def detect_edits(vdir: Path) -> dict:
                 elif a != b and n < skill_n:
                     out["conflicts"].append("a Technical Skills line was edited in content.tex; edit the skills "
                                             "in content.json instead")
-        _ = bullet_ids
     out["bullets"] = json_bullets
     return out
 

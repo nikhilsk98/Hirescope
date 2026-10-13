@@ -22,6 +22,7 @@ from . import versions
 
 log = logging.getLogger("resume_builder")
 STATUSES = ("queued", "generating", "validating", "ready", "reviewed", "failed")
+IN_FLIGHT_STALE_S = 2 * 3600
 
 
 class BridgeError(Exception):
@@ -79,12 +80,19 @@ def sync_job(conn, pk: int) -> dict | None:
             (pk, m["version"], m.get("status"), str(v / f["pdf"]) if f.get("pdf") else None, str(v / f.get("tex", "main.tex")),
              str(v / "manifest.json"), rc.sha256_file(v / "manifest.json"), m.get("generated_at") or db.utcnow(),
              m.get("reviewed_at"), json.dumps(summary)))
-    row = conn.execute("SELECT status FROM resume_status WHERE job_pk=?", (pk,)).fetchone()
-    in_flight = row and row["status"] in ("queued", "generating", "validating")
+    row = conn.execute("SELECT status, updated_at FROM resume_status WHERE job_pk=?", (pk,)).fetchone()
+    # a status set after the newest version (a run in progress, or a build that stopped before saving a version)
+    # wins over the manifests; an in-progress one older than 2 h is treated as abandoned
+    stamp, built = (row["updated_at"] or "") if row else "", (latest or {}).get("generated_at", "")
+    newer = bool(row and row["status"] in ("queued", "generating", "validating", "failed")
+                 and (stamp > built or (stamp == built and row["status"] == "failed")))
+    if newer and row["status"] != "failed":
+        from datetime import datetime, timezone
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(row["updated_at"])).total_seconds()
+        newer = age < IN_FLIGHT_STALE_S
     if latest:
-        if in_flight and (latest.get("generated_at") or "") < (conn.execute(
-                "SELECT updated_at FROM resume_status WHERE job_pk=?", (pk,)).fetchone()["updated_at"] or ""):
-            status, msg = row["status"], None          # a newer generation is running; keep its state
+        if newer:
+            status, msg = row["status"], None
         elif latest.get("status") == "failed":
             status = "failed"
             msg = "; ".join((latest.get("failure_reasons") or [])[:3])

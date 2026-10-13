@@ -1,8 +1,9 @@
 """Tectonic wrapper: isolated build directory, no shell escape (--untrusted), timeout, full log captured.
 
-Tectonic downloads the TeX packages it needs on first use and caches them (~/Library/Caches/Tectonic); later builds
-are offline. The main font is a system font (Calibri, or Carlito when Calibri isn't installed); the font files used
-are copied into the version's source bundle so the PDF can be rebuilt elsewhere.
+Tectonic downloads the TeX packages it needs on first use and caches them
+(~/Library/Caches/TectonicProject.Tectonic); later builds are offline. The main font is a system font (Calibri, or
+Carlito when Calibri isn't installed); the font files used are copied into the version's source bundle so the PDF can
+be rebuilt elsewhere.
 """
 from __future__ import annotations
 

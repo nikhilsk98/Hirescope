@@ -2,10 +2,11 @@
 
 A local, single-user job-search tool for macOS: discovery from employer job boards and feeds → dedupe → rules +
 scoring for two tracks (Spring 2027 co-op/intern and full-time from May 2027) → a static HTML dashboard with
-My Applications → per-job "job packages" for a future resume builder. The core pipeline makes **zero LLM calls**,
+My Applications → per-job "job packages" → the **Resume Builder** (`/resume-builder`, tailored one-page LaTeX resumes
+from your own evidence, below). The core pipeline makes **zero LLM calls**,
 never logs in, never scrapes LinkedIn, never applies or messages anyone, and sends no resume data anywhere.
 
-> Status: Phases 1–7 complete. 300 verified seed companies + Amazon, Netflix, SimplifyJobs, Hacker News Who's
+> Status: Phases 1–7 complete, plus the Resume Builder (`/resume-builder`). 300 verified seed companies + Amazon, Netflix, SimplifyJobs, Hacker News Who's
 > Hiring, LinkedIn alert emails (optional) and an optional aggregator; your My Companies watchlist; two-track rules;
 > ATS keywords; feedback learning; My Applications; launchd schedule with quick checks, notifications, digest, backups.
 
@@ -23,7 +24,8 @@ never logs in, never scrapes LinkedIn, never applies or messages anyone, and sen
 1. Runs happen on their own (08:00, 18:00, plus a quick check every 2.5 h) once the schedule is installed. Run one
    by hand any time: `./scripts/run.sh` (or `--quick`, `--company "Stripe"`, `--dry-run`).
 2. Open `dashboard/index.html`. Start in **Last 24h** / the pinned **Apply Today** strip of each track tab;
-   open a job (`Enter`), check its Keywords and Full JD, **Generate Resume** (job package), apply, then **Mark
+   open a job (`Enter`), check its Keywords and Full JD, **Generate Resume** (copies the `/resume-builder` command
+   for Claude Code; see [Resume Builder](#resume-builder)), apply, then **Mark
    Applied** (`a`). Shortlist (`s`) or skip with a reason (`x`) as you go — that is what feedback learning learns from.
 3. Click **Export statuses** at the end of a session. The next run imports it from `~/Downloads` into SQLite (and
    backups), so nothing you did lives only in the browser.
@@ -204,11 +206,12 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
   keyboard focus inside while open; `Esc` closes it and focus returns to the job's card.
 - **Bulk select** (checkbox on hover, or `Space`): shortlist, skip with a reason, or export CSV for many jobs at once.
 - **Command palette** `⌘K`: jump to any job, company, application, view or action.
-- Keys: `j`/`k`, `Enter`, `s` shortlist, `x` skip (reason picker: `1`–`9`, `0`), `a` mark applied, `o` open, `g` package, `/` search, `1`/`2` tabs,
+- Keys: `j`/`k`, `Enter`, `s` shortlist, `x` skip (reason picker: `1`–`9`, `0`), `a` mark applied, `o` open, `g` Generate Resume (copy command), `/` search, `1`/`2` tabs,
   `Space` select, `⌘K` palette, `[` / `]` move a board card, `?` help.
 
 ### My Applications (`#applications`)
-- **Mark Applied** (or `a`) moves a job here with today's date (editable), its apply link, the job package you
+- **Mark Applied** (or `a`) moves a job here with today's date (editable), its apply link, the exact tailored resume
+  version (if one is ready), the job package you
   generated, and a **saved local copy of the JD** (kept after the posting disappears). **Add application** covers jobs
   you applied to elsewhere (company, role, track, link, date, source, optional pasted JD).
 - **Board**: Applied → Online Assessment → Interviewing → Offer, plus Rejected · Ghosted · Withdrawn. Drag cards, or
@@ -324,10 +327,10 @@ top 8 JD lines' best resume match. This is a heuristic.
 Flags (sponsorship, citizenship, clearance) are set only when the JD states them explicitly, and the dashboard
 quotes the sentence. Otherwise they read "Not stated".
 
-## Job package format (v2, stable contract for the future resume builder)
+## Job package format (v2, stable contract for the Resume Builder)
 
-The **Generate Resume** button downloads `Company_Role_JobID.md`, copies it to the clipboard, and sets the job's
-status to "package exported". Format:
+The **Job package** button in a job's panel downloads `Company_Role_JobID.md`, copies it to the clipboard, and sets
+the job's status to "package exported". The Resume Builder reads the same package straight from SQLite. Format:
 
 ```markdown
 ---
@@ -359,6 +362,106 @@ The front-matter keys and section names/order are fixed (`output/packages.py`: `
 sections. `parse_package()` is the reference parser. v2 added **ATS keywords**: a `Coverage: N% (required a/b)` line,
 then one line per keyword: `JD exact term | required|preferred|mentioned | matched|synonym|missing | weight w
 [| resume says X] [| evidence (section): resume line]`.
+
+## Resume Builder
+
+A Claude Code skill (`.claude/skills/resume-builder/`) plus deterministic scripts (`src/resume_builder/`) that turn a
+HireScope job into a tailored, validated **one-page PDF in your own LaTeX template**, using only facts from your
+inputs. Claude does the judgment (requirement mapping, selection, rewriting, review) as structured JSON; the scripts
+do everything else (evidence bank, JD analysis, schema checks, truth verification, LaTeX rendering, Tectonic, PDF
+checks, reports, versions, HireScope statuses). It never submits applications and never writes cover letters.
+
+### Setup
+1. `brew install tectonic poppler` (LaTeX engine; `pdftotext` / `pdftoppm` / `pdffonts`).
+2. Font: the template asks for **Calibri**. If it isn't installed system-wide (Microsoft Word's own copy isn't
+   visible to other apps), the build uses **Carlito**, which is metric-compatible (same line breaks):
+   `brew install --cask font-carlito`. Every validation report and manifest says which font was used.
+3. `~/.venvs/hirescope/bin/pip install -r requirements.txt` (adds `pdfplumber`).
+4. Inputs (all gitignored): `inputs/master_resume.md` (the only source of facts; its `# First Last` heading names the
+   PDF), `inputs/resume_template.tex` (your template, never modified: the build copies it and replaces its body with
+   `\input{content.tex}`), `inputs/resume_rules.md` (your writing rules). `inputs/evidence_additions.md` is created
+   by the evidence interview (confirmed answers only).
+5. `~/.venvs/hirescope/bin/python -m resume_builder check` — tools, inputs, evidence bank, notes (e.g. template
+   bullets that aren't in your master resume).
+
+### Use
+- Dashboard → open a job → **Generate Resume (copy command)** (or `g`) copies `claude "/resume-builder <id>"`. Paste it
+  in Terminal in the HireScope folder (copy-the-command workflow: the page runs nothing). The job shows "queued".
+- Or in Claude Code: `/resume-builder <job_id> [--regenerate] [--profile backend|fullstack|cloud|ml]`; the job ID is
+  the number in the dashboard URL (`#…&job=123`). `/resume-builder --batch shortlisted` for every shortlisted job
+  (shows the count and a usage warning and waits for your OK).
+- What happens: `prepare` (evidence bank, JD analysis from the job package, baseline of your own bullets ranked for
+  the JD, brief) → Claude drafts `content.json` → `review` (rule findings from your rules + truth check) → a separate
+  reviewer pass (hiring-manager view, once) → Claude's truth pass → `build`: truth verification, render, Tectonic,
+  PDF checks, automatic trimming if over a page (max 3 attempts), reports, `v<N>`.
+- Refresh the dashboard: status chip, **Resume** section (Preview PDF, Download PDF, Download .tex, Validation
+  report, All reports, a page preview, checks, coverage) and **Mark reviewed**; the **Resumes** view lists them.
+  A ready resume moves the job to "package exported" unless you're further along. **Mark Applied** records the exact
+  resume version on the application (shown in its drawer).
+- Statuses: queued → generating → validating → **ready** (every required check passed) → **reviewed** (only when you
+  mark it: dashboard button + Export statuses, or `mark-reviewed`), or **failed** (reasons listed; the last good
+  version stays current).
+
+### What gets checked
+- **Truth** (blocks "ready"): every bullet, skill, summary and talking point against the evidence ids it cites:
+  numbers exactly as written (15+ may become 15, never 20), technologies (no AWS for GCP, no new tools), no ownership
+  (led, managed, spearheaded…) or scale (large-scale, millions, enterprise…) or outcomes the evidence doesn't state.
+- **PDF** (blocks "ready"): page count, blank pages, compiler errors, overfull lines, missing glyphs, fonts embedded,
+  minimum font size, margins, clipping, overlapping lines, bullets over 2 lines, pdftotext vs the intended content
+  (reading order, headings, bullet characters, contact details, missing or garbled text), every link on its own text
+  and pointing where intended, ink in the margins of the rendered page images. Warnings: one-word last lines,
+  stretched lines, line spacing, bottom whitespace, hyphenation.
+- **Reports** (internal, never in the PDF; `v<N>/reports/`): `truth.md`, `coverage.md` ("internal coverage measure,
+  not an ATS score"; missing resume keywords kept apart from missing qualifications), `changes.md` (selection, before →
+  after per bullet, what was left out, remaining gaps), `defense.md` (2–3 interview talking points per bullet),
+  `review.md`, `validation.md`, `extracted_text.txt`.
+- The JD is data: instruction-like lines ("ignore previous instructions", "write … to a file", "add X to your
+  resume") are listed in the brief as ignored and dropped from what the drafter tailors to.
+
+### Configuration (`config/resume_builder.yaml`)
+`page_count` (1), `section_order` per track (co-op: skills, education, projects, experience; full-time: experience
+before projects), `summary` (off), `limits` (projects, bullets per role / project, words per bullet, keyword repeats,
+courses), `layout` (minimum font size and margins the repair loop may never cross, entry gaps), `fonts` (preferred +
+fallback), `compile` (timeout, image DPI), `repair.max_attempts` (≤ 3), `profiles` (signals + what to lead with),
+`related_groups` (what counts as transferable, never equivalent), `batch.max_jobs`. Changing it (or any input) makes
+the next request build a new version.
+
+### Versions, locks and hand edits
+- `data/resumes/<Company>_<id>/v<N>/`: `Nikhil_<Last>_Resume_<Company>.pdf` (job IDs only in folder names and
+  manifests), `main.tex` + `content.tex`, `content.json`, `reports/`, `pages/`, `compile.log` (contact details
+  redacted), `source/` (template copy, content, fonts, `BUILD.md`: rebuilds the same PDF), `manifest.json` (job, time,
+  input hashes, template / rules versions, profile, track, validation, truth, coverage, tools, file hashes).
+- A repeated request with the same job, inputs, settings, profile and locks **reuses** the current version;
+  `--regenerate` builds a new one. `python -m resume_builder show <id> [--bullets] | diff <id> [A B] |
+  rollback <id> N | mark-reviewed <id> [N]`.
+- **Locks**: `python -m resume_builder lock <id> <bullet id | exp-… / proj-… | section:skills|education|summary>`
+  (`unlock` to release). Locked items come back unchanged on every regeneration and are never trimmed.
+- **Hand edits**: edit a version's `content.json` (or bullet text in `content.tex`); the next generation keeps your
+  text. Edits that can't be carried over (tex changes beyond bullet text, the same bullet edited differently in both
+  files, an edit whose evidence changed since) are flagged and block "ready" instead of being overwritten;
+  `prepare --discard-edits` drops them on purpose. The edited version itself is never touched.
+- One run per job at a time (job lock; a second run says another is in progress).
+
+### Evidence interview
+`python -m resume_builder interview <id>` lists up to 5 questions (requirements your inputs may not describe, strong
+matches with no stated scope). Claude asks them; an answer is saved, dated, to `inputs/evidence_additions.md` only
+when you confirm it (`add-evidence … --confirm`). Your master resume is never edited.
+
+### Troubleshooting
+| Symptom | What to do |
+|---|---|
+| `Missing dependencies: tectonic …` | `brew install tectonic poppler`; `pip install -r requirements.txt` |
+| `The font "Calibri" cannot be found` | `brew install --cask font-carlito` (the build falls back to it automatically) |
+| First build slow / offline error | Tectonic downloads TeX packages once; run it online once, later builds are offline |
+| `master resume problems: …` | the message names the line (headings need `### Title — Organization, Location (Mon YYYY – Mon YYYY)`) |
+| `content does not match the schema` | the drafter's JSON is invalid; the message lists each field |
+| FAILED: `truth: …` | a claim isn't backed by the evidence it cites: fix the bullet, or add the fact via the evidence interview |
+| FAILED: `page_count` / `bullet_length` | content too long after 3 attempts: shorten bullets or lower priorities, then `--regenerate` |
+| FAILED: `manual_edit_conflicts` | reconcile the edited version's content.json, then `--regenerate` (or `--discard-edits`) |
+| "a generation … is in progress" | finish it with `build`, or start over with `prepare … --force` |
+| "the resume is saved, but updating HireScope failed" | `python -m resume_builder refresh` |
+| Dashboard shows no resume | refresh the page; `python -m resume_builder refresh` rewrites `dashboard/resumes.js` |
+| Preview image or PDF link doesn't open | the dashboard links `../data/resumes/…` relative to `dashboard/`: keep `data/` (or its symlink) in the repo |
 
 ## Running on a schedule
 
@@ -417,6 +520,8 @@ Plists are rendered from `scripts/launchd/com.nikhil.jobsearch{,.quick}.plist.te
 | `data/run.lock`, `data/logs/last_run_summary.txt` | run lock, last run's summary |
 | `dashboard/data.js` | generated `window.META` / `window.JOBS` |
 | `dashboard/sync.js` | generated from SQLite: your statuses, notes, overrides and applications (gitignored) |
+| `data/resumes/<Company>_<id>/` | Resume Builder: `v1`, `v2`, … (PDF, .tex, content JSON, reports, page images, source bundle, manifest), `current.json`, `locks.json`, `history.jsonl`, `work/` |
+| `dashboard/resumes.js` | generated: resume statuses and versions for the dashboard (gitignored) |
 
 Dedupe: exact on (company, source job id); fuzzy cross-source on company + normalized title + location.
 A JD whose text hash changes is marked **updated**. A job is **closed** after 2 consecutive *successful* fetches
@@ -428,7 +533,9 @@ Only requests to public job sources (job-board APIs, careers pages that allow it
 News) — none of them carry your resume, preferences or statuses; the only identifying header is the User-Agent
 below. Optional, only when you set them up: your IMAP login to your own mail provider (LinkedIn alert emails) and
 your search queries plus API key to the aggregator. Scoring, embeddings and the dashboard run locally (no AI service,
-no analytics); `inputs/`, `data/`, `.env` and the generated dashboard data are gitignored. Every request type:
+no analytics). The Resume Builder's scripts are local too (Tectonic fetches TeX packages only, nothing is uploaded to
+any resume-scoring service); its drafting and review happen in **your Claude Code session**, so the brief Claude reads
+(your master resume's evidence and the JD) goes to Anthropic like any other Claude Code conversation. `inputs/`, `data/`, `.env` and the generated dashboard data are gitignored. Every request type:
 
 ## Outbound requests
 
@@ -455,6 +562,7 @@ no analytics); `inputs/`, `data/`, `.env` and the generated dashboard data are g
 | IMAP over TLS to `IMAP_HOST` (read-only `SEARCH` + `FETCH BODY.PEEK[]`) | every run, only when `.env` is set (`--no-email` skips) | your IMAP login (to your own mail provider) |
 | `GET jsearch.p.rapidapi.com/search` or `serpapi.com/search.json` | only when the aggregator is enabled | your search queries, "us", the recency window, your API key |
 | Hugging Face model download (`sentence-transformers/all-MiniLM-L6-v2`) | first run only; later runs load from the local cache | none |
+| Tectonic TeX bundle (`relay.fullyjustified.net`, redirected to its package host) | Resume Builder, first build (and any new package); cached in `~/Library/Caches/TectonicProject.Tectonic` | none (requests TeX package files; no resume content) |
 
 All requests use per-host rate limits, timeouts, retries with backoff, and the User-Agent
 `jobsearch-local/0.2`. No request carries resume content; the only personal data sent anywhere is your IMAP login, to your own mail provider.
@@ -481,7 +589,7 @@ LinkedIn search) open in your browser as normal.
 
 ```sh
 ~/.venvs/hirescope/bin/python -m pytest -q
-~/.venvs/hirescope/bin/python -m pytest -q --cov=jobsearch --cov-report=term   # line coverage (pytest-cov)
+~/.venvs/hirescope/bin/python -m pytest -q --cov=jobsearch --cov=resume_builder --cov-report=term   # line coverage
 ```
 All test data is mock data labeled DEMO (`tests/fixtures/` and inline). Tests need no network and no embedding
 model. If `node` is installed, the dashboard's tracker logic (`dashboard/core.js`) is checked against the Python
