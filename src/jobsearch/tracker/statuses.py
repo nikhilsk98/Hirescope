@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -102,10 +103,19 @@ def _date(v) -> str | None:
     return v if _DATE.match(v) else None
 
 
-def newest_export(directory: Path) -> Path | None:
-    if not directory.is_dir():
-        return None
-    files = [p for p in directory.glob(EXPORT_GLOB) if p.is_file()]
+def readable(directory: Path) -> bool:
+    """Can this process list the folder? (macOS denies scheduled jobs ~/Downloads without Full Disk Access; Python's
+    glob would silently return nothing.)"""
+    try:
+        os.listdir(directory)
+        return True
+    except OSError:
+        return False
+
+
+def newest_export(directory: Path | list[Path]) -> Path | None:
+    dirs = directory if isinstance(directory, list) else [directory]
+    files = [p for d in dirs if d.is_dir() and readable(d) for p in d.glob(EXPORT_GLOB) if p.is_file()]
     return max(files, key=lambda p: p.stat().st_mtime) if files else None
 
 
@@ -231,11 +241,15 @@ def _merge_app(conn, app_id: str, a: dict, exported: str, apps_dir: Path | None,
             conn.execute("UPDATE applications SET jd_path=? WHERE id=?", (str(dest), app_id))
 
 
-def import_newest(conn, directory: Path, apps_dir: Path | None, archive_dir: Path | None = None) -> ImportResult:
-    """Import the newest export in `directory` unless that exact file was imported already."""
-    path = newest_export(directory)
+def import_newest(conn, directory: Path | list[Path], apps_dir: Path | None, archive_dir: Path | None = None) -> ImportResult:
+    """Import the newest export in `directory` (one folder or several) unless that exact file was imported already."""
+    dirs = directory if isinstance(directory, list) else [directory]
+    path = newest_export(dirs)
     if path is None:
-        return ImportResult(skipped_reason=f"no {EXPORT_GLOB} in {directory}")
+        blocked = [str(d) for d in dirs if d.is_dir() and not readable(d)]
+        note = (f"; can't read {', '.join(blocked)} (macOS privacy protection: scheduled runs need Full Disk Access "
+                f"for that folder — save the export to {dirs[-1]} instead)") if blocked else ""
+        return ImportResult(skipped_reason=f"no {EXPORT_GLOB} in {', '.join(map(str, dirs))}{note}")
     st = path.stat()
     sig = f"{path.name}:{st.st_mtime_ns}:{st.st_size}"
     if db.get_meta(conn, "statuses_import") == sig:

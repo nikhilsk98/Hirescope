@@ -403,3 +403,27 @@ def test_future_timestamps_capped_at_export_time_and_reimport_is_noop(conn):
     at = conn.execute("SELECT user_status_at FROM jobs").fetchone()[0]
     assert at == "2026-10-12T15:00:00+00:00"          # the export's own time, not 2099
     assert statuses.merge(conn, payload, None).statuses_applied == 0
+
+
+def test_import_from_several_folders_and_report_blocked_ones(conn, tmp_path, monkeypatch):
+    """Scheduled runs can't list ~/Downloads without Full Disk Access: the newest export across all folders wins,
+    and a folder the process can't read is reported instead of silently looking empty."""
+    _job(conn)
+    downloads, inbox = tmp_path / "Downloads", tmp_path / "inputs" / "statuses"
+    downloads.mkdir(); inbox.mkdir(parents=True)
+    (inbox / "jobsearch-statuses.json").write_text(json.dumps(_export(statuses={"DemoCo::greenhouse::1": {
+        "status": "shortlisted", "updated_at": "2026-10-12T00:00:00Z"}})))
+    real_listdir = statuses.os.listdir
+    monkeypatch.setattr(statuses.os, "listdir", lambda d: (_ for _ in ()).throw(PermissionError("Operation not permitted"))
+                        if str(d) == str(downloads) else real_listdir(d))
+    r = statuses.import_newest(conn, [downloads, inbox], None)
+    assert r.file.endswith("jobsearch-statuses.json") and r.statuses_applied == 1       # the inbox still works
+    r2 = statuses.import_newest(conn, [downloads, tmp_path / "empty"], None)
+    assert "can't read" in r2.skipped_reason and str(downloads) in r2.skipped_reason
+
+
+def test_import_dirs_setting():
+    from jobsearch import paths
+    from jobsearch.run import import_dirs
+    assert import_dirs("~/Downloads") == [Path("~/Downloads").expanduser()]
+    assert import_dirs(["~/Downloads", "inputs/statuses"]) == [Path("~/Downloads").expanduser(), paths.ROOT / "inputs/statuses"]

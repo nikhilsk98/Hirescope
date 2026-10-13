@@ -61,6 +61,15 @@ def setup_logging(verbose: bool) -> Path:
     return log_file
 
 
+def import_dirs(setting: str | list[str]) -> list[Path]:
+    """statuses_import_dir (one folder or a list): ~ expands, relative paths are inside the repo."""
+    out = []
+    for d in [setting] if isinstance(setting, str) else setting:
+        p = Path(d).expanduser()
+        out.append(p if p.is_absolute() else paths.ROOT / p)
+    return out
+
+
 def exit_code(summary: dict) -> int:
     """1 only for real source failures. "Manual check needed" companies (unsupported job systems, marked on purpose)
     and partial listings are reported in the summary and on the dashboard, not treated as errors."""
@@ -226,7 +235,7 @@ def _main(args, log_file: Path) -> int:
                 res = statuses.merge(conn, statuses.load_export(args.statuses), None if args.dry_run else paths.APPS_DIR)
                 res.file = str(args.statuses)
             else:
-                res = statuses.import_newest(conn, Path(cfg.prefs.statuses_import_dir).expanduser(),
+                res = statuses.import_newest(conn, import_dirs(cfg.prefs.statuses_import_dir),
                                              None if args.dry_run else paths.APPS_DIR,
                                              None if args.dry_run else paths.IMPORTS_DIR)
             imported = res.as_dict()

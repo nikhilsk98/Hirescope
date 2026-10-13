@@ -143,8 +143,8 @@ pages without job data), 202 not due; 36 new, 101 closed; 6,350 visible (5,505 f
 - The LinkedIn alert parser is built from the documented layout and DEMO emails; check its first real run.
 
 **Setup checklist (Needs Nikhil)**
-1. ~~`./scripts/schedule.sh install`~~ done 2026-10-12 (both jobs loaded); Full Disk Access for /bin/zsh only if
-   `data/logs/launchd-*.log` shows "Operation not permitted".
+1. ~~`./scripts/schedule.sh install`~~ done; the repo now lives in `~/Projects/hirescope`, so no Full Disk Access is
+   needed (2026-10-13).
 2. Optional `.env`: `IMAP_USER`, `IMAP_APP_PASSWORD` (Gmail app password) for LinkedIn alerts; create alerts on LinkedIn.
 3. Optional `inputs/Connections.csv` (LinkedIn data export) for the referral finder.
 4. Optional `aggregator.enabled: true` + `JSEARCH_API_KEY` / `SERPAPI_API_KEY`.
@@ -201,8 +201,9 @@ consecutive SmartRecruiters runs answered 304 for all 18 companies.
 - **Netflix** requirement parsing works for ~44% of postings (its pages carry little structure).
 
 ## Needs Nikhil
-1. **Full Disk Access for `/bin/zsh`** — required for the schedule. The launchd jobs are installed and loaded, but
-   macOS blocks them from reading the repo in `~/Documents` ("can't open input file", exit 127).
+1. ~~Full Disk Access for `/bin/zsh`~~ not needed: the repo moved to `~/Projects/hirescope` (2026-10-13), the schedule
+   was reinstalled and a launchd-started quick check ran successfully. Save **Export statuses** files to
+   `inputs/statuses/` (scheduled runs can't read `~/Downloads`), or run `./scripts/run.sh` from Terminal now and then.
 2. **Notifications**: allow Script Editor in System Settings → Notifications.
 3. Confirm `inputs/preferences.yaml → work_authorization` (needs_sponsorship: true, us_citizen: false).
 4. Optional: LinkedIn alert emails (Gmail app password in `.env`), `inputs/Connections.csv`, the USCIS H-1B CSV,
