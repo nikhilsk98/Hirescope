@@ -17,7 +17,7 @@ import httpx
 
 from ..config import Company
 from ..extract.text import html_to_text
-from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, SourceError
+from .base import Adapter, Capabilities, ConditionalPages, FetchContext, FetchResult, RawJob, SourceError
 from .util import parse_dt
 
 BASE = "https://www.amazon.jobs/en/search.json"
@@ -71,28 +71,47 @@ class AmazonAdapter(Adapter):
         return "/jobs/" in str(r.url)   # closed postings redirect to the search page
 
     def fetch(self, company: Company, ctx: FetchContext) -> FetchResult:
+        """search.json pages carry an ETag and answer 304 (verified 2026-10-12): when every page of every search is
+        unchanged the listing is reported unchanged; otherwise unchanged pages are fetched again in full."""
         max_pages = 40 if ctx.full else ctx.max_pages
         jobs: dict[str, RawJob] = {}
         capped = []
-        for search in ctx.queries.get("amazon", []):
-            offset, hits = 0, None
-            for _ in range(max_pages):
-                params = {**search, "country": "USA", "result_limit": PAGE, "offset": offset, "sort": "recent"}
-                url = f"{BASE}?{urlencode(params)}"
-                try:
-                    data = self.http.get_json(url, headers={"Accept": "application/json"})
-                except Exception as e:  # noqa: BLE001
-                    raise SourceError(f"{company.name}: {url}: {e}") from e
-                if data.get("error"):
-                    raise SourceError(f"{company.name}: {url}: {data['error']}")
-                hits = data.get("hits", 0) if hits is None else hits
-                for j in data.get("jobs") or []:
-                    if j.get("title") and (j.get("id_icims") or j.get("id")):
-                        r = self._raw(company.name, j, f"{BASE}?{urlencode(search)}")
-                        jobs.setdefault(r.job_id, r)
-                offset += PAGE
-                if offset >= hits or not data.get("jobs"):
-                    break
-            else:
-                capped.append(f"{search} capped at {max_pages * PAGE} of {hits}")
-        return FetchResult(jobs=list(jobs.values()), partial="; ".join(capped) or None)
+        cp = ConditionalPages(self.http, ctx.validators)
+        hdr = {"Accept": "application/json"}
+        bodies: list[tuple[str, dict, dict | None]] = []
+        url = ""
+        try:
+            for search in ctx.queries.get("amazon", []):
+                offset, hits = 0, None
+                page_url = lambda off: f"{BASE}?{urlencode({**search, 'country': 'USA', 'result_limit': PAGE, 'offset': off, 'sort': 'recent'})}"  # noqa: E731
+                for _ in range(max_pages):
+                    url = page_url(offset)
+                    data = cp.get(url, headers=hdr)
+                    if data is not None and data.get("error"):
+                        raise SourceError(f"{company.name}: {url}: {data['error']}")
+                    bodies.append((url, search, data))
+                    if data is not None and hits is None:
+                        hits = data.get("hits", 0)
+                    offset += PAGE
+                    if data is not None and not data.get("jobs"):
+                        break
+                    if (offset >= hits) if hits is not None else not cp.seen_before(page_url(offset)):
+                        break
+                else:
+                    capped.append(f"{search} capped at {max_pages * PAGE} of {hits}")
+            if cp.unchanged:
+                return FetchResult(unchanged=True)
+            for i, (u, search, data) in enumerate(bodies):
+                if data is None:
+                    url = u
+                    bodies[i] = (u, search, cp.refetch(u, headers=hdr))
+        except SourceError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise SourceError(f"{company.name}: {url}: {e}") from e
+        for _, search, data in bodies:
+            for j in (data or {}).get("jobs") or []:
+                if j.get("title") and (j.get("id_icims") or j.get("id")):
+                    r = self._raw(company.name, j, f"{BASE}?{urlencode(search)}")
+                    jobs.setdefault(r.job_id, r)
+        return FetchResult(jobs=list(jobs.values()), partial="; ".join(capped) or None, validators=cp.validators)

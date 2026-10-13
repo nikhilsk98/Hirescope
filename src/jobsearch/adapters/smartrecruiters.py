@@ -8,6 +8,8 @@ Verified 2026-10-12 (ServiceNow, Canva):
     -> {..., postingUrl, applyUrl, jobAd: {sections: {companyDescription, jobDescription, qualifications,
         additionalInformation}: {title, text(HTML)}}}
 Note: an unknown company id returns 200 with totalFound 0 (not 404), so 0 jobs cannot prove the id exists.
+List pages carry an ETag and answer 304 to If-None-Match (verified 2026-10-12), so an unchanged listing costs only
+304s and no detail requests.
 """
 from __future__ import annotations
 
@@ -19,7 +21,7 @@ from datetime import datetime, timezone
 
 from ..config import Company
 from ..extract.text import html_to_text
-from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, SourceError
+from .base import Adapter, Capabilities, ConditionalPages, FetchContext, FetchResult, RawJob, SourceError
 from .util import parse_dt
 
 LIST = "https://api.smartrecruiters.com/v1/companies/{co}/postings?limit=100&offset={offset}&country=us"
@@ -78,24 +80,41 @@ class SmartRecruitersAdapter(Adapter):
         max_pages = 20 if ctx.full else ctx.max_pages
         by_id: dict[str, dict] = {}
         capped, total = [], 0
-        for q in ctx.queries.get("smartrecruiters", []):
-            offset, found = 0, None
-            url = ""
-            try:
+        cp = ConditionalPages(self.http, ctx.validators)
+        bodies: list[tuple[str, dict | None]] = []
+        firsts: list[int] = []          # index of each search's first page in `bodies`
+        url = ""
+        try:
+            for q in ctx.queries.get("smartrecruiters", []):
+                offset, found = 0, None
+                firsts.append(len(bodies))
+                page_url = lambda off: LIST.format(co=co, offset=off) + f"&q={quote(q)}"   # noqa: E731
                 for _ in range(max_pages):
-                    url = LIST.format(co=co, offset=offset) + f"&q={quote(q)}"
-                    page = self.http.get_json(url)
-                    found = page.get("totalFound", 0) if found is None else found
-                    for p in page.get("content") or []:
-                        by_id.setdefault(str(p.get("id")), p)
+                    url = page_url(offset)
+                    page = cp.get(url)
+                    bodies.append((url, page))
+                    if page is not None and found is None:
+                        found = page.get("totalFound", 0)
                     offset += 100
-                    if offset >= found or not page.get("content"):
+                    # an unchanged (304) page has no body: follow last run's pages
+                    if page is not None and not page.get("content"):
+                        break
+                    if (offset >= found) if found is not None else not cp.seen_before(page_url(offset)):
                         break
                 else:
                     capped.append(f"“{q}” capped at {offset} of {found}")
-            except Exception as e:  # noqa: BLE001
-                raise SourceError(f"{company.name}: {url}: {e}") from e
-            total += found or 0
+            if cp.unchanged:
+                return FetchResult(unchanged=True)
+            for i, (u, page) in enumerate(bodies):
+                if page is None:
+                    url = u
+                    bodies[i] = (u, cp.refetch(u))
+        except Exception as e:  # noqa: BLE001
+            raise SourceError(f"{company.name}: {url}: {e}") from e
+        total = sum((bodies[i][1] or {}).get("totalFound", 0) or 0 for i in firsts)
+        for _, page in bodies:
+            for p in (page or {}).get("content") or []:
+                by_id.setdefault(str(p.get("id")), p)
         items = list(by_id.values())
         partial = "; ".join(capped) or None
 
@@ -114,7 +133,7 @@ class SmartRecruitersAdapter(Adapter):
                     pass
             jobs.append(self._raw(company.name, co, p, detail))
         notes = ["0 postings: SmartRecruiters also returns 0 for unknown company ids"] if not total else []
-        return FetchResult(jobs=jobs, partial=partial, notes=notes)
+        return FetchResult(jobs=jobs, partial=partial, notes=notes, validators=cp.validators)
 
     def check_open(self, company: Company, job_id: str, apply_url: str | None) -> bool | None:
         try:

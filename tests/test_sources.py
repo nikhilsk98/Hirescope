@@ -713,3 +713,66 @@ def test_eightfold_respects_robots():
     with pytest.raises(SourceError, match="robots.txt"):
         EightfoldAdapter(mock_client(deny)).fetch(co, FetchContext())
     assert not any("/api/pcsx" in u for _, u in deny.calls)
+
+
+# --- conditional (ETag / 304) listings: SmartRecruiters, Amazon ------------------------------------
+def _etag_server(bodies: dict[str, dict], etag='W/"v1"'):
+    """frag -> JSON body; answers 304 to If-None-Match == etag."""
+    calls = []
+
+    def handler(request: httpx.Request):
+        calls.append((str(request.url), request.headers.get("if-none-match")))
+        for frag, body in bodies.items():
+            if frag in str(request.url):
+                if request.headers.get("if-none-match") == etag:
+                    return httpx.Response(304)
+                return httpx.Response(200, json=body, headers={"etag": etag})
+        return httpx.Response(404, json={})
+    handler.calls = calls
+    return handler
+
+
+def test_smartrecruiters_unchanged_listing_is_304_only():
+    q = {"smartrecruiters": ["software", "intern"]}
+    co = Company(name="DemoCo", source="smartrecruiters", board="DemoCo")
+    h = _etag_server({"q=software": SR_LIST, "q=intern": {"totalFound": 0, "content": []}, "/postings/744": SR_DETAIL})
+    first = SmartRecruitersAdapter(mock_client(h)).fetch(co, FetchContext(queries=q))
+    assert len(first.jobs) == 1 and len(first.validators) == 2
+    # next run: both pages answer 304 -> the whole listing is unchanged, no detail requests
+    h2 = _etag_server({"q=software": SR_LIST, "q=intern": {"totalFound": 0, "content": []}, "/postings/744": SR_DETAIL})
+    res = SmartRecruitersAdapter(mock_client(h2)).fetch(co, FetchContext(queries=q, validators=first.validators))
+    assert res.unchanged and all(inm for _, inm in h2.calls) and not any("/postings/744" in u for u, _ in h2.calls)
+
+
+def test_smartrecruiters_partly_changed_listing_refetches_304_pages():
+    q = {"smartrecruiters": ["software", "intern"]}
+    co = Company(name="DemoCo", source="smartrecruiters", board="DemoCo")
+    intern = {"totalFound": 1, "content": [{**SR_LIST["content"][0], "id": "744000000000002", "name": "Software Engineering Intern (DEMO)"}]}
+
+    def handler(request: httpx.Request):
+        u, inm = str(request.url), request.headers.get("if-none-match")
+        if "q=software" in u:
+            return httpx.Response(304) if inm == 'W/"v1"' else httpx.Response(200, json=SR_LIST, headers={"etag": 'W/"v1"'})
+        if "q=intern" in u:
+            return httpx.Response(200, json=intern, headers={"etag": 'W/"v2"'})     # changed since last run
+        if "/postings/" in u:
+            return httpx.Response(200, json=SR_DETAIL)
+        return httpx.Response(404, json={})
+    url_sw = "https://api.smartrecruiters.com/v1/companies/DemoCo/postings?limit=100&offset=0&country=us&q=software"
+    url_in = "https://api.smartrecruiters.com/v1/companies/DemoCo/postings?limit=100&offset=0&country=us&q=intern"
+    known = {url_sw: {"etag": 'W/"v1"'}, url_in: {"etag": 'W/"old"'}}
+    res = SmartRecruitersAdapter(mock_client(handler)).fetch(co, FetchContext(queries=q, validators=known))
+    assert not res.unchanged and {j.job_id for j in res.jobs} == {"744000000000001", "744000000000002"}
+    assert res.validators[url_in]["etag"] == 'W/"v2"' and res.validators[url_sw]["etag"] == 'W/"v1"'
+
+
+def test_amazon_unchanged_listing_is_304_only():
+    from jobsearch.adapters.amazon import AmazonAdapter
+    body = {"hits": 0, "jobs": []}
+    q = {"amazon": [{"base_query": "intern"}]}
+    h = _etag_server({"search.json": body})
+    first = AmazonAdapter(mock_client(h)).fetch(Company(name="Amazon", source="amazon"), FetchContext(queries=q))
+    assert not first.unchanged and first.validators
+    h2 = _etag_server({"search.json": body})
+    res = AmazonAdapter(mock_client(h2)).fetch(Company(name="Amazon", source="amazon"), FetchContext(queries=q, validators=first.validators))
+    assert res.unchanged

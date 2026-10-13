@@ -165,6 +165,41 @@ class NotModified(Exception):
     pass
 
 
+class ConditionalPages:
+    """Paged listings fetched with If-None-Match / If-Modified-Since (SmartRecruiters, Amazon send ETags and
+    answer 304). If every page is 304 the whole listing is unchanged (FetchResult(unchanged=True)); otherwise the
+    304 pages are fetched again in full, since their bodies weren't kept."""
+
+    def __init__(self, http: "HttpClient", known: dict[str, dict] | None):
+        self.http, self.known = http, known or {}
+        self.validators: dict[str, dict] = {}
+        self.pending: list[str] = []
+        self.changed = False
+
+    def get(self, url: str, **kw) -> dict | None:
+        """Page JSON, or None when the server says it is unchanged (304)."""
+        try:
+            resp = self.http.get_conditional(url, self.known.get(url), **kw)
+        except NotModified:
+            self.pending.append(url)
+            return None
+        self.changed = True
+        self.validators[url] = self.http.validators_of(resp)
+        return resp.json()
+
+    def seen_before(self, url: str) -> bool:
+        return url in self.known
+
+    @property
+    def unchanged(self) -> bool:
+        return bool(self.pending) and not self.changed
+
+    def refetch(self, url: str, **kw) -> dict:
+        resp = self.http.get_conditional(url, None, **kw)
+        self.validators[url] = self.http.validators_of(resp)
+        return resp.json()
+
+
 _SECRET_PARAM = re.compile(r"((?:api_?key|apikey|access_token|token|password|secret)=)[^&\s'\"]+", re.I)
 
 

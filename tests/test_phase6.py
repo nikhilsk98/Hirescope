@@ -225,3 +225,45 @@ def test_main_offline_and_locked(monkeypatch, tmp_path):
 
 def test_online_probe():
     assert alerts.online(timeout=0.2, hosts=(("127.0.0.1", 9),)) is False
+
+
+# --- alerts: early birds include Stretch, season reminders once, exit codes -------------------------
+def test_early_birds_include_stretch(conn):
+    now = datetime.now(timezone.utc)
+    def add(jid, label, posted_h, score):
+        pk, _ = db.upsert_job(conn, rec(job_id=jid, title=f"SWE {jid} (DEMO)", normalized_title=f"swe {jid}",
+                                        posted_date=(now - timedelta(hours=posted_h)).isoformat()))
+        conn.execute("UPDATE jobs SET label=?, score=?, filtered=0 WHERE id=?", (label, score, pk))
+    add("1", "Strong", 10, 90)
+    add("2", "Stretch", 5, 60)       # fresh Stretch: an early bird, not a "new Strong match"
+    add("3", "Stretch", 100, 65)     # too old for an early bird
+    add("4", "Weak", 2, 30)
+    strong, early = alerts.new_strong(conn, (now - timedelta(days=1)).isoformat(), 48)
+    assert [r["title"] for r in strong] == ["SWE 1 (DEMO)"]
+    assert [r["title"] for r in early] == ["SWE 1 (DEMO)", "SWE 2 (DEMO)"]
+    sent = []
+    notify_orig, notify.notify = notify.notify, lambda *a, **k: sent.append(a)
+    try:
+        titles = alerts.send({"new_strong_rows": [], "early_bird": [early[1]]})
+    finally:
+        notify.notify = notify_orig
+    assert titles == ["HireScope: 1 early bird"] and "Strong/Stretch" in sent[0][2]
+
+
+def test_season_reminders_notified_once(conn, monkeypatch):
+    sent = []
+    monkeypatch.setattr(notify, "notify", lambda *a, **k: sent.append(a))
+    sea = [{"company": "DemoCo", "track": "coop_intern", "predicted": "2026-11", "remind": True, "status": "expected in 9 days"},
+           {"company": "OtherCo", "track": "new_grad", "predicted": "2027-02", "remind": False, "status": "expected around Feb 2027"}]
+    first = alerts.season_reminders(conn, sea)
+    assert [x["company"] for x in first] == ["DemoCo"]
+    assert alerts.season_reminders(conn, sea) == []                  # remembered: no second notification
+    assert alerts.send({"season_reminders": first}) == ["HireScope: 1 hiring season opening soon"]
+    assert "DemoCo (co-op/intern, in 9 days)" in sent[0][1]
+    assert "SEASON: DemoCo" in alerts.summary_text({"season_reminders": first})
+
+
+def test_exit_code_ignores_manual_companies():
+    from jobsearch.run import exit_code
+    assert exit_code({"failures": [], "manual": [{"company": "Apple"}], "partial": [{"company": "RTX"}]}) == 0
+    assert exit_code({"failures": [{"company": "X", "source": "greenhouse", "error": "404"}], "manual": []}) == 1

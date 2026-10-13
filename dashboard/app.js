@@ -241,8 +241,8 @@
   function renderHeader() {
     const s = META.summary || {};
     if (META.last_run) {
-      const failed = (s.sources_failed || 0) + (s.sources_manual || 0);
-      $("#run-dot").className = "dot " + (failed ? "red" : s.sources_partial ? "amber" : "green");
+      // red only for real failures; manual checks and partial listings are amber
+      $("#run-dot").className = "dot " + (s.sources_failed ? "red" : s.sources_partial || s.sources_manual ? "amber" : "green");
       $("#run-text").textContent = `Last run ${fmtTime(META.last_run)} · ${s.sources_ok ?? 0} of ${s.sources_checked ?? 0} checked`;
       $("#run-dot").parentElement.title = `${s.sources_ok} of ${s.sources_checked} companies/sources checked successfully this run; ` +
         `${s.sources_failed || 0} failed, ${s.sources_manual || 0} manual, ${s.sources_partial || 0} partial, ${s.sources_skipped || 0} not due. ` +
@@ -289,11 +289,15 @@
     const box = $("#banners"); box.textContent = "";
     const s = META.summary || {};
     const fails = s.failures || [], manual = s.manual || [], partial = s.partial || [];
-    if (fails.length || manual.length) {
+    const manualList = (title) => el("details", null, el("summary", { text: title }),
+      el("ul", null, manual.map((m) => el("li", null, `${m.company}: `, m.error ? el("span", { text: `${m.error} ` }) : "", safeUrl(m.url) ? el("a", { href: m.url, target: "_blank", rel: "noopener noreferrer", text: "check manually" }) : ""))));
+    if (fails.length) {
       const d = el("details", null, el("summary", { text: `Last run had problems: ${fails.length} failed, ${manual.length} need a manual check, ${partial.length} partial listings` }),
-        el("ul", null, fails.map((f) => el("li", { text: `${f.company} (${f.source}) failed — ${f.error}` })),
-          manual.map((m) => el("li", null, `${m.company}: manual check needed `, safeUrl(m.url) ? el("a", { href: m.url, target: "_blank", rel: "noopener noreferrer", text: m.url }) : ""))));
+        el("ul", null, fails.map((f) => el("li", { text: `${f.company} (${f.source}) failed — ${f.error}` }))));
       box.append(el("div", { class: "banner err" }, d));
+      if (manual.length) box.append(el("div", { class: "banner info" }, manualList(`${manual.length} companies to check by hand (job systems HireScope can't read) — see Coverage`)));
+    } else if (manual.length) {
+      box.append(el("div", { class: "banner info" }, manualList(`No failures. ${manual.length} companies to check by hand (job systems HireScope can't read)${partial.length ? `; ${partial.length} partial listings` : ""} — see Coverage`)));
     } else if (partial.length) {
       box.append(el("div", { class: "banner warn" }, `${partial.length} sources returned partial listings (page caps); closures for those are verified per job. See Coverage.`));
     }

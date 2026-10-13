@@ -61,6 +61,12 @@ def setup_logging(verbose: bool) -> Path:
     return log_file
 
 
+def exit_code(summary: dict) -> int:
+    """1 only for real source failures. "Manual check needed" companies (unsupported job systems, marked on purpose)
+    and partial listings are reported in the summary and on the dashboard, not treated as errors."""
+    return 1 if summary.get("failures") else 0
+
+
 def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_file: Path,
             partial_run: bool = False, last_run: str | None = None, learned=None, imported: dict | None = None,
             seasons: list[dict] | None = None) -> dict:
@@ -282,6 +288,8 @@ def _main(args, log_file: Path) -> int:
         today = datetime.now(tz).date()
         seasons = track_seasons(conn, today, rules=cfg.title_rules,
                                 remind_days=cfg.prefs.notifications.season_remind_days)
+        if not args.rescore:
+            s["season_reminders"] = alerts.season_reminders(conn, seasons)
         publish(conn, cfg, resume, s, coverage_rows(conn, summary, watch), watch, log_file,
                 partial_run=bool(args.source or args.company or args.watchlist or args.quick),
                 last_run=last_fetch if args.rescore else None, learned=learned, imported=imported, seasons=seasons)
@@ -321,7 +329,7 @@ def _main(args, log_file: Path) -> int:
         log.warning("MANUAL CHECK NEEDED: %s %s (%s)", m["company"], m["url"] or "", m["error"])
     for p in s["partial"]:
         log.warning("PARTIAL: %s (%s): %s", p["company"], p["source"], p["why"])
-    return 0 if s["complete"] else 1
+    return exit_code(s)
 
 
 if __name__ == "__main__":
