@@ -35,13 +35,67 @@ aliases:
   "Immersive (formerly Immersive Labs)": Immersive
   "Numerated (check Moody's recruiting)": Numerated
   "Velsera (Seven Bridges)": Velsera
-  "Juniper Networks, Inc.": Juniper Networks
+  "Juniper Networks, Inc.": Hewlett Packard Enterprise  # acquired by HPE (2025); juniper.net careers -> careers.hpe.com
+  "CyberArk": Palo Alto Networks                       # acquired by Palo Alto Networks; cyberark.com/careers redirects there
+  "Kensho": S&P Global                                 # S&P Global subsidiary (2018); posts on S&P Global's Workday board
 
-# Names that can't be mapped to a current employer with a job board: always "Manual check needed".
+# Always "Manual check needed" (never probed): names that can't be mapped to a current employer, and employers
+# whose jobs live somewhere HireScope can't read. Keys are CSV names or brands; the careers_url in
+# inputs/my_companies.csv is the page to check by hand. Platforms checked live 2026-10-12.
 manual:
-  "Endure Digital Intermediate Holdings, Inc.": "Could not identify the current employer (possibly Newfold Digital, formerly Endurance International Group — unverified)."
-  "GetGo Investment LLC": "Could not identify the current employer (possibly related to GoTo, formerly LogMeIn — unverified)."
+  "Endure Digital Intermediate Holdings, Inc.": "Current employer not confirmed: probably Newfold Digital (Endurance International + Web.com, announced as 'Endure Digital'); the careers_url is Newfold's Workday board — confirm before relying on it."
+  "GetGo Investment LLC": "Current employer not confirmed: probably GoTo (GetGo was the Citrix unit merged into LogMeIn, now GoTo); the careers_url is GoTo's Workday board — confirm before relying on it."
   "Excel Switching Corporation": "Historical company (acquired in 1999); no current careers site found."
+  # Own careers sites that robots.txt or the site's terms don't let us read (docs/experimental_big_tech.md)
+  Google: "Google Careers: robots.txt disallows the job results and job pages."
+  Meta: "Meta Careers: automated collection prohibited without written permission."
+  Apple: "Apple Jobs: the site's terms forbid automated access."
+  IBM: "IBM Careers: own site behind a bot challenge; no public job API."
+  # Own careers sites with no public job API
+  MathWorks: "MathWorks careers: own site (blocks automated requests); no public job API."
+  Pegasystems: "Pega careers: own site on pega.com; no public job API."
+  HubSpot: "HubSpot careers: own site; its Greenhouse board (hubspotjobs) is not public."
+  IntelyCare: "IntelyCare careers page lists corporate roles; applications by email."
+  # ATS platforms without a supported adapter
+  Oracle: "Oracle Recruiting Cloud (not supported)."
+  Akamai: "Oracle Recruiting Cloud (not supported)."
+  N-able: "iCIMS (not supported)."
+  Seismic: "iCIMS (not supported)."
+  HealthEdge: "iCIMS (not supported)."
+  Schneider Electric: "iCIMS behind a Jibe careers site (not supported)."
+  Publicis Sapient: "iCIMS, listed on the Publicis Groupe careers site (not supported)."
+  Dynatrace: "SAP SuccessFactors (not supported)."
+  Cimpress: "SAP SuccessFactors (jobs.vista.com; not supported)."
+  Ascend Learning: "SAP SuccessFactors (not supported)."
+  NTT DATA: "SAP SuccessFactors (not supported)."
+  Siemens Digital Industries Software: "Siemens' Avature job portal (not supported)."
+  Dassault Systèmes: "3ds.com job list with Taleo applications (not supported)."
+  CGI: "Njoyn (not supported)."
+  eClinicalWorks: "UKG / UltiPro (not supported)."
+  MEDITECH: "Paylocity (not supported)."
+  LineVision: "Paylocity (not supported)."
+  Vecna Robotics: "Paycor (not supported)."
+  Outseer: "BambooHR (not supported)."
+  HYCU: "BambooHR (not supported)."
+  Realtime Robotics: "Workable (not supported)."
+  Velsera: "Workable (not supported)."
+  Redpoint Global: "Workable (not supported)."
+  Acoustic: "Workable (not supported; 0 jobs on 2026-10-12)."
+  TileDB: "Workable (not supported; 0 jobs on 2026-10-12; renamed Tile.ai)."
+  Thrive (managed IT services): "Workable (not supported). The Greenhouse board 'thrive' is a different company."
+  Sea Machines Robotics: "JazzHR (not supported)."
+  Flexcar: "JazzHR on careers.flexcar.com (not supported)."
+  Validity: "JazzHR (not supported)."
+  Lusha: "Comeet (not supported)."
+  Earnix: "Comeet (not supported)."
+  22nd Century Technologies: "JobDiva (not supported)."
+  Robin: "Kula (not supported)."
+  Ekotrope: "Dover (not supported)."
+  Brightcove: "Acquired by Bending Spoons; hires on Bending Spoons' Pinpoint board (not supported)."
+  # No public job board found
+  OM1: "No public job board: its careers page still links a deleted Greenhouse board (om1 -> 404); Workable account has 0 jobs."
+  ChaosSearch: "No public job board: its careers page links a deleted Greenhouse board (chaossearch -> 404)."
+  Auriga: "No careers page found (auriga.com lists LinkedIn only)."
 
 # Legal suffixes stripped when no alias applies ("Toast, Inc." -> "Toast").
 legal_suffixes: [inc, incorporated, llc, l.l.c, ltd, limited, corp, corporation, co, company, plc, lp, llp, holdings]

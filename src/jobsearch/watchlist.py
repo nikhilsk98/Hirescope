@@ -93,12 +93,14 @@ def resolve(items: list[WatchItem], aliases_path: Path) -> list[WatchItem]:
         k = " ".join(it.company.casefold().split())
         reason = manual.get(k)
         brand = it.company if reason else brand_name(it.company, aliases, suffixes)
+        reason = reason or manual.get(" ".join(brand.casefold().split()))   # manual by brand ("Google")
         cur = merged.get(brand.casefold())
         if cur is None:
             merged[brand.casefold()] = WatchItem(brand, it.careers_url, it.notes, [it.company], reason)
         else:
             cur.names.append(it.company)
             cur.careers_url = cur.careers_url or it.careers_url
+            cur.manual_reason = cur.manual_reason or reason
             if it.notes and it.notes not in (cur.notes or ""):
                 cur.notes = f"{cur.notes}; {it.notes}" if cur.notes else it.notes
     return list(merged.values())

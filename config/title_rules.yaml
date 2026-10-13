@@ -141,6 +141,10 @@ search_queries:
             site reliability, infrastructure engineer]
   # SmartRecruiters `q` full-text search ("co-op" / "new grad" match far too broadly, so they are not searched)
   smartrecruiters: [software, developer, intern, engineer]
+  # Eightfold PCSX `query` (only for sites with more than ~300 US jobs; smaller sites are listed in full).
+  # Results come 10 per request and Microsoft rate-limits bursts, so the list stays short and specific;
+  # "new grad" is left out: it is matched loosely (1,163 Microsoft US hits on 2026-10-12, mostly senior roles).
+  eightfold: [software engineer, software developer, intern, data engineer, site reliability, full stack]
   # Amazon search.json: each item is one query (category[] or base_query)
   amazon:
     - {"category[]": software-development}

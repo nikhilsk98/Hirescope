@@ -513,3 +513,190 @@ def test_workday_canonical_key_ignores_repost_suffix():
     assert canonical_key("https://demo.wd1.myworkdayjobs.com/x/job/y/Engineer_JR2015623") == "workday:demo:engineer_jr2015623"
     assert canonical_key("https://demo.wd1.myworkdayjobs.com/x/job/y/Specialist-Software-Engineer_R-255470") == \
         "workday:demo:specialist-software-engineer_r-255470"
+
+
+# --- Rippling / Jobvite / Eightfold -------------------------------------------------------------
+RIP_UUID = "8c392f73-4918-4ccf-bbff-4fa6f0ee2506"
+RIP_LIST = [{"uuid": RIP_UUID, "name": "Software Engineer (DEMO)", "department": {"label": "Engineering"},
+             "url": f"https://ats.rippling.com/democo/jobs/{RIP_UUID}", "workLocation": {"label": "Boston, MA"}},
+            {"uuid": "00000000-0000-0000-0000-000000000002", "name": "Account Executive (DEMO)",
+             "url": "https://ats.rippling.com/democo/jobs/00000000-0000-0000-0000-000000000002",
+             "workLocation": {"label": "Remote (United States)"}}]
+RIP_DETAIL = {"uuid": RIP_UUID, "name": "Software Engineer (DEMO)", "createdOn": "2026-10-10T09:00:00-07:00",
+              "description": {"company": "<p>About DemoCo</p>", "role": "<p>DEMO role</p>" + REQ},
+              "workLocations": ["Boston, MA"], "employmentType": {"label": "SALARIED_FT", "id": "Salaried, full-time"},
+              "url": f"https://ats.rippling.com/democo/jobs/{RIP_UUID}", "companyName": "DemoCo Inc"}
+
+
+def test_rippling_adapter_prefilters_details(cfg):
+    from jobsearch.adapters.rippling import RipplingAdapter
+    from jobsearch.match.rules import quick_relevant
+    h = router({("GET", f"/board/democo/jobs/{RIP_UUID}"): RIP_DETAIL, ("GET", "/board/democo/jobs"): RIP_LIST})
+    ctx = FetchContext(want=lambda t, loc: quick_relevant(t, loc, cfg.prefs, cfg.title_rules))
+    res = RipplingAdapter(mock_client(h)).fetch(Company(name="DemoCo", source="rippling", board="democo"), ctx)
+    swe = next(j for j in res.jobs if j.job_id == RIP_UUID)
+    ae = next(j for j in res.jobs if j.job_id != RIP_UUID)
+    assert "- Python and SQL" in swe.description and "About DemoCo" in swe.description
+    assert swe.posted_date.day == 10 and swe.location == "Boston, MA" and swe.canonical_key == f"rippling:{RIP_UUID}"
+    assert swe.employment_type == "Salaried, full-time"
+    assert ae.description == "" and ae.location == "Remote (United States)"       # not relevant: no detail
+    assert sum(1 for m, u in h.calls if RIP_UUID in u) == 1
+
+
+def test_rippling_unknown_board_is_source_error():
+    from jobsearch.adapters.base import SourceError
+    from jobsearch.adapters.rippling import RipplingAdapter
+    with pytest.raises(SourceError):
+        RipplingAdapter(mock_client(router({}))).fetch(Company(name="X", source="rippling", board="nope"), FetchContext())
+
+
+JV_PAGE0 = """<table class="jv-job-list"><tbody>
+<tr><td class="jv-job-list-name"><a href="/democo/job/oAAAA1">Software Engineer (DEMO)</a></td>
+    <td class="jv-job-list-location">  Boston,
+        Massachusetts </td></tr>
+<tr><td class="jv-job-list-name"><a href="/democo/job/oBBBB2">Account Executive (DEMO)</a></td>
+    <td class="jv-job-list-location">Chicago, Illinois</td></tr>
+</tbody></table><div class="jv-pagination"><a href="/democo/search/?p=1" class="jv-pagination-next">Next</a></div>"""
+JV_PAGE1 = """<a href="/democo/job/oCCCC3"><div class="title">Software Engineering Intern (DEMO)</div>
+<div class="jv-job-list-location">United States</div><div class="arrow"><i></i></div></a>"""
+JV_DETAIL = """<html><script type="application/ld+json">{"@context": "http://schema.org", "@type": "JobPosting",
+"title": "Software Engineer (DEMO)", "datePosted": "2026-09-24", "employmentType": "Full-time",
+"identifier": "oAAAA1", "hiringOrganization": "DemoCo", "description": "<p>DEMO</p>%s",
+"jobLocation": [{"@type": "Place", "address": {"addressLocality": "Boston", "addressRegion": "MA",
+"addressCountry": "United States"}}]}</script></html>""" % REQ.replace('"', '\\"')
+
+
+def test_jobvite_listing_parser_handles_table_and_card_themes():
+    from jobsearch.adapters.jobvite import parse_listing
+    assert parse_listing(JV_PAGE0, "democo") == {"oAAAA1": ("Software Engineer (DEMO)", "Boston, Massachusetts"),
+                                                 "oBBBB2": ("Account Executive (DEMO)", "Chicago, Illinois")}
+    assert parse_listing(JV_PAGE1, "democo") == {"oCCCC3": ("Software Engineering Intern (DEMO)", "United States")}
+
+
+def test_jobvite_adapter_paginates_and_reads_jsonld_details(cfg):
+    from jobsearch.adapters.jobvite import JobviteAdapter
+    from jobsearch.match.rules import quick_relevant
+    h = router({("GET", "robots.txt"): 404, ("GET", "/democo/search?nl=1&p=0"): JV_PAGE0,
+                ("GET", "/democo/search?nl=1&p=1"): JV_PAGE1, ("GET", "/democo/job/oAAAA1"): JV_DETAIL,
+                ("GET", "/democo/job/oCCCC3"): "<html>no structured data</html>"})
+    ctx = FetchContext(want=lambda t, loc: quick_relevant(t, loc, cfg.prefs, cfg.title_rules))
+    res = JobviteAdapter(mock_client(h)).fetch(Company(name="DemoCo", source="jobvite", board="democo"), ctx)
+    by_id = {j.job_id: j for j in res.jobs}
+    assert set(by_id) == {"oAAAA1", "oBBBB2", "oCCCC3"} and res.partial is None
+    swe = by_id["oAAAA1"]
+    assert "- Python and SQL" in swe.description and swe.posted_date.day == 24
+    assert swe.location == "Boston, MA, United States" and swe.apply_url == "https://jobs.jobvite.com/democo/job/oAAAA1"
+    assert swe.canonical_key == "jobvite:democo:oAAAA1"
+    assert by_id["oBBBB2"].description == ""                          # not relevant: no detail fetch
+    assert by_id["oCCCC3"].description == "" and by_id["oCCCC3"].location == "United States"
+    assert not any("p=2" in u for _, u in h.calls)                     # no "next" link on page 1
+
+
+def test_jobvite_respects_robots():
+    from jobsearch.adapters.base import SourceError
+    from jobsearch.adapters.jobvite import JobviteAdapter
+    h = router({("GET", "robots.txt"): "User-agent: *\nDisallow: /\n"})
+    with pytest.raises(SourceError, match="robots.txt"):
+        JobviteAdapter(mock_client(h)).fetch(Company(name="DemoCo", source="jobvite", board="democo"), FetchContext())
+    assert not any("/democo/" in u for _, u in h.calls)
+
+
+def _ef_pos(i, name, loc="United States, Massachusetts, Cambridge"):
+    return {"id": 1000 + i, "displayJobId": f"R{i}", "name": name, "locations": [loc], "postedTs": 1791676800,
+            "positionUrl": f"/careers/job/{1000 + i}", "department": "Engineering"}
+
+
+def test_eightfold_small_site_lists_everything_with_details(cfg):
+    from jobsearch.adapters.eightfold import EightfoldAdapter
+    from jobsearch.match.rules import quick_relevant
+    pages = {0: [_ef_pos(i, "Software Engineer (DEMO)" if i == 0 else f"Sales Lead {i} (DEMO)") for i in range(10)],
+             10: [_ef_pos(10, "Data Engineer (DEMO)")]}
+
+    def search(request):
+        start = int(request.url.params["start"])
+        assert request.url.params["location"] == "United States" and request.url.params["query"] == ""
+        return httpx.Response(200, json={"status": 200, "data": {"count": 11, "positions": pages.get(start, [])}})
+    detail = {"status": 200, "data": {"id": "1000", "jobDescription": "<p>DEMO</p>" + REQ,
+                                      "publicUrl": "https://democo.eightfold.ai/careers/job/1000",
+                                      "efcustomTextEmploymentType": ["Full-Time"]}}
+    h = router({("GET", "/api/pcsx/search"): search, ("GET", "position_id=1000&"): detail,
+                ("GET", "/api/pcsx/position_details"): {"status": 200, "data": {"id": "x", "jobDescription": ""}}})
+    ctx = FetchContext(want=lambda t, loc: quick_relevant(t, loc, cfg.prefs, cfg.title_rules))
+    res = EightfoldAdapter(mock_client(h)).fetch(
+        Company(name="DemoCo", source="eightfold", host="democo.eightfold.ai", board="democo.com"), ctx)
+    assert len(res.jobs) == 11 and res.partial is None
+    swe = next(j for j in res.jobs if j.job_id == "1000")
+    assert "- Python and SQL" in swe.description and swe.employment_type == "Full-Time"
+    assert swe.apply_url == "https://democo.eightfold.ai/careers/job/1000" and swe.posted_date.year == 2026
+    assert swe.canonical_key == "eightfold:democo.com:1000"
+    assert next(j for j in res.jobs if j.job_id == "1001").description == ""     # not relevant: no detail
+    assert sum(1 for _, u in h.calls if "/api/pcsx/search" in u) == 2           # first page reused
+
+
+def test_eightfold_big_site_searches_role_keywords_and_reports_caps():
+    from jobsearch.adapters.eightfold import EightfoldAdapter
+    queries = []
+
+    def search(request):
+        q = request.url.params["query"]
+        queries.append(q)
+        count = 5000 if q == "" else 30
+        return httpx.Response(200, json={"data": {"count": count, "positions": [
+            _ef_pos(hash(q) % 1000 + int(request.url.params["start"]), f"{q or 'x'} role")]}})
+    h = router({("GET", "/api/pcsx/search"): search})
+    ctx = FetchContext(full=False, max_pages=2, queries={"eightfold": ["software engineer"]})
+    res = EightfoldAdapter(mock_client(h)).fetch(
+        Company(name="BigCo", source="eightfold", host="careers.bigco.example", board="bigco.com"), ctx)
+    assert set(queries) == {"", "software engineer"} and len(res.jobs) == 2
+    assert "capped at 20 of 30" in res.partial
+
+
+def test_eightfold_pcsx_not_enabled_is_source_error():
+    from jobsearch.adapters.base import SourceError
+    from jobsearch.adapters.eightfold import EightfoldAdapter
+    h = router({("GET", "/api/pcsx/search"): lambda r: httpx.Response(403, json={"message": "Not authorized for PCSX"})})
+    with pytest.raises(SourceError):
+        EightfoldAdapter(mock_client(h)).fetch(
+            Company(name="OldCo", source="eightfold", host="oldco.eightfold.ai", board="oldco.com"), FetchContext())
+
+
+@pytest.mark.parametrize("url,fields", [
+    ("https://ats.rippling.com/tive-careers/jobs", {"source": "rippling", "board": "tive-careers"}),
+    (f"https://ats.rippling.com/en-GB/democo/jobs/{RIP_UUID}", {"source": "rippling", "board": "democo"}),
+    ("https://jobs.jobvite.com/careers/imprivata/jobs", {"source": "jobvite", "board": "imprivata"}),
+    ("https://jobs.jobvite.com/democo/job/oAAAA1", {"source": "jobvite", "board": "democo"}),
+    ("https://apply.careers.microsoft.com/careers?domain=microsoft.com",
+     {"source": "eightfold", "host": "apply.careers.microsoft.com", "board": "microsoft.com"}),
+    ("https://democo.eightfold.ai/careers?domain=democo.com",
+     {"source": "eightfold", "host": "democo.eightfold.ai", "board": "democo.com"}),
+    ("https://explore.jobs.netflix.net/careers?domain=netflix.com", {"source": "netflix"}),
+])
+def test_new_ats_detection_from_url(url, fields):
+    assert from_url(url) == fields
+
+
+def test_careers_page_embeds_new_ats():
+    page = '<iframe src="https://jobs.jobvite.com/__assets__/x.js"></iframe><a href="https://ats.rippling.com/democo/jobs">Jobs</a>'
+    h = router({("GET", "robots.txt"): 404, ("GET", "democo.example"): page})
+    r = Detector(mock_client(h), [], {}).detect("DemoCo", "https://democo.example/careers")
+    assert r.via == "careers page" and r.company.source == "rippling" and r.company.board == "democo"
+
+
+def test_changed_careers_url_redetects_cached_company():
+    d = Detector(mock_client(router({})), [], {})
+    cached = {"source": "jsonld", "careers_url": "https://old.example/careers", "fail_count": 0, "detected_via": "json-ld"}
+    assert d.detect("DemoCo", "https://old.example/careers", cached).via == "cache"
+    r = d.detect("DemoCo", "https://jobs.jobvite.com/democo/jobs", cached)
+    assert r.via == "careers_url" and r.company.source == "jobvite"
+    # unchanged URL, but it is a board: it beats an old cached guess (Imprivata was cached as jsonld)
+    stale = {**cached, "careers_url": "https://jobs.jobvite.com/careers/democo/jobs"}
+    assert d.detect("DemoCo", "https://jobs.jobvite.com/careers/democo/jobs", stale).company.source == "jobvite"
+
+
+def test_manual_by_brand_survives_alias_merge(tmp_path):
+    from jobsearch.watchlist import resolve
+    aliases = tmp_path / "aliases.yaml"
+    aliases.write_text("aliases:\n  \"ITA Software LLC\": Google\nmanual:\n  Google: \"custom site\"\n")
+    items = parse_watchlist("company,careers_url,notes\nITA Software LLC,,a\nGoogle,https://careers.google.example,b\n")
+    (g,) = resolve(items, aliases)
+    assert g.company == "Google" and g.manual_reason == "custom site" and g.careers_url == "https://careers.google.example"

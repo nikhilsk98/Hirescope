@@ -88,6 +88,9 @@ filtered and unknown locations are left uncertain.
 | Greenhouse, Lever, Ashby | official public job-board APIs | full JD in one call; ETag/304 skips unchanged boards |
 | Workday | the `cxs` JSON every `*.myworkdayjobs.com` page uses | US location facet + role keyword searches; JD fetched only for relevant jobs, cached 7 days |
 | SmartRecruiters | public Posting API (`country=us`) | JD fetched only for relevant jobs |
+| Rippling | public board API behind `ats.rippling.com/<slug>/jobs` | whole board in one call; JD fetched only for relevant jobs |
+| Jobvite | the employer's hosted `jobs.jobvite.com/<slug>` pages (its JSON API needs an employer key) | listing pages + `JobPosting` JSON-LD on job pages; robots.txt respected |
+| Eightfold | the PCSX JSON behind `<host>/careers?domain=<domain>` (e.g. Microsoft) | ≤300 US jobs: listed in full; bigger sites: role keyword searches, capped at 200 results each |
 | Amazon | `amazon.jobs/en/search.json` (best effort) | software-development category + intern/co-op/new-grad searches |
 | Netflix | careers sitemap + schema.org `JobPosting` JSON-LD | its JSON search API is not public; pages cached by `lastmod` |
 | SimplifyJobs | `listings.json` from `SimplifyJobs/Summer2027-Internships` (incl. off-season) and `SimplifyJobs/New-Grad-Positions` | aggregator; JD pulled from the linked employer ATS for new relevant listings (capped per run). Repo names change yearly — update the URLs in `config/companies.yaml` |
@@ -132,9 +135,11 @@ Stripe,,
 NVIDIA,https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite,
 ```
 Every row is checked **every run** with full pagination. The job system is auto-detected in this order:
-cached detection → `careers_url` is an ATS URL → seed list → SimplifyJobs-derived directory → ATS links on the
+`careers_url` is an ATS URL → cached detection (re-run when `careers_url` changes) → seed list → SimplifyJobs-derived directory → ATS links on the
 careers page → company-name probes (Greenhouse, Lever, Ashby, SmartRecruiters) → JSON-LD on the careers page →
 **Manual check needed** (shown with a direct link, never dropped). A cached detection that fails is re-detected.
+Companies on job systems HireScope can't read (iCIMS, SuccessFactors, Workable, own sites whose terms forbid it…)
+are listed under `manual:` in `config/company_aliases.yaml` with the reason; their `careers_url` is the page to check.
 Test one company: `python -m jobsearch.run --company "Stripe" --verbose`.
 
 ### Add job by URL
@@ -385,6 +390,9 @@ that don't list it; a failed fetch never closes anything. A closed job that reap
 | `GET api.ashbyhq.com/posting-api/job-board/<board>` (conditional) | per Ashby company | none |
 | `POST <tenant>.wdN.myworkdayjobs.com/wday/cxs/<tenant>/<site>/jobs` + `GET …/job/<path>` | per Workday company (detail only for relevant new jobs) | search keywords ("software", "intern"…) and the site's US facet id |
 | `GET api.smartrecruiters.com/v1/companies/<id>/postings[/<id>]` | per SmartRecruiters company | none |
+| `GET api.rippling.com/platform/api/ats/v1/board/<slug>/jobs[/<uuid>]` | per Rippling company | none |
+| `GET jobs.jobvite.com/<slug>/search?nl=1&p=N`, `…/job/<id>?nl=1` and `/robots.txt` | per Jobvite company | none |
+| `GET <host>/api/pcsx/search?domain=…&query=…&location=United States`, `…/position_details` | per Eightfold company | search keywords |
 | `GET www.amazon.jobs/en/search.json?...` | Amazon | search keywords |
 | `GET explore.jobs.netflix.net/careers/sitemap…` + job pages | Netflix (pages only when new/changed) | none |
 | `GET raw.githubusercontent.com/SimplifyJobs/…/listings.json` (conditional) | SimplifyJobs feeds | none |
@@ -435,7 +443,7 @@ tracker on the same DEMO applications.
 | Statuses or applications not in SQLite | click **Export statuses** (it lands in `~/Downloads`); the next run imports the newest `jobsearch-statuses*.json` — see Run Log → "Statuses import". Or `python -m jobsearch.run --statuses FILE` |
 | Lost browser data | nothing exported is lost: each run writes `dashboard/sync.js`, which the page merges on load. Older state: `python -m jobsearch.ops.backup list` / `restore DAY` |
 | A company shows as failed | Coverage tab + `data/logs/jobsearch.log`; for Greenhouse check `https://boards-api.greenhouse.io/v1/boards/<board>/jobs`; for My Companies add a `careers_url` |
-| "Manual check needed" | the company's careers page has no ATS or JobPosting data: open the link, use Add job by URL with `--jd-file` |
+| "Manual check needed" | no readable job system was found, or the company is listed under `manual:` in `config/company_aliases.yaml` (the reason says which platform): open the link, use Add job by URL with `--jd-file`. If the company moves to a supported board, put that URL in `careers_url` and remove the `manual:` entry |
 | Source-health banner | a source returned 0 or far fewer jobs than usual: usually a changed board token or careers page; fix it in `config/companies.yaml` / `my_companies.csv` |
 | SimplifyJobs feed fails each autumn | the repos are renamed yearly (e.g. `Summer2028-Internships`): update the URL in `config/companies.yaml` |
 | LinkedIn alerts: "not set up" | add `IMAP_USER` and `IMAP_APP_PASSWORD` to `.env` (Gmail app password). "IMAP … authentication failed": regenerate the app password. 0 jobs parsed: alerts may be in another folder (`IMAP_FOLDER`) |

@@ -1,8 +1,9 @@
 """ATS auto-detection for My Companies.
 
 Fallback order (first hit wins; each step records how it decided):
-  1. cached detection in SQLite (unless it failed twice in a row)       -> "cache"
-  2. careers_url is itself an ATS / known careers URL                    -> "careers_url"
+  1. careers_url is itself an ATS / known careers URL                    -> "careers_url"
+  2. cached detection in SQLite (unless it failed twice in a row or     -> "cache"
+     careers_url changed)
   3. company is in the verified seed list (config/companies.yaml)        -> "seed list"
   4. company appears in the SimplifyJobs-derived ATS directory           -> "simplify directory"
   5. careers_url page links to / embeds an ATS board                     -> "careers page"
@@ -17,7 +18,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from rapidfuzz import fuzz
 
@@ -69,10 +70,21 @@ def from_url(url: str | None) -> dict | None:
         if host.startswith("api.") and (m := re.search(r"/companies/([^/]+)", path)):
             return {"source": "smartrecruiters", "board": m.group(1)}
         return {"source": "smartrecruiters", "board": first}
+    if host == "ats.rippling.com":
+        from .rippling import parse_url as rippling_url
+        slug, _ = rippling_url(u.geturl())
+        return {"source": "rippling", "board": slug} if slug else None
+    if host == "jobs.jobvite.com" and first:
+        segs = [p for p in path.split("/") if p]
+        slug = segs[1] if first == "careers" and len(segs) > 1 else first
+        return {"source": "jobvite", "board": slug} if not slug.startswith("__") else None
     if host.endswith("amazon.jobs"):
         return {"source": "amazon"}
     if host.endswith("jobs.netflix.net") or host == "jobs.netflix.com":
         return {"source": "netflix"}
+    domain = (parse_qs(u.query).get("domain") or [None])[0]
+    if domain and (host.endswith(".eightfold.ai") or path.startswith("/careers")):   # Eightfold PCSX site
+        return {"source": "eightfold", "host": host, "board": domain}
     return None
 
 
@@ -83,6 +95,9 @@ _EMBED = [
     re.compile(r"jobs\.ashbyhq\.com/([A-Za-z0-9_.%-]+)"),
     re.compile(r"[a-z0-9-]+\.wd\d+\.myworkdayjobs\.com/[A-Za-z0-9_/-]+"),
     re.compile(r"(?:jobs|careers)\.smartrecruiters\.com/[A-Za-z0-9_-]+"),
+    re.compile(r"ats\.rippling\.com/(?:[a-z]{2}-[A-Z]{2}/)?[A-Za-z0-9_-]+/jobs"),
+    re.compile(r"jobs\.jobvite\.com/(?:careers/)?(?!__)[A-Za-z0-9_-]+"),
+    re.compile(r"[a-z0-9-]+\.eightfold\.ai/careers\?domain=[A-Za-z0-9.-]+"),
 ]
 
 
@@ -145,10 +160,13 @@ class Detector:
                manual_reason: str | None = None) -> Detection:
         if manual_reason:
             return Detection(None, "manual", manual_reason)
-        if cached and cached.get("fail_count", 0) < 2:
-            return Detection(self._make(name, cached, careers_url), "cache", cached.get("detected_via", ""))
+        # a careers_url that is itself a board is authoritative (and free), so it beats a cached guess
         if fields := from_url(careers_url):
             return Detection(self._make(name, fields, careers_url), "careers_url")
+        # a cached detection is reused until it fails twice, or until the careers_url you gave changes
+        if cached and cached.get("fail_count", 0) < 2 and (not careers_url or not cached.get("careers_url")
+                                                           or cached["careers_url"] == careers_url):
+            return Detection(self._make(name, cached, careers_url), "cache", cached.get("detected_via", ""))
         if seed := self._lookup(self.seed, name):
             return Detection(seed.model_copy(update={"origin": "my_companies", "tier": 1,
                                                      "careers_url": careers_url or seed.careers_url}), "seed list")
