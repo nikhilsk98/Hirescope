@@ -68,6 +68,8 @@ company_tiers:
   excluded: []
   check_every_hours: {1: 0, 2: 20, 3: 70}   # how often each tier is checked (0 = every run)
   max_pages: {1: 100, 2: 25, 3: 10}         # listing pages per company per run, by tier
+  feed_tier: 2                              # companies known only from the SimplifyJobs internship / new-grad
+                                            # lists score as this tier (else they'd be tier 3)
 
 # --- Freshness ---------------------------------------------------------
 max_posting_age_days: 60
@@ -126,7 +128,7 @@ aggregator:
   queries: ["software engineer new grad 2027", "software engineer intern spring 2027", "software engineering co-op 2027", "entry level software engineer"]
   date_posted: week
 # --- Notifications / digest / seasons -----------------------------------------------------------------
-notifications: {enabled: true, early_bird_hours: 48, digest_weekday: Sunday, season_remind_days: 21}
+notifications: {enabled: true, early_bird_hours: 48, digest_weekday: Sunday, season_remind_days: 21}   # early_bird_hours is also the "Fresh" badge window
 
 # ======================================================================================================
 # Fine-tuning. Every value below is the built-in default; change any of them here (nothing is hardcoded).
@@ -151,6 +153,9 @@ scoring:
   yoe_fit: {match: 100, near: 90, stretch: 60, over: 20}   # required years <= years_experience / <= match_max /
                                  # <= stretch_max / above
   domain_fit: {match: 100}       # the domain component when one of your domains is mentioned
+  preferred_skill_weight: 0.5    # a preferred-only skill counts half of a required one
+  semantic_scale: [0.15, 0.60]   # resume-vs-JD cosine similarity mapped to 0..100 (at or below the first = 0)
+  similar_min: 0.3               # "More like this": nearest open roles at least this similar
   grad_fit: {match: 100, mismatch: 25}           # JD's graduation year(s) include yours / don't
   degree_above_yours: 40         # JD asks for a higher degree than your resume shows
   location_fit: {preferred: 100, remote_us: 90, other_us: 75, no_preferences: 100}   # no_preferences: when

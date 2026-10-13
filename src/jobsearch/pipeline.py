@@ -38,7 +38,7 @@ from .watchlist import WatchItem
 log = logging.getLogger(__name__)
 
 # Bump when extraction logic changes; stored jobs are then re-extracted from their saved title/location/JD.
-EXTRACT_VERSION = "2026-10-13.16"  # .16: seasons in graduation phrases are not work terms; .15: "staff" inside "member of technical staff" is not a level; .14: "2027 Summer Intern" term order; .13: "Toronto, CA" = Canada
+EXTRACT_VERSION = "2026-10-13.18"  # .18: seasons in school-enrollment phrases are not work terms; .17: clearance from titles and "Clearance: Secret" headers; "graduating by X or Y" uses the later date; "Spring/Summer 2027" season lists; "Spring Boot" / "6-month period" are not terms; .16: seasons in graduation phrases are not work terms; .15: "staff" inside "member of technical staff" is not a level; .14: "2027 Summer Intern" term order; .13: "Toronto, CA" = Canada
 EXTRACT_CONFIGS = ("title_rules.yaml", "levels.yaml", "locations.yaml", "skills_synonyms.yaml", "ats_keywords.yaml")
 DIRECTORY_KEY = "ats_directory:simplify"
 WORKERS = 16
@@ -151,7 +151,7 @@ def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None, official: bool = Tr
         yoe_required=yoe.min, yoe_max=yoe.max, yoe_evidence=yoe.evidence,
         degree=parse_degree("\n".join(reqs.minimum) or text),
         grad_years=parse_grad_years(f"{raw.title}\n{text}"),
-        flags=extract_flags(text),
+        flags=extract_flags(text, raw.title),
         extra={**raw.extra, **({"yoe_preferred": y.min, "yoe_preferred_evidence": y.evidence} if y.min is not None
                                else {}), **({"has_jd": False} if not text else {}),
                **({"employment_type_raw": raw.employment_type} if raw.employment_type else {})},
@@ -284,7 +284,7 @@ def plan(conn, cfg: Config, watch: list[WatchItem], *, only_company: str | None 
             continue
         label = adapter(None).source_label(c) if adapter else c.source  # type: ignore[arg-type]
         t = tier_of(c, cfg)
-        if quick and t != 1:
+        if quick and (t != 1 or c.source == "aggregator"):   # aggregator: free-tier quotas, full runs only
             continue
         if force_all or only_source or quick or due(conn, c, label, t, now, cfg.prefs.company_tiers.check_every_hours):
             planned.append(Planned(c, None, f"tier {t}"))
@@ -485,10 +485,14 @@ def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
     scope = None if f.multi else name
     if res.unchanged:
         out.unchanged = True
-        out.jobs = db.touch_all(conn, label, scope, now)
+        present = db.touch_all(conn, label, scope, now)
+        cls = ADAPTERS.get(company.source)
+        if cls is None or not cls.capabilities.query_based:   # a full listing: what was missing is still missing
+            out.closed = db.mark_missing(conn, label, scope, present, now)
+        out.jobs = len(present)
         out.ok, out.status = True, "ok"
         db.set_source_status(conn, name, label, "ok", None, out.jobs, now, partial=None, **extra)
-        log.info("source ok: %s/%s: unchanged (304), %d listings", label, name, out.jobs)
+        log.info("source ok: %s/%s: unchanged (304), %d listings, %d closed", label, name, out.jobs, out.closed)
         return out
 
     seen: set[str] = set(res.seen_ids or ())
@@ -595,7 +599,8 @@ def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: E
             t["filtered"] += 1
             continue
         jd = _jd(job)
-        sem = semantic_match(embedder, resume_lines, jd_chunks(jd, job.get("min_reqs") or [], job.get("pref_reqs") or []))
+        sem = semantic_match(embedder, resume_lines, jd_chunks(jd, job.get("min_reqs") or [], job.get("pref_reqs") or []),
+                             prefs.scoring.semantic_scale)
         discovered_ok = job["first_seen"] > _shift(first_scan[(job["company_key"], job["source"])], hours=1)
         res = score_job(job, resume, score_prefs, rules, sem, cfg.synonyms, by_name.get(job["company_key"]), now,
                         discovered_ok=discovered_ok, jd_text=jd,
@@ -628,12 +633,12 @@ def _shift(iso: str, hours: float) -> str:
     return (datetime.fromisoformat(iso) + timedelta(hours=hours)).isoformat(timespec="seconds")
 
 
-def compute_similar(conn, embedder: Embedder, jobs: list[dict], k: int = 5) -> int:
+def compute_similar(conn, embedder: Embedder, jobs: list[dict], k: int = 5, min_sim: float = 0.3) -> int:
     """'More like this' for the jobs shown on the dashboard (same track, local embeddings)."""
     from .match.prefilter import similar_jobs
     items = [(j["id"], j.get("track_override") or j.get("track") or "full_time",
               f"{j['title']}. {' '.join((j.get('min_reqs') or [])[:3])}") for j in jobs]
-    sims = similar_jobs(embedder, items, k)
+    sims = similar_jobs(embedder, items, k, min_sim)
     for pk, ids in sims.items():
         db.save_scores(conn, pk, similar=ids)
     conn.commit()

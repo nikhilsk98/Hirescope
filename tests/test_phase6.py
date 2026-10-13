@@ -8,6 +8,7 @@ import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from openpyxl import load_workbook
 
@@ -267,3 +268,65 @@ def test_exit_code_ignores_manual_companies():
     from jobsearch.run import exit_code
     assert exit_code({"failures": [], "manual": [{"company": "Apple"}], "partial": [{"company": "RTX"}]}) == 0
     assert exit_code({"failures": [{"company": "X", "source": "greenhouse", "error": "404"}], "manual": []}) == 1
+
+
+def test_quick_check_skips_the_aggregator(conn, cfg, monkeypatch):
+    from jobsearch.adapters.aggregator import AggregatorAdapter
+    from jobsearch.config import Aggregator
+    monkeypatch.setenv("JSEARCH_API_KEY", "demo-key")
+    monkeypatch.setattr(AggregatorAdapter, "enabled", True)
+    prefs = cfg.prefs.model_copy(update={"aggregator": Aggregator(enabled=True)})
+    cfg2 = cfg.model_copy(update={"prefs": prefs})
+    full = {p.company.source for p in plan(conn, cfg2, [], force_all=True)[0]}
+    quick = {p.company.source for p in plan(conn, cfg2, [], quick=True)[0]}
+    assert "aggregator" in full and "aggregator" not in quick           # free-tier quotas: full runs only
+
+
+# --- end to end: python -m jobsearch.run with mocked sources (DEMO) --------------------------------
+def test_main_end_to_end_with_mocked_sources(monkeypatch, tmp_path, cfg, greenhouse_payload):
+    """The whole run: plan -> fetch (mocked Greenhouse) -> extract -> score -> SQLite -> dashboard data.js/sync.js ->
+    run summary, all inside tmp_path (the real data/ and dashboard/ are never touched)."""
+    from jobsearch import paths
+    from jobsearch import run as R
+    from .conftest import FIXTURES, FakeEmbedder, mock_client
+    from .test_pipeline import gh_handler
+    for name, rel in (("DATA", ""), ("LOG_DIR", "logs"), ("JD_DIR", "jd"), ("APPS_DIR", "applications"),
+                      ("IMPORTS_DIR", "imports"), ("PACKAGES_DIR", "packages")):
+        monkeypatch.setattr(paths, name, tmp_path / rel if rel else tmp_path)
+    monkeypatch.setattr(paths, "DB", tmp_path / "jobs.db")
+    monkeypatch.setattr(paths, "ROOT", tmp_path)
+    monkeypatch.setattr(paths, "DASHBOARD", tmp_path / "dashboard")
+    monkeypatch.setattr(paths, "SYNC_JS", tmp_path / "dashboard" / "sync.js")
+    (tmp_path / "inputs").mkdir()
+    (tmp_path / "inputs" / "my_companies.csv").write_text("company,careers_url,notes\nWatchCo,https://jobs.lever.co/watchco,DEMO\n")
+    prefs = cfg.prefs.model_copy(update={"statuses_import_dir": str(tmp_path / "downloads"), "my_companies_csv": "inputs/my_companies.csv"})
+    monkeypatch.setattr(R, "load_config", lambda *a, **k: cfg.model_copy(update={"prefs": prefs}))
+    lever = [{"id": "22222222-2222-2222-2222-222222222222", "text": "Software Engineer, New Grad (DEMO)",
+              "categories": {"commitment": "Full-time", "location": "Boston, MA", "allLocations": ["Boston, MA"]},
+              "createdAt": 1791676800000, "description": "<p>DEMO</p>", "lists": [], "additional": "",
+              "hostedUrl": "https://jobs.lever.co/watchco/22222222-2222-2222-2222-222222222222"}]
+    gh = gh_handler({"democo": greenhouse_payload})
+
+    def handler(request):
+        return httpx.Response(200, json=lever) if "api.lever.co" in str(request.url) else gh(request)
+    monkeypatch.setattr(R, "HttpClient", lambda **k: mock_client(handler))
+    monkeypatch.setattr(R, "Embedder", FakeEmbedder)
+    monkeypatch.setattr(R.alerts, "online", lambda: True)
+    args = ["--no-email", "--no-notify", "--no-backup", "--no-link-check", "--no-import",
+            "--resume", str(FIXTURES / "demo_resume.md"), "--prefs", str(FIXTURES / "demo_preferences.yaml")]
+    assert R.main(args) == 0
+    data = (tmp_path / "dashboard" / "data.js").read_text()
+    assert "window.META" in data and "Software Engineer, New Grad 2027 (DEMO)" in data and "WatchCo" in data
+    assert (tmp_path / "dashboard" / "sync.js").exists()
+    summary = (tmp_path / "logs" / "last_run_summary.txt").read_text()
+    assert "2 of 2 sources OK" in summary and "0 failed" in summary
+    import sqlite3
+    c = sqlite3.connect(tmp_path / "jobs.db")
+    assert c.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 4
+    assert c.execute("SELECT source FROM company_sources WHERE company='WatchCo'").fetchone()[0] == "lever"
+    # a dry run afterwards writes nothing
+    before = c.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+    c.close()
+    assert R.main([*args, "--dry-run"]) == 0
+    c = sqlite3.connect(tmp_path / "jobs.db")
+    assert c.execute("SELECT COUNT(*) FROM runs").fetchone()[0] == before

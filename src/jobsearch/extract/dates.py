@@ -73,7 +73,8 @@ _GRAD_CTX = r"(?:graduat\w*|graduation|degree (?:completion|conferral)|complet\w
 _GRAD_BETWEEN = re.compile(
     rf"{_GRAD_CTX}[^.\n]{{0,60}}?between\s+{_when('a')}\s*(?:and|-|–|to)\s*{_when('b')}", re.I)
 _GRAD_RANGE = re.compile(rf"{_GRAD_CTX}[^.\n]{{0,40}}?(?:from\s+)?{_when('a')}\s*(?:-|–|to|through)\s*{_when('b')}", re.I)
-_GRAD_BY = re.compile(rf"{_GRAD_CTX}[^.\n]{{0,40}}?\b(?P<op>by|before|no later than|prior to)\s+{_when('a')}", re.I)
+_GRAD_BY = re.compile(rf"{_GRAD_CTX}[^.\n]{{0,40}}?\b(?P<op>by|before|no later than|prior to)\s+{_when('a')}"
+                      rf"(?:\s*,?\s*or\s+(?:by\s+)?{_when('b')})?", re.I)   # "by December 2026 or Summer 2027"
 _GRAD_AFTER = re.compile(rf"{_GRAD_CTX}[^.\n]{{0,40}}?\b(?P<op>after|or later|on or after|no earlier than|"
                          rf"starting)\s+{_when('a')}|{_GRAD_CTX}[^.\n]{{0,40}}?{_when('c')}\s+or later", re.I)
 _GRAD_IN = re.compile(rf"(?:{_GRAD_CTX}|new grad\w*)[^.\n]{{0,30}}?\b(?:in|of|date of|:)?\s*{_when('a')}\b", re.I)
@@ -101,7 +102,10 @@ def parse_grad_windows(text: str) -> list[Window]:
         add(m, _point(m.group("am"), m.group("as"), m.group("ay"), "start"),
             _point(m.group("bm"), m.group("bs"), m.group("by"), "end"))
     for m in _GRAD_BY.finditer(text):
-        add(m, "2000-01", _point(m.group("am"), m.group("as"), m.group("ay"), "end"))
+        end = _point(m.group("am"), m.group("as"), m.group("ay"), "end")
+        if m.group("by") or m.group("bs") or m.group("bm"):     # an "or" alternative: the later one counts
+            end = max(end, _point(m.group("bm"), m.group("bs"), m.group("by"), "end"))
+        add(m, "2000-01", end)
     for m in _GRAD_AFTER.finditer(text):
         if m.group("ay"):
             add(m, _point(m.group("am"), m.group("as"), m.group("ay"), "start"), "2099-12")
@@ -167,9 +171,17 @@ def summer_only(terms: list[str], title: str, text: str) -> bool:
     if not seasons or seasons != {"Summer"}:
         return False
     from .track import without_grad_phrases   # "graduating between Fall 2027 …" is not a fall work term
-    other = re.search(r"\b(off[- ]cycle|off[- ]season|spring|winter|fall|autumn|year[- ]round|6[- ]month|"
-                      r"4[- ]month|8[- ]month)\b", f"{title}\n{without_grad_phrases(text[:3000])}", re.I)
-    return other is None
+    return _OTHER_TERM.search(f"{title}\n{without_grad_phrases(text[:3000])}") is None
+
+
+# Signs an internship also runs outside summer. Seasons count only when used as a term ("Spring 2027", "spring
+# semester", "winter or summer 2027", "during the fall"), not "Spring Boot" or "a 6-month period".
+_OTHER_TERM = re.compile(
+    r"\b(off[- ]cycle|off[- ]season|year[- ]round)\b"
+    r"|\b(spring|winter|fall|autumn)\b(?!\s+(?:boot|framework|cloud|mvc|batch|security|data|webflux|integration|ai)\b)"
+    r"(?=\s*(?:/|,|&|\band\b|\bor\b)?\s*(?:summer\s*)?(?:'|’)?\s*(?:20\d\d|\d\d\b|term|semester|quarter|session|co-?op|intern))"
+    r"|\b(?:during|in|for|this|next)\s+(?:the\s+)?(?:spring|winter|fall|autumn)\b(?!\s+(?:boot|framework)\b)"
+    r"|\b[468][- ]month\b(?!\s+period)", re.I)
 
 
 _RESTRICT = re.compile(

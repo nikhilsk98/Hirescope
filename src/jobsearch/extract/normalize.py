@@ -53,15 +53,6 @@ def employment_type_from_title(norm_title: str, rules: TitleRules) -> str | None
     return None
 
 
-def clean_location(location: str | None) -> str | None:
-    """'SF, CA | NYC; SF, CA | Seattle' -> 'SF, CA · NYC · Seattle' (split on | ; •, dedupe, keep order)."""
-    if not location:
-        return None
-    parts = [p.strip() for p in re.split(r"[|;•]", location)]
-    out = list(dict.fromkeys(p for p in parts if p))
-    return " · ".join(out) or None
-
-
 def work_mode(location: str | None, description: str = "") -> str:
     """remote / hybrid / onsite / unknown. Location text wins; the JD is only checked for 'hybrid'/'remote' phrases."""
     loc = (location or "").lower()

@@ -54,7 +54,9 @@ def requirement_status(lines: list[str], keywords: list[dict]) -> list[list]:
     return out
 
 
-def _badges(job: dict, today: str, latest_day: str, tz: str, mine: set[str], closing_days: int = 7) -> list[str]:
+def _badges(job: dict, today: str, latest_day: str, tz: str, mine: set[str], closing_days: int = 7,
+            fresh_hours: int = 48) -> list[str]:
+    """fresh_hours: preferences notifications.early_bird_hours (the Fresh badge = the early-bird window)."""
     sig = job.get("signals") or {}
     b = []
     if job["job_status"] == "updated":
@@ -64,7 +66,7 @@ def _badges(job: dict, today: str, latest_day: str, tz: str, mine: set[str], clo
     else:
         b.append("seen")          # listed in an earlier run and unchanged since
     fh = sig.get("fresh_hours")
-    if fh is not None and fh <= 48:
+    if fh is not None and fh <= fresh_hours:
         b.append("fresh")
     if job.get("deadline") and today <= job["deadline"] <= (date.fromisoformat(today) + timedelta(days=closing_days)).isoformat():
         b.append("closing")
@@ -86,7 +88,7 @@ def _badges(job: dict, today: str, latest_day: str, tz: str, mine: set[str], clo
 
 
 def build_entry(job: dict, tz: str, tier: int | None, today: str, latest_day: str, mine: set[str],
-                closing_days: int = 7) -> dict:
+                closing_days: int = 7, fresh_hours: int = 48) -> dict:
     flags = {k: v.get("value") for k, v in (job.get("flags") or {}).items()}
     sig = job.get("signals") or {}
     e = {
@@ -115,7 +117,7 @@ def build_entry(job: dict, tz: str, tier: int | None, today: str, latest_day: st
         "label": job.get("label"),
         "filtered": bool(job.get("filtered")),
         "flags": flags,
-        "badges": _badges(job, today, latest_day, tz, mine, closing_days),
+        "badges": _badges(job, today, latest_day, tz, mine, closing_days, fresh_hours),
         "terms": job.get("terms") or [],
         "deadline": job.get("deadline"),
         "salary": ({"min": job["salary_min"], "max": job["salary_max"], "currency": job.get("salary_currency")}
@@ -287,7 +289,7 @@ def select_visible(jobs: list[dict], top_n: int) -> list[dict]:
 def write_data_js(path: Path, jobs: list[dict], meta: dict, tz: str, resume_hash: str, top_n: int,
                   tier_of, my_companies: set[str] | None = None, max_filtered: int = 4000,
                   now: datetime | None = None, h1b: dict | None = None, apply_cfg: ApplyToday | None = None,
-                  title_rules=None) -> dict:
+                  title_rules=None, fresh_hours: int = 48) -> dict:
     """jobs: decoded open job rows (scored). top_n visible jobs per track get details; filtered ones a summary.
 
     The Filtered tab lists missed-match candidates and software-relevant filtered jobs first (title matched but
@@ -315,7 +317,7 @@ def write_data_js(path: Path, jobs: list[dict], meta: dict, tz: str, resume_hash
 
     days = sorted({local_day(j["first_seen"], tz) for j in visible}, reverse=True)
     latest_day = days[0] if days else today
-    entries = [build_entry(j, tz, tier_of(j), today, latest_day, mine, apply_cfg.closing_soon_days)
+    entries = [build_entry(j, tz, tier_of(j), today, latest_day, mine, apply_cfg.closing_soon_days, fresh_hours)
                for j in [*visible, *shown_filtered]]
     shown_ids = {e["id"] for e in entries}
     for e in entries:

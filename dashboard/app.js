@@ -198,6 +198,7 @@
     { id: "tier", label: "Tier", values: (js) => counts(js.map((j) => (j.tier ? `Tier ${j.tier}` : "Untiered"))), test: (j, v) => v.includes(j.tier ? `Tier ${j.tier}` : "Untiered") },
     { id: "label", label: "Label", values: (js) => counts(js.map((j) => j.label || "—")), test: (j, v) => v.includes(j.label || "—") },
     { id: "level", label: "Level", values: (js) => counts(js.map((j) => j.level)), test: (j, v) => v.includes(j.level) },
+    { id: "type", label: "Type", values: (js) => counts(js.map((j) => j.employment_type || "Not stated")), test: (j, v) => v.includes(j.employment_type || "Not stated") },
     { id: "mode", label: "Work mode", values: (js) => counts(js.map((j) => j.work_mode)), test: (j, v) => v.includes(j.work_mode) },
     { id: "location", label: "Location", values: (js) => counts(js.map((j) => stateOf(j.location))), test: (j, v) => v.includes(stateOf(j.location)), search: true },
     { id: "status", label: "My status", values: (js) => counts(js.map((j) => statusOf(j) || "(none)")), test: (j, v) => v.includes(statusOf(j) || "(none)") },
@@ -243,7 +244,8 @@
     if (META.last_run) {
       // red only for real failures; manual checks and partial listings are amber
       $("#run-dot").className = "dot " + (s.sources_failed ? "red" : s.sources_partial || s.sources_manual ? "amber" : "green");
-      $("#run-text").textContent = `Last run ${fmtTime(META.last_run)} · ${s.sources_ok ?? 0} of ${s.sources_checked ?? 0} checked`;
+      $("#run-text").textContent = `Last run ${fmtTime(META.last_run)} · ${s.sources_ok ?? 0}/${s.sources_checked ?? 0} OK · ` +
+        `${(s.new || 0).toLocaleString()} new · ${(s.updated || 0).toLocaleString()} updated · ${(s.closed || 0).toLocaleString()} closed`;
       $("#run-dot").parentElement.title = `${s.sources_ok} of ${s.sources_checked} companies/sources checked successfully this run; ` +
         `${s.sources_failed || 0} failed, ${s.sources_manual || 0} manual, ${s.sources_partial || 0} partial, ${s.sources_skipped || 0} not due. ` +
         `Jobs found ${s.jobs_found}, new ${s.new}, updated ${s.updated}, closed ${s.closed}.`;
@@ -1281,8 +1283,10 @@
     const chips = (lst) => {
       const box = el("div", { class: "kw-chips" });
       for (const k of lst.filter((x) => !kwFilter || x.status === kwFilter)) {
+        const why = k.status === "synonym" ? `\nYour resume says “${k.resume_term}” → JD says “${k.term}”` :
+          k.evidence ? `\n${k.evidence_section}: “${k.evidence}”` : k.status === "missing" ? "\nNot on your resume (a gap)" : "";
         const chip = el("button", { class: `kw ${k.status}`, type: "button",
-          title: `${k.status} · ${k.section} · weight ${k.weight}${k.count > 1 ? ` · mentioned ${k.count}×` : ""} — click to highlight it in the Full JD`,
+          title: `${k.status} · ${k.section} · weight ${k.weight}${k.count > 1 ? ` · mentioned ${k.count}×` : ""}${why}\nClick to highlight it in the Full JD`,
           onclick: () => { jdHighlight = k.term; jdKw = k; pTab = "Full JD"; renderPanel(); } },
           el("span", { "aria-hidden": "true", text: icon[k.status] }), el("span", { class: "sr-only", text: `${k.status}: ` }), k.term);
         box.append(chip);
@@ -1291,7 +1295,10 @@
     };
     for (const [sec, title] of [["required", "Required"], ["preferred", "Preferred"], ["mentioned", "Also mentioned"]]) {
       const lst = ks.filter((k) => k.section === sec);
-      if (lst.length) out.append(el("div", { class: "section" }, el("h3", { text: `${title} (${lst.length})` }), chips(lst)));
+      const syn = lst.filter((k) => k.status === "synonym" && (!kwFilter || kwFilter === "synonym"));
+      if (lst.length) out.append(el("div", { class: "section" }, el("h3", { text: `${title} (${lst.length})` }), chips(lst),
+        syn.length ? el("ul", { class: "list-plain syn-notes" }, syn.map((k) => el("li", null, "≈ Your resume says ", el("b", { text: k.resume_term }),
+          " → JD says ", el("b", { text: k.term })))) : null));
     }
     const plain = (fn) => ks.filter(fn).map((k) => k.term).join(", ");
     const copyBtn = (label, text, done) => el("button", { class: "btn small", type: "button", onclick: async () => toast((await copyText(text())) ? done : "Clipboard unavailable") }, label);

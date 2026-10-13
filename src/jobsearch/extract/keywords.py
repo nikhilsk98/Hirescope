@@ -163,7 +163,6 @@ def extract_keywords(text: str, min_reqs: list[str], pref_reqs: list[str], vocab
 @dataclass(frozen=True, eq=False)
 class ResumeTerms:
     lines: tuple[tuple[str, str], ...]   # (section, line)
-    text_lower: str
 
 
 def resume_terms(resume) -> ResumeTerms:
@@ -173,7 +172,7 @@ def resume_terms(resume) -> ResumeTerms:
             for ln in [e.heading, *e.bullets]:
                 if ln:
                     lines.append((sec, ln))
-    return ResumeTerms(tuple(lines), "\n".join(ln for _, ln in lines).lower())
+    return ResumeTerms(tuple(lines))
 
 
 def _find_line(rt: ResumeTerms, surface: str) -> tuple[str, str] | None:

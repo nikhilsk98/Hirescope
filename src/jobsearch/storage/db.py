@@ -454,18 +454,19 @@ def touch_job(conn, source: str, company: str, job_id: str, now: str | None = No
     return pk, "seen"
 
 
-def touch_all(conn, source: str, company: str | None, now: str | None = None) -> int:
-    """A conditional GET returned 304: every listing from (source, company) is still there, unchanged.
-    company=None covers a whole multi-company feed."""
+def touch_all(conn, source: str, company: str | None, now: str | None = None) -> set[str]:
+    """A conditional GET returned 304: the listing is exactly what the last successful fetch saw. Listings present
+    then (miss_count 0, job not closed) are marked seen; listings already missing then are left alone (the caller
+    counts another miss for full listings) and a closed job is never reopened. company=None covers a whole
+    multi-company feed. Returns the source job ids that are present."""
     now = now or utcnow()
-    if company is None:
-        rows = conn.execute("SELECT company_key, source_job_id FROM job_sources WHERE source=?", (source,)).fetchall()
-    else:
-        rows = conn.execute("SELECT company_key, source_job_id FROM job_sources WHERE source=? AND company_key=?",
-                            (source, company_key(company))).fetchall()
+    sql = ("SELECT s.company_key, s.source_job_id FROM job_sources s JOIN jobs j ON j.id = s.job_pk "
+           "WHERE s.source=? AND s.miss_count = 0 AND j.job_status != 'closed'")
+    rows = (conn.execute(sql, (source,)) if company is None else
+            conn.execute(sql + " AND s.company_key=?", (source, company_key(company)))).fetchall()
     for ck, jid in rows:
         touch_job(conn, source, ck, jid, now)
-    return len(rows)
+    return {jid for _, jid in rows}
 
 
 def known_listings(conn, source: str, company: str | None = None) -> dict[str, str | None]:

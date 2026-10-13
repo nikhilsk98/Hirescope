@@ -12,7 +12,6 @@ COOP = "coop_intern"
 FULL_TIME = "full_time"
 UNCLEAR = "unclear"
 TRACKS = (COOP, FULL_TIME, UNCLEAR)
-TRACK_LABELS = {COOP: "Co-op/Intern", FULL_TIME: "Full-time", UNCLEAR: "Unclear"}
 
 # "intern" must be a whole word: "Internal Tools" / "International" are not internships.
 _COOP_TITLE = re.compile(
@@ -91,6 +90,9 @@ def classify_track(title: str, employment_type: str | None = None, text: str = "
 
 _SEASON = re.compile(r"\b(spring|summer|fall|autumn|winter)\s*(?:'|’)?\s*(20\d\d|\d\d)\b", re.I)
 _YEAR_SEASON = re.compile(r"\b(20\d\d)\s+(spring|summer|fall|autumn|winter)\b", re.I)   # "2027 Summer Intern"
+# "Spring/Summer 2027", "winter or summer 2027": the year belongs to every season in the list
+_SEASON_LIST = re.compile(r"\b(spring|summer|fall|autumn|winter)((?:\s*(?:/|,|&|\band\b|\bor\b)\s*(?:spring|summer|fall|autumn|winter))+)"
+                          r"\s*(?:'|’)?\s*(20\d\d|\d\d)\b", re.I)
 _MONTH_START = re.compile(
     r"\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|"
     r"jun|jul|aug|sep|sept|oct|nov|dec)\.?\s+(20\d\d)\s+(start|cohort|intake)\b|"
@@ -98,7 +100,9 @@ _MONTH_START = re.compile(
     r"november|december)\s+(20\d\d)\b", re.I)
 
 
-_GRAD = re.compile(r"\b(graduat\w*|class of|degree (completion|conferral)|expected to (complete|finish))", re.I)
+# graduation and school-enrollment phrases: their seasons are when you study / graduate, not work terms
+_GRAD = re.compile(r"\b(graduat\w*|class of|degree (completion|conferral)|expected to (complete|finish)|enrolled|enrollment|"
+                   r"returning to (school|campus|university|college))", re.I)
 _CLAUSE_END = re.compile(r"[.;!?\n]|\s-\s")
 
 
@@ -124,6 +128,12 @@ def parse_terms(text: str) -> list[str]:
     found = [(m.start(), m.group(1), m.group(2) if len(m.group(2)) == 4 else "20" + m.group(2))
              for m in _SEASON.finditer(t) if not in_grad_phrase(t, m.start(), m.end())]
     found += [(m.start(), m.group(2), m.group(1)) for m in _YEAR_SEASON.finditer(t) if not in_grad_phrase(t, m.start(), m.end())]
+    for m in _SEASON_LIST.finditer(t):
+        if in_grad_phrase(t, m.start(), m.end()):
+            continue
+        year = m.group(3) if len(m.group(3)) == 4 else "20" + m.group(3)
+        for i, season in enumerate([m.group(1), *re.findall(r"spring|summer|fall|autumn|winter", m.group(2), re.I)]):
+            found.append((m.start() + i, season, year))
     for _, season, year in sorted(found):
         out.append(f"{season.capitalize().replace('Autumn', 'Fall')} {year}")
     for m in _MONTH_START.finditer(text or ""):

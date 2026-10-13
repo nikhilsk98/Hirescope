@@ -269,3 +269,14 @@ def test_domains_and_own_years_in_scoring(cfg, resume):
     lv = lambda r: r.breakdown["qualification"]["parts"]["level"]   # noqa: E731
     assert lv(near)["score"] < lv(plain)["score"] and "you have 3" in lv(near)["detail"]
     assert near.label != "Weak" or plain.label == "Weak"
+
+
+def test_early_career_feed_companies_score_as_feed_tier(cfg, resume):
+    """New-grad roles from the SimplifyJobs lists at companies you haven't tiered aren't held back as tier 3."""
+    def tier_part(j):
+        r = score_job(j, resume, cfg.prefs, apply_rules(j, cfg.prefs, cfg.title_rules, NOW), no_sem(), cfg.synonyms, None, NOW)
+        return r.breakdown["preference"]["parts"]["company_tier"]
+    feed = tier_part(job(company="FeedCo (DEMO)", source="simplify_newgrad"))
+    other = tier_part(job(company="OtherCo (DEMO)", source="greenhouse"))
+    assert feed["score"] == cfg.prefs.scoring.tier_fit[cfg.prefs.company_tiers.feed_tier] and "SimplifyJobs" in feed["detail"]
+    assert other["score"] == cfg.prefs.scoring.tier_fit[3] and "tier 3" in other["detail"]

@@ -32,6 +32,9 @@ class CompanyTiers(BaseModel):
     excluded: list[str] = []
     check_every_hours: dict[int, float] = {1: 0, 2: 20, 3: 70}   # 0 = every run
     max_pages: dict[int, int] = {1: 100, 2: 25, 3: 10}           # listing pages per company per run
+    # companies known only from the SimplifyJobs internship / new-grad lists (curated for early-career hiring) score
+    # as this tier instead of 3, so new-grad roles there aren't held back by an "unknown company" tier
+    feed_tier: int = 2
 
     def tier_of(self, company: str) -> int | None:
         key = company.casefold()
@@ -158,6 +161,9 @@ class Scoring(BaseModel):
     # <= years_experience / <= match_max / <= stretch_max / above
     yoe_fit: dict[str, float] = {"match": 100, "near": 90, "stretch": 60, "over": 20}
     domain_fit: dict[str, float] = {"match": 100}   # JD / title / company mentions one of your domains
+    preferred_skill_weight: float = 0.5     # a preferred-only skill counts this much of a required one
+    semantic_scale: list[float] = [0.15, 0.60]   # MiniLM cosine -> 0..100: at or below the first = 0, at the second = 100
+    similar_min: float = 0.3                # "More like this": nearest roles at least this similar (cosine)
     grad_fit: dict[str, float] = {"match": 100, "mismatch": 25}
     degree_above_yours: float = 40          # JD asks for a higher degree than your resume shows
     location_fit: dict[str, float] = {"preferred": 100, "remote_us": 90, "other_us": 75, "no_preferences": 100}

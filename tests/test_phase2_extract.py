@@ -211,3 +211,36 @@ def test_graduation_phrases_are_not_work_terms():
     assert parse_terms("Class of Spring 2027") == []
     assert parse_terms("Spring 2027 Co-op (January - June)") == ["Spring 2027"]           # real terms still count
     assert not summer_only(["Summer 2027"], "SWE Intern (DEMO)", "Summer or Fall 2027 internship")
+
+
+def test_graduating_by_x_or_y_uses_the_later_date():
+    """'graduating by December 2026 or Summer 2027' (Applied Intuition, New Grad 2027) includes an Aug 2027 graduate."""
+    from jobsearch.extract.dates import parse_grad_windows
+    (w,) = parse_grad_windows("Bachelor's degree in CS and graduating by December 2026 or Summer 2027. (DEMO)")
+    assert (w.start, w.end) == ("2000-01", "2027-08")
+    (w2,) = parse_grad_windows("graduating by May 2027 (DEMO)")
+    assert w2.end == "2027-05"
+
+
+@pytest.mark.parametrize("title,jd,terms,summer", [
+    ("Software Engineering Co-op (Spring/Summer 2027) (DEMO)", "", ["Spring 2027", "Summer 2027"], False),
+    ("Backend Intern 2027 (DEMO)", "available to work at HQ during winter or summer 2027", ["Winter 2027", "Summer 2027"], False),
+    ("Data Engineer Intern (DEMO)", "Summer 2027. You may submit 3 applications within a 6-month period.", ["Summer 2027"], True),
+    ("SWE Intern, Cloud (Summer 2027) (DEMO)", "Experience with Spring Boot and Spring Cloud.", ["Summer 2027"], True),
+    ("SWE Intern - Summer 2027 (DEMO)", "Java (J2EE), JavaScript, Spring, etc.", ["Summer 2027"], True),
+    ("SWE Intern (Summer 2027) (DEMO)", "This is a 6-month co-op.", ["Summer 2027"], False),
+    ("SWE Intern (DEMO)", "Summer 2027; a spring semester term is also possible", ["Summer 2027"], False),
+])
+def test_summer_only_detection(title, jd, terms, summer):
+    from jobsearch.extract.dates import summer_only
+    from jobsearch.extract.track import parse_terms
+    got = parse_terms(f"{title}\n{jd}")
+    assert got == terms and summer_only(got, title, jd) is summer
+
+
+def test_enrollment_phrases_are_not_work_terms():
+    from jobsearch.extract.dates import summer_only
+    from jobsearch.extract.track import parse_terms
+    t, jd = "Software Developer Intern (DEMO)", "Summer 2027 internship. Must be enrolled at a university for Fall term 2027."
+    terms = parse_terms(f"{t}\n{jd}")
+    assert terms == ["Summer 2027"] and summer_only(terms, t, jd)

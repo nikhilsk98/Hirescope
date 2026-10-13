@@ -73,7 +73,7 @@ def rescue(embedder: Embedder, items: list[tuple[int, str]], threshold: float, m
     return out
 
 
-def similar_jobs(embedder: Embedder, jobs: list[tuple[int, str, str]], k: int = 5) -> dict[int, list[int]]:
+def similar_jobs(embedder: Embedder, jobs: list[tuple[int, str, str]], k: int = 5, min_sim: float = 0.3) -> dict[int, list[int]]:
     """jobs: (pk, track, text). Top-k most similar open jobs in the same track (cosine on local embeddings)."""
     out: dict[int, list[int]] = {}
     by_track: dict[str, list[tuple[int, str]]] = {}
@@ -87,5 +87,5 @@ def similar_jobs(embedder: Embedder, jobs: list[tuple[int, str, str]], k: int = 
         np.fill_diagonal(sims, -1)
         top = np.argsort(-sims, axis=1)[:, :k]
         for (pk, _), row, idx in zip(items, sims, top):
-            out[pk] = [items[int(i)][0] for i in idx if row[int(i)] > 0.3]
+            out[pk] = [items[int(i)][0] for i in idx if row[int(i)] > min_sim]
     return out

@@ -161,3 +161,20 @@ def test_markdown_jd_headings():
                              "##\n# Nice to have:\n* Kafka")
     r = split_requirements(text)
     assert r.minimum == ["Python"] and r.preferred == ["Kafka"]
+
+
+@pytest.mark.parametrize("title,jd,value", [
+    ("Software Engineer - Level 2 (Active SCI) (DEMO)", "Great role.", "Clearance required"),
+    ("Space TS/SCI Mission Software Engineer (DEMO)", "", "Clearance required"),
+    ("Software Engineer (DEMO)", "CLEARANCE REQUIRED FOR START: Yes\nCLEARANCE TYPE: SCI", "Clearance required"),
+    ("Software Engineer (DEMO)", "Clearance: Secret", "Clearance required"),
+    ("Software Engineer (DEMO)", "Security Clearance: Eligible to obtain a Secret clearance", "Clearance required"),
+    ("Software Engineer (DEMO)", "CLEARANCE TYPE: None", "Not stated"),
+    ("Software Engineer (DEMO)", "Clearance: Public Trust", "Not stated"),
+    ("Secrets Management Engineer (DEMO)", "Vault and secrets.", "Not stated"),
+    ("Software Engineer (DEMO)", "Security clearance: preferred", "Not stated"),
+])
+def test_clearance_from_titles_and_headers(title, jd, value):
+    """You are not a US citizen, so a clearance requirement hides a job; titles and structured headers count."""
+    from jobsearch.extract.flags import extract_flags
+    assert extract_flags(jd, title)["clearance"]["value"] == value

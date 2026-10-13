@@ -176,3 +176,30 @@ def test_discovered_label_only_for_jobs_new_after_the_first_scan(conn, cfg, resu
     _, jobs = load_data_js(out)
     e = {j["job_id"]: j for j in jobs}
     assert e["1001"]["discovered"] is True and e["1002"]["discovered"] is False
+
+
+def test_304_keeps_counting_missing_jobs_and_never_reopens_closed(conn, cfg, resume, embedder, greenhouse_payload, tmp_path):
+    """An unchanged board (304) equals the last response: jobs that left the board keep counting misses and close,
+    closed jobs stay closed (no false "Reopened"), and present jobs are still seen."""
+    co = [Company(name="DemoCo", source="greenhouse", board="democo")]
+    full = greenhouse_payload
+    fewer = {**full, "jobs": [j for j in full["jobs"] if str(j["id"]) != "1003"]}
+    etag = {"etag": 'W/"v2"'}
+    state = {"body": full, "etag": 'W/"v1"'}
+
+    def handler(request):
+        if request.headers.get("if-none-match") == state["etag"]:
+            return httpx.Response(304)
+        return httpx.Response(200, json=state["body"], headers={"etag": state["etag"]})
+    def go():
+        run(conn, cfg, resume, co, mock_client(handler), embedder, tmp_path)
+        return {j["job_id"]: j["job_status"] for j in db.open_jobs(conn)}, {
+            r[0]: r[1] for r in conn.execute("SELECT j.job_id, j.job_status FROM jobs j")}
+    go()                                               # 1003 listed
+    state.update(body=fewer, etag=etag["etag"])
+    go()                                               # 1003 gone: 1st miss
+    _, every = go()                                    # 304: still gone -> 2nd miss -> closed
+    assert every["1003"] == "closed"
+    open_now, every = go()                             # 304 again: closed stays closed, the rest stay open
+    assert every["1003"] == "closed" and set(open_now) == {"1001", "1002"}
+    assert conn.execute("SELECT repost_count FROM jobs WHERE job_id='1003'").fetchone()[0] == 0

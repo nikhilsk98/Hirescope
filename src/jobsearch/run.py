@@ -105,7 +105,7 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
         except (OSError, ValueError) as e:
             log.warning("referral finder: %s: %s", conn_file, e)
     statuses.write_sync_js(paths.SYNC_JS, statuses.sync_payload(conn))
-    compute_similar(conn, Embedder(conn), shown)            # "More like this"
+    compute_similar(conn, Embedder(conn), shown, min_sim=cfg.prefs.scoring.similar_min)   # "More like this"
     jobs = db.open_jobs(conn)
     if paths.ENG_BLOGS.exists():
         meta["eng_blogs"] = eng_blogs({j["company"] for j in shown}, yaml.safe_load(paths.ENG_BLOGS.read_text(encoding="utf-8")) or {})
@@ -122,7 +122,8 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
             log.warning("sponsorship history enabled but %s not found", f)
     counts = write_data_js(paths.DASHBOARD / "data.js", jobs, meta, cfg.prefs.timezone,
                            resume.version_hash, cfg.prefs.top_n, tier_of, {w.company for w in watch}, h1b=h1b,
-                           apply_cfg=cfg.prefs.apply_today, title_rules=cfg.title_rules)
+                           apply_cfg=cfg.prefs.apply_today, title_rules=cfg.title_rules,
+                           fresh_hours=cfg.prefs.notifications.early_bird_hours)
     log.info("dashboard: %d visible, %d filtered (%d listed), %d detail chunks -> %s", counts["visible"],
              counts["filtered"], counts["filtered_listed"], counts["chunks"], paths.DASHBOARD / "index.html")
     return counts

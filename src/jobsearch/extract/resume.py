@@ -33,13 +33,6 @@ class Resume:
             out.extend(e.bullets)
         return out
 
-    def section_text(self, section: str) -> str:
-        parts = []
-        for e in self.sections.get(section, []):
-            parts.append(e.heading)
-            parts.extend(e.bullets)
-        return "\n".join(p for p in parts if p)
-
 
 def file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:16]

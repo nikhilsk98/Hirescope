@@ -18,6 +18,18 @@ never logs in, never scrapes LinkedIn, never applies or messages anyone, and sen
 4. Open `dashboard/index.html`. Shortlist / skip with a reason / **Mark Applied**; **Export statuses** now and then.
 5. `./scripts/schedule.sh install` — full runs 08:00 + 18:00 and quick checks every 2.5 h.
 
+## Daily use
+
+1. Runs happen on their own (08:00, 18:00, plus a quick check every 2.5 h) once the schedule is installed. Run one
+   by hand any time: `./scripts/run.sh` (or `--quick`, `--company "Stripe"`, `--dry-run`).
+2. Open `dashboard/index.html`. Start in **Last 24h** / the pinned **Apply Today** strip of each track tab;
+   open a job (`Enter`), check its Keywords and Full JD, **Generate Resume** (job package), apply, then **Mark
+   Applied** (`a`). Shortlist (`s`) or skip with a reason (`x`) as you go — that is what feedback learning learns from.
+3. Click **Export statuses** at the end of a session. The next run imports it from `~/Downloads` into SQLite (and
+   backups), so nothing you did lives only in the browser.
+4. Weekly: skim **Missed Matches** (false negatives) and **Coverage** (companies to check by hand); follow up on
+   **Follow-ups Due**. A Sunday digest lands in `data/digests/`.
+
 ## How it works (data flow)
 
 | Stage | Reads | Writes |
@@ -261,6 +273,12 @@ never as job-level eligibility.
 
 ## Where the settings live
 
+**Changing your preferences**: edit `inputs/preferences.yaml` (every key is explained in
+`inputs/preferences.example.yaml`), then `python -m jobsearch.run --rescore` to re-score stored jobs without
+fetching; the next scheduled run uses the new values too. Typical edits: `preferred_locations`, `domains`, `salary`,
+`work_authorization`, `tracks.*` windows, `yoe` / `years_experience`, `company_tiers` (tier1 = checked every run),
+`schedule.full_times`. Your resume is `inputs/master_resume.md`; it is re-read every run.
+
 Nothing about your search is hardcoded. `inputs/preferences.yaml` (documented line by line in
 `inputs/preferences.example.yaml`) holds your profile and every tuning value: graduation date, track windows and
 preferred terms, levels and YOE limits, locations and work modes, work authorization (incl. the co-op
@@ -356,6 +374,8 @@ Plists are rendered from `scripts/launchd/com.nikhil.jobsearch{,.quick}.plist.te
 - **macOS permissions**: the repo lives in `~/Documents` and statuses are imported from `~/Downloads`, both protected
   folders. If `data/logs/launchd-full.log` shows "Operation not permitted", give `/bin/zsh` Full Disk Access
   (System Settings → Privacy & Security → Full Disk Access), or move the repo out of Documents.
+- **Notifications** are sent with `osascript`, so macOS lists them under **Script Editor**: allow them in System
+  Settings → Notifications → Script Editor (Alerts or Banners). `notifications.enabled: false` turns them off.
 
 ### After every run
 - **Run summary**: printed, logged, and saved to `data/logs/last_run_summary.txt` (coverage, new / updated / closed,
@@ -393,6 +413,14 @@ Plists are rendered from `scripts/launchd/com.nikhil.jobsearch{,.quick}.plist.te
 Dedupe: exact on (company, source job id); fuzzy cross-source on company + normalized title + location.
 A JD whose text hash changes is marked **updated**. A job is **closed** after 2 consecutive *successful* fetches
 that don't list it; a failed fetch never closes anything. A closed job that reappears counts as a repost.
+
+## What leaves your machine
+
+Only requests to public job sources (job-board APIs, careers pages that allow it, SimplifyJobs on GitHub, Hacker
+News) — none of them carry your resume, preferences or statuses; the only identifying header is the User-Agent
+below. Optional, only when you set them up: your IMAP login to your own mail provider (LinkedIn alert emails) and
+your search queries plus API key to the aggregator. Scoring, embeddings and the dashboard run locally (no AI service,
+no analytics); `inputs/`, `data/`, `.env` and the generated dashboard data are gitignored. Every request type:
 
 ## Outbound requests
 

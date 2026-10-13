@@ -260,6 +260,7 @@ table.grid .title { font-weight: 600; }
 .kw.missing { color: var(--kw-miss); background: var(--kw-miss-bg); }
 .kw[aria-expanded="true"] { border-color: currentColor; }
 .kw-detail { flex-basis: 100%; margin: 2px 0 6px; padding: 6px 10px; border-radius: var(--r-sm); background: var(--surface-2); font-size: var(--fs-sm); color: var(--text-2); }
+.syn-notes { margin-top: var(--sp-2); color: var(--kw-syn); }
 .legend { display: flex; flex-wrap: wrap; gap: var(--sp-3); font-size: var(--fs-xs); color: var(--text-3); margin-top: var(--sp-3); }
 /* JD */
 .jd-text { font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }

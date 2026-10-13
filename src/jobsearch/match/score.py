@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from ..config import Company, Preferences, Scoring
+from ..config import Company, Preferences, Scoring, Weights
 from ..extract.locations import preferred_match
 from ..extract.resume import Resume
 from ..extract.skills import extract_skills
@@ -62,6 +62,7 @@ def _resume_degree(resume: Resume) -> int:
 
 
 _DEFAULT_SCORING = Scoring()   # built-in values for keys a preferences file's partial dicts leave out
+_DEFAULT_WEIGHTS = Weights()
 
 
 def domain_match(text: str, domains: list[str]) -> tuple[str, str] | None:
@@ -144,9 +145,10 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         req_skills = list(job.get("skills") or [])
     matched = [s for s in [*req_skills, *pref_skills] if s in resume_skills]
     missing_req = [s for s in req_skills if s not in resume_skills]
-    denom = len(req_skills) + 0.5 * len(pref_skills)
+    pw = sc.preferred_skill_weight
+    denom = len(req_skills) + pw * len(pref_skills)
     if denom:
-        num = sum(1 for s in req_skills if s in resume_skills) + 0.5 * sum(1 for s in pref_skills if s in resume_skills)
+        num = sum(1 for s in req_skills if s in resume_skills) + pw * sum(1 for s in pref_skills if s in resume_skills)
         skills_score = 100 * num / denom
         skills_detail = f"{len([s for s in req_skills if s in resume_skills])}/{len(req_skills)} required" + (
             f", {len([s for s in pref_skills if s in resume_skills])}/{len(pref_skills)} preferred" if pref_skills else "")
@@ -221,7 +223,11 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
                 loc_score = lf["no_preferences"] if not prefs.preferred_locations else lf["other_us"]
                 loc_detail = "in the US"
     tier = prefs.company_tiers.tier_of(job["company"]) or (company.tier if company else None)
-    # a company outside your tiers and the seed list is a known fact (not missing data): treat it as tier 3
+    tier_note = f"tier {tier}" if tier else None
+    if tier is None and (job.get("source") or "").startswith("simplify"):
+        tier = prefs.company_tiers.feed_tier
+        tier_note = f"tier {tier} (on the SimplifyJobs early-career lists)"
+    # a company outside your tiers, the seed list and the early-career lists is a known fact (not missing data): tier 3
     tier_score = sc.tier_fit.get(tier or 3, sc.tier_fit.get(3))
 
     fresh_pts, fresh_detail, age_h = freshness(job, prefs, now, discovered_ok)
@@ -243,11 +249,11 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     pref_parts = {
         "location": Part(loc_score, w.get("location", 0),
                          f"{job.get('location') or 'Unknown'} · {job.get('work_mode')} ({loc_detail})"),
-        "company_tier": Part(tier_score, w.get("company_tier", 0), f"tier {tier}" if tier else "not in your tiers or the seed list (tier 3)"),
+        "company_tier": Part(tier_score, w.get("company_tier", 0), tier_note or "not in your tiers, the seed list or the early-career lists (tier 3)"),
         "employment_type": Part(et_score, w.get("employment_type", 0), et or "Not stated"),
         "salary": Part(sal_score, w.get("salary", 0), sal_detail),
         # silence is uncertainty (left out of the average), never a mismatch
-        "domain": Part(dom_score, w.get("domain", 0.15), dom_detail),
+        "domain": Part(dom_score, w.get("domain", _DEFAULT_WEIGHTS.preference_parts["domain"]), dom_detail),
     }
     pref, pref_missing = _weighted(pref_parts)
 

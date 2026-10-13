@@ -102,8 +102,8 @@ class SemanticResult:
     evidence: list[Evidence]
 
 
-def _scale(raw: float) -> float:
-    return float(np.clip((raw - SIM_FLOOR) / (SIM_CEIL - SIM_FLOOR), 0, 1) * 100)
+def _scale(raw: float, lo: float = SIM_FLOOR, hi: float = SIM_CEIL) -> float:
+    return float(np.clip((raw - lo) / (hi - lo), 0, 1) * 100)
 
 
 def _coverage(sim: np.ndarray) -> float:
@@ -113,7 +113,9 @@ def _coverage(sim: np.ndarray) -> float:
     return float(np.sort(best)[-k:].mean())
 
 
-def semantic_match(embedder: Embedder, resume_lines: dict[str, list[str]], chunks: list[str]) -> SemanticResult:
+def semantic_match(embedder: Embedder, resume_lines: dict[str, list[str]], chunks: list[str],
+                   scale: tuple[float, float] | list[float] = (SIM_FLOOR, SIM_CEIL)) -> SemanticResult:
+    """scale: preferences scoring.semantic_scale (cosine at 0 / at 100)."""
     lines = [(sec, ln) for sec in SECTIONS for ln in resume_lines.get(sec, []) if len(ln) >= 10]
     if not chunks or not lines:
         return SemanticResult(None, {s: None for s in SECTIONS}, [])
@@ -124,7 +126,7 @@ def semantic_match(embedder: Embedder, resume_lines: dict[str, list[str]], chunk
     sections: dict[str, float | None] = {}
     for sec in SECTIONS:
         idx = [i for i, (s, _) in enumerate(lines) if s == sec]
-        sections[sec] = round(_scale(_coverage(sim[:, idx])), 1) if idx else None
+        sections[sec] = round(_scale(_coverage(sim[:, idx]), scale[0], scale[1]), 1) if idx else None
 
     evidence, used = [], set()
     for j in np.argsort(-sim.max(axis=1)):
@@ -135,4 +137,4 @@ def semantic_match(embedder: Embedder, resume_lines: dict[str, list[str]], chunk
         evidence.append(Evidence(chunks[j], lines[i][1], lines[i][0], round(float(sim[j, i]), 3)))
         if len(evidence) == 3:
             break
-    return SemanticResult(round(_scale(_coverage(sim)), 1), sections, evidence)
+    return SemanticResult(round(_scale(_coverage(sim), scale[0], scale[1]), 1), sections, evidence)

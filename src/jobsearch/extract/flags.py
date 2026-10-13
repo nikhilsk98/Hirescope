@@ -51,6 +51,19 @@ _CLEARANCE = re.compile(
 )
 
 
+# Structured headers: "Clearance: Secret", "Security Clearance: Active TS/SCI", "CLEARANCE REQUIRED FOR START: Yes",
+# "CLEARANCE TYPE: SCI". None / N/A / No / Public Trust (a background check, not a clearance) don't count.
+_CLEARANCE_HEADER = re.compile(
+    r"\b(?:security\s+)?clearance(?:\s+(?:type|level|required(?:\s+for\s+start)?))?\s*:\s*"
+    r"(?!none\b|n/?a\b|no\b|not\b|public\s+trust\b)"
+    r"(yes\b|(?:active\s+|current\s+|interim\s+)?(?:ts\s*/\s*sci|top\s+secret|secret|sci|confidential|q\b|l\b|dod|doe|"
+    r"u\.?s\.?|eligib|must|candidates must|this position requires|active))", re.I)
+# Titles: "(Active SCI)", "TS/SCI", "Top Secret", "Active Secret", "Secret Clearance", "w/ Poly", "Cleared"
+_CLEARANCE_TITLE = re.compile(
+    r"\b(ts\s*/\s*sci|top\s+secret|sci|polygraph|poly|(?:active|interim|current)\s+secret|secret\s+(?:clearance|cleared)|"
+    r"clearance\s+required|cleared)\b", re.I)
+
+
 def _evidence(text: str, m: re.Match) -> str:
     start = max(text.rfind(".", 0, m.start()), text.rfind("\n", 0, m.start())) + 1
     end_candidates = [i for i in (text.find(".", m.end()), text.find("\n", m.end())) if i != -1]
@@ -58,8 +71,9 @@ def _evidence(text: str, m: re.Match) -> str:
     return text[start:end + 1].strip()[:240]
 
 
-def extract_flags(text: str) -> dict[str, dict]:
-    """{'sponsorship': {'value', 'evidence'}, 'citizenship': {...}, 'clearance': {...}}"""
+def extract_flags(text: str, title: str = "") -> dict[str, dict]:
+    """{'sponsorship': {'value', 'evidence'}, 'citizenship': {...}, 'clearance': {...}}. The title counts for the
+    clearance flag ("Software Engineer (Active SCI)")."""
     text = text or ""
     flags = {}
     no = None
@@ -103,4 +117,11 @@ def extract_flags(text: str) -> dict[str, dict]:
             continue
         flags["clearance"] = {"value": "Clearance required", "evidence": ev}
         break
+    if flags["clearance"]["value"] != "Clearance required":
+        if m := _CLEARANCE_TITLE.search(title or ""):
+            flags["clearance"] = {"value": "Clearance required", "evidence": f"Title: {title}"}
+        elif m := _CLEARANCE_HEADER.search(text):
+            ev = _evidence(text, m)
+            if not _OPTIONAL.search(ev):
+                flags["clearance"] = {"value": "Clearance required", "evidence": ev}
     return flags

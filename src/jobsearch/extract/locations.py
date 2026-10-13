@@ -82,9 +82,6 @@ class LocationInfo:
     def display(self) -> str:
         return " · ".join(dict.fromkeys(p.text for p in self.places)) or "Unknown"
 
-    def us_places(self) -> list[str]:
-        return [p.text for p in self.places if p.country == "US"]
-
 
 def _classify(part: str, cfg: LocationConfig) -> Place:
     raw = part.strip(" -–,()")
