@@ -776,3 +776,123 @@ def test_amazon_unchanged_listing_is_304_only():
     h2 = _etag_server({"search.json": body})
     res = AmazonAdapter(mock_client(h2)).fetch(Company(name="Amazon", source="amazon"), FetchContext(queries=q, validators=first.validators))
     assert res.unchanged
+
+
+# --- Workable / iCIMS / Jibe (careers-site JSON feed) -------------------------------------------------
+WK = {"name": "DemoCo", "jobs": [
+    {"shortcode": "ABC123", "title": "Software Engineer (DEMO)", "employment_type": "Full-time", "telecommuting": False,
+     "url": "https://apply.workable.com/j/ABC123", "published_on": "2026-10-10", "city": "Boston", "state": "Massachusetts",
+     "country": "United States", "locations": [{"city": "Boston", "region": "Massachusetts", "country": "United States"}],
+     "description": "<p>DEMO</p>" + REQ},
+    {"shortcode": "DEF456", "title": "Remote Engineer (DEMO)", "telecommuting": True, "country": "United States",
+     "published_on": "2026-10-09", "description": "<p>DEMO</p>"}]}
+
+
+def test_workable_adapter():
+    from jobsearch.adapters.workable import WorkableAdapter
+    h = router({("GET", "/api/v1/widget/accounts/democo?details=true"): WK})
+    res = WorkableAdapter(mock_client(h)).fetch(Company(name="DemoCo", source="workable", board="democo"), FetchContext())
+    a, b = res.jobs
+    assert a.job_id == "ABC123" and "- Python and SQL" in a.description and a.posted_date.day == 10
+    assert a.location == "Boston, Massachusetts, United States" and a.canonical_key == "workable:ABC123"
+    assert b.location == "Remote - United States"
+    from jobsearch.adapters.base import SourceError
+    with pytest.raises(SourceError):
+        WorkableAdapter(mock_client(router({}))).fetch(Company(name="X", source="workable", board="nope"), FetchContext())
+
+
+IC_SITEMAP = """<?xml version='1.0' encoding='utf-8'?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://careers-democo.icims.com/jobs/intro</loc></url>
+<url><loc>https://careers-democo.icims.com/jobs/8188/software-engineer/job</loc><lastmod>2026-10-12T14:38:12-04:00</lastmod></url>
+<url><loc>https://careers-democo.icims.com/jobs/8189/account-executive/job</loc><lastmod>2026-10-12T14:30:16-04:00</lastmod></url>
+</urlset>"""
+IC_JOB = """<html><script type="application/ld+json">{"@context": "http://schema.org", "@type": "JobPosting",
+"title": "Software Engineer (DEMO)", "datePosted": "2026-10-11T04:00:00.000Z", "employmentType": "FULL_TIME",
+"description": "<p>DEMO</p>", "jobLocation": [{"address": {"addressLocality": "Boston", "addressRegion": "UNAVAILABLE",
+"addressCountry": "US"}}], "url": "https://careers-democo.icims.com/jobs/8188/software-engineer/job"}</script></html>"""
+
+
+def test_icims_adapter_reads_sitemap_and_iframe_job_pages(cfg):
+    from jobsearch.adapters.icims import IcimsAdapter
+    from jobsearch.match.rules import quick_relevant
+    h = router({("GET", "robots.txt"): "User-agent: *\nDisallow: /jobs/*login\n", ("GET", "/sitemap.xml"): IC_SITEMAP,
+                ("GET", "/jobs/8188/software-engineer/job?in_iframe=1"): IC_JOB})
+    ctx = FetchContext(want=lambda t, loc: quick_relevant(t, loc, cfg.prefs, cfg.title_rules))
+    res = IcimsAdapter(mock_client(h)).fetch(Company(name="DemoCo", source="icims", host="careers-democo.icims.com"), ctx)
+    (j,) = res.jobs
+    assert j.job_id == "8188" and j.location == "Boston, US" and j.posted_date.day == 11
+    assert j.apply_url == "https://careers-democo.icims.com/jobs/8188/software-engineer/job"
+    assert j.canonical_key == "icims:careers-democo.icims.com:8188"
+    assert res.seen_ids == {"8188", "8189"}                       # listed, even though the AE page wasn't fetched
+    assert not any("account-executive" in u for _, u in h.calls)  # slug prefilter: no page fetch
+
+
+def test_icims_portal_that_disallows_robots_is_not_read():
+    from jobsearch.adapters.base import SourceError
+    from jobsearch.adapters.icims import IcimsAdapter
+    h = router({("GET", "robots.txt"): "User-agent: *\nDisallow: /\n"})
+    with pytest.raises(SourceError, match="robots.txt"):
+        IcimsAdapter(mock_client(h)).fetch(Company(name="X", source="icims", host="us-careers-x.icims.com"), FetchContext())
+    assert not any("sitemap" in u for _, u in h.calls)
+
+
+def _jibe(d):
+    return {"data": {"slug": d[0], "req_id": d[0], "title": d[1], "description": "<p>DEMO</p>", "qualifications": REQ,
+                     "city": "Boston", "state": "Massachusetts", "country": "United States", "posted_date": "2026-10-11T23:46:00+0000",
+                     "employment_type": "FULL_TIME", "apply_url": f"https://careers-democo.icims.com/jobs/{d[0]}/login",
+                     "hiring_organization": "DemoCo Holdings", "tags2": [d[2]]}}
+
+
+def test_jibe_feed_pages_and_brand_filter():
+    from jobsearch.adapters.jibe import JibeAdapter
+    pages = {"1": {"totalCount": 3, "jobs": [_jibe(("101", "Software Engineer (DEMO)", "DemoCo Digital")),
+                                              _jibe(("102", "Data Engineer (DEMO)", "Other Brand"))]},
+             "2": {"totalCount": 3, "jobs": [_jibe(("103", "Platform Engineer (DEMO)", "DemoCo Digital"))]}}
+    def feed(request):
+        assert request.url.params["country"] == "United States"
+        return httpx.Response(200, json=pages[request.url.params["page"]] if request.url.params["limit"] == "100" else pages["1"])
+    h = router({("GET", "robots.txt"): 404, ("GET", "/api/jobs"): feed})
+    import jobsearch.adapters.jibe as J
+    old, J.PAGE = J.PAGE, 2
+    try:
+        co = Company(name="DemoCo Digital", source="jibe", host="careers.democo.example", site="DemoCo Digital")
+        res = JibeAdapter(mock_client(h)).fetch(co, FetchContext())
+    finally:
+        J.PAGE = old
+    assert {j.job_id for j in res.jobs} == {"101", "103"}           # brand filter drops "Other Brand"
+    j = next(x for x in res.jobs if x.job_id == "101")
+    assert "- Python and SQL" in j.description and j.location == "Boston, Massachusetts, United States"
+    assert j.apply_url == "https://careers.democo.example/careers-home/jobs/101?lang=en-us" and j.canonical_key == "jibe:careers.democo.example:101"
+
+
+@pytest.mark.parametrize("url,fields", [
+    ("https://apply.workable.com/huggingface/", {"source": "workable", "board": "huggingface"}),
+    ("https://apply.workable.com/thrive-7/j/ABC123/", {"source": "workable", "board": "thrive-7"}),
+    ("https://careers-healthedge.icims.com/jobs/search?ss=1", {"source": "icims", "host": "careers-healthedge.icims.com", "board": "careers-healthedge.icims.com"}),
+    ("https://se.jibeapply.com/jobs", {"source": "jibe", "host": "se.jibeapply.com"}),
+    ("https://www.icims.com/", None),
+])
+def test_workable_icims_jibe_detection_from_url(url, fields):
+    assert from_url(url) == fields
+
+
+def test_detection_finds_careers_site_json_feed():
+    feed = {"totalCount": 7, "jobs": [_jibe(("101", "Software Engineer (DEMO)", "x"))]}
+    h = router({("GET", "robots.txt"): 404, ("GET", "careers.democo.example/api/jobs"): feed,
+                ("GET", "careers.democo.example/jobs"): "<html>no ATS links</html>"})
+    r = Detector(mock_client(h), [], {}).detect("DemoCo", "https://careers.democo.example/jobs")
+    assert r.via == "careers feed" and r.company.source == "jibe" and r.company.host == "careers.democo.example"
+
+
+def test_source_filter_includes_watchlist_companies_with_a_known_source(conn, cfg):
+    """--source X: My Companies on X are included when their source is known without fetching (careers_url, seed
+    list, cached detection); unknown ones and manual ones are not."""
+    cfg2 = cfg.model_copy(update={"companies": [Company(name="SeedJibe", source="jibe", host="careers.seedjibe.example", tier=2)]})
+    db.set_company_source(conn, "CachedCo", "workable", "careers page", "cachedco")
+    watch = [WatchItem("UrlCo", "https://apply.workable.com/urlco/"), WatchItem("SeedJibe", "https://careers.seedjibe.example/jobs"),
+             WatchItem("CachedCo", "https://cachedco.example/careers"), WatchItem("Unknown", "https://unknown.example/careers"),
+             WatchItem("ManualCo", "https://apply.workable.com/manualco/", manual_reason="unsupported")]
+    names = lambda src: {p.watch.company if p.watch else p.company.name for p in plan(conn, cfg2, watch, only_source=src)[0]}  # noqa: E731
+    assert names("workable") == {"UrlCo", "CachedCo"}
+    assert names("jibe") == {"SeedJibe"}
+    assert names("greenhouse") == set()

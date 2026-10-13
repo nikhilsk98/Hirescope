@@ -8,8 +8,9 @@ Fallback order (first hit wins; each step records how it decided):
   4. company appears in the SimplifyJobs-derived ATS directory           -> "simplify directory"
   5. careers_url page links to / embeds an ATS board                     -> "careers page"
   6. company-name slug probes: Greenhouse, Lever, Ashby, SmartRecruiters -> "name probe"
-  7. careers_url page carries schema.org JobPosting JSON-LD              -> "json-ld"
-  8. nothing works                                                       -> "manual" (never dropped)
+  7. the careers site's own public JSON job feed (Jibe /api/jobs)        -> "careers feed"
+  8. careers_url page carries schema.org JobPosting JSON-LD              -> "json-ld"
+  9. nothing works                                                       -> "manual" (never dropped)
 Verified 2026-10-12: unknown Greenhouse / Lever / Ashby boards return 404; unknown SmartRecruiters
 ids return 200 with totalFound 0, so a SmartRecruiters probe needs at least one posting.
 """
@@ -78,6 +79,14 @@ def from_url(url: str | None) -> dict | None:
         segs = [p for p in path.split("/") if p]
         slug = segs[1] if first == "careers" and len(segs) > 1 else first
         return {"source": "jobvite", "board": slug} if not slug.startswith("__") else None
+    if host.endswith(".workable.com") or host == "apply.workable.com":
+        from .workable import parse_url as workable_url
+        slug, _ = workable_url(u.geturl())
+        return {"source": "workable", "board": slug} if slug else None
+    if host.endswith(".icims.com") and not host.startswith("www."):
+        return {"source": "icims", "host": host, "board": host}
+    if host.endswith(".jibeapply.com"):
+        return {"source": "jibe", "host": host}
     if host.endswith("amazon.jobs"):
         return {"source": "amazon"}
     if host.endswith("jobs.netflix.net") or host == "jobs.netflix.com":
@@ -98,6 +107,8 @@ _EMBED = [
     re.compile(r"ats\.rippling\.com/(?:[a-z]{2}-[A-Z]{2}/)?[A-Za-z0-9_-]+/jobs"),
     re.compile(r"jobs\.jobvite\.com/(?:careers/)?(?!__)[A-Za-z0-9_-]+"),
     re.compile(r"[a-z0-9-]+\.eightfold\.ai/careers\?domain=[A-Za-z0-9.-]+"),
+    re.compile(r"apply\.workable\.com/(?!api/|j/)[A-Za-z0-9_-]+"),
+    re.compile(r"(?<![a-z0-9-])(?:careers|jobs|globalcareers|[a-z0-9]+-careers|careers-[a-z0-9-]+)\.icims\.com"),
 ]
 
 
@@ -144,6 +155,23 @@ class Detector:
                 pass
         return None
 
+    def _own_feed(self, careers_url: str) -> dict | None:
+        """The careers site's own public JSON job feed (Jibe sites: /api/jobs), when robots.txt allows it."""
+        from .jibe import feed_url
+        host = (urlparse(careers_url).hostname or "").lower()
+        if not host:
+            return None
+        url = feed_url(host, 1, limit=1)
+        try:
+            if not self.http.allowed(url):
+                return None
+            d = self.http.get_json(url)
+        except Exception:  # noqa: BLE001 - no feed here
+            return None
+        if isinstance(d, dict) and isinstance(d.get("jobs"), list) and "totalCount" in d:
+            return {"source": "jibe", "host": host}
+        return None
+
     def _lookup(self, table: dict, name: str):
         """Exact (casefolded) match, then legal-suffix-insensitive match ("Akamai" ~ "Akamai Technologies")."""
         if hit := table.get(name.casefold()):
@@ -187,6 +215,8 @@ class Detector:
                             return Detection(self._make(name, fields, careers_url), "careers page", hit)
         if fields := self._probe(name):
             return Detection(self._make(name, fields, careers_url), "name probe", fields["board"])
+        if careers_url and (fields := self._own_feed(careers_url)):
+            return Detection(self._make(name, fields, careers_url), "careers feed", fields["host"])
         if html and jobpostings_in_html(html):
             return Detection(self._make(name, {"source": "jsonld"}, careers_url), "json-ld")
         if careers_url:

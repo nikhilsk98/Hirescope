@@ -258,9 +258,13 @@ def plan(conn, cfg: Config, watch: list[WatchItem], *, only_company: str | None 
         if not planned:  # not configured anywhere: try detection by name
             planned.append(Planned(None, WatchItem(only_company), "ad hoc"))
         return planned, skipped
-    if not only_source:   # --source X means exactly that adapter (My Companies' sources are known only after detection)
+    if not only_source:
         for w in watch:
             planned.append(Planned(None, w, "My Companies: every run"))
+    else:   # --source X: My Companies whose source is already known without fetching (careers_url, seed list, cache)
+        for w in watch:
+            if not w.manual_reason and _known_source(conn, cfg, w) == only_source:
+                planned.append(Planned(None, w, f"My Companies on {only_source}"))
     if watchlist_only:
         return planned, skipped
     if cfg.prefs.aggregator.enabled:
@@ -290,6 +294,20 @@ def plan(conn, cfg: Config, watch: list[WatchItem], *, only_company: str | None 
     if only_source:
         planned = [p for p in planned if p.company is not None or p.watch is not None]
     return planned, skipped
+
+
+def _known_source(conn, cfg: Config, w: WatchItem) -> str | None:
+    """A watchlist company's adapter when it's known without network: careers_url, seed list, then cached detection
+    (the same order detection uses)."""
+    from .adapters.detect import from_url
+    from .output.h1b import norm_name
+    if fields := from_url(w.careers_url):
+        return fields["source"]
+    n = norm_name(w.company)
+    if seed := next((c for c in cfg.companies if c.name.casefold() == w.company.casefold() or norm_name(c.name) == n), None):
+        return seed.source
+    cached = db.get_company_source(conn, w.company)
+    return cached["source"] if cached and cached.get("fail_count", 0) < 2 else None
 
 
 # --- fetching ------------------------------------------------------------------------------------

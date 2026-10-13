@@ -2122,3 +2122,40 @@ companies:
   tier: 2
   verified: '2026-10-12'
   notes: 6 US software intern/new-grad listings in SimplifyJobs; 27 open jobs at verification
+# Jibe career sites (the careers site's own public JSON feed, adapters/jibe.py), verified 2026-10-13
+- name: AMD
+  source: jibe
+  host: careers.amd.com
+  tier: 2
+  careers_url: https://careers.amd.com/careers-home/jobs
+  verified: '2026-10-13'
+  notes: 659 US jobs at verification (iCIMS applications; the iCIMS portal itself disallows robots)
+- name: Rivian
+  source: jibe
+  host: careers.rivian.com
+  tier: 2
+  careers_url: https://careers.rivian.com/careers-home/jobs
+  verified: '2026-10-13'
+  notes: 766 US jobs at verification (iCIMS applications; the iCIMS portal itself disallows robots)
+- name: Schneider Electric
+  source: jibe
+  host: se.jibeapply.com
+  tier: 2
+  careers_url: https://careers.se.com/united-states
+  verified: '2026-10-13'
+  notes: 823 US jobs at verification (careers.se.com is the same Jibe site behind a bot check)
+- name: N-able
+  source: jibe
+  host: careers.n-able.com
+  tier: 2
+  careers_url: https://careers.n-able.com/jobs
+  verified: '2026-10-13'
+  notes: 7 US jobs at verification
+- name: Publicis Sapient
+  source: jibe
+  host: careers.publicisgroupe.com
+  site: Publicis Sapient
+  tier: 2
+  careers_url: https://careers.publicisgroupe.com/jobs
+  verified: '2026-10-13'
+  notes: Publicis Groupe site, filtered to the "Publicis Sapient" brand tag (53 of 972 US jobs at verification)

@@ -5,6 +5,8 @@ from .base import Adapter, HttpClient
 from .eightfold import EightfoldAdapter
 from .greenhouse import GreenhouseAdapter
 from .hn_hiring import HNHiringAdapter
+from .icims import IcimsAdapter
+from .jibe import JibeAdapter
 from .jobvite import JobviteAdapter
 from .jsonld import CareersPageAdapter, NetflixAdapter, SitemapJsonLdAdapter
 from .lever import LeverAdapter
@@ -12,11 +14,12 @@ from .linkedin_alerts import LinkedInAlertsAdapter
 from .rippling import RipplingAdapter
 from .simplify_github import SimplifyAdapter
 from .smartrecruiters import SmartRecruitersAdapter
+from .workable import WorkableAdapter
 from .workday import WorkdayAdapter
 
 ADAPTERS: dict[str, type[Adapter]] = {a.name: a for a in (
     GreenhouseAdapter, LeverAdapter, AshbyAdapter, WorkdayAdapter, SmartRecruitersAdapter, AmazonAdapter,
-    RipplingAdapter, JobviteAdapter, EightfoldAdapter,
+    RipplingAdapter, JobviteAdapter, EightfoldAdapter, WorkableAdapter, IcimsAdapter, JibeAdapter,
     NetflixAdapter, SitemapJsonLdAdapter, CareersPageAdapter, SimplifyAdapter, HNHiringAdapter, LinkedInAlertsAdapter,
     AggregatorAdapter,
 )}

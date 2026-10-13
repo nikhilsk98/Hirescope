@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 _LD = re.compile(r"<script[^>]+type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>", re.S | re.I)
 _JOB_LINK = re.compile(r"/(jobs?|careers?|positions?|openings?|opportunit(y|ies)|roles?)/", re.I)
 MAX_PAGE_LINKS = 60
+_PLACEHOLDERS = {"unavailable", "n/a", "na", "none", "null", "-"}
 HTML_ACCEPT = {"Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}
 
 
@@ -66,6 +67,8 @@ def _place(p) -> str | None:
     for x in (a.get("addressLocality"), a.get("addressRegion"), country):
         for piece in str(x or "").split(","):
             piece = piece.strip()
+            if piece.casefold() in _PLACEHOLDERS:   # iCIMS fills unknown address parts with "UNAVAILABLE"
+                continue
             if piece and piece.casefold() not in (q.casefold() for q in parts):
                 parts.append(piece)
     return ", ".join(parts) or p.get("name")
@@ -123,6 +126,21 @@ class SitemapJsonLdAdapter(Adapter):
     name = "jsonld_sitemap"
     capabilities = Capabilities(full_description=True, posted_date=True, pagination=False, official=True)
 
+    # hooks for sitemap-based ATS adapters (iCIMS)
+    def job_id(self, url: str) -> str:
+        return _url_id(url)
+
+    def page_url(self, url: str) -> str:
+        """The URL actually fetched for a sitemap job page."""
+        return url
+
+    def slug_title(self, url: str) -> str:
+        """Title words in the job page URL (the cheap relevance prefilter before fetching it)."""
+        return _slug_title(url)
+
+    def finish(self, raw: RawJob, url: str) -> None:
+        """Last touches on a parsed posting (apply link, canonical key)."""
+
     def _sitemap_urls(self, url: str, depth: int = 0) -> list[tuple[str, str | None]]:
         xml = self.http.get(url, headers={"Accept": "application/xml,text/xml"}).text
         root = ET.fromstring(xml.encode())
@@ -151,21 +169,21 @@ class SitemapJsonLdAdapter(Adapter):
         jobs, pages, fetched, blocked = [], {}, 0, 0
         seen: set[str] = set()
         for url, lastmod in urls:
-            jid = _url_id(url)
+            jid = self.job_id(url)
             seen.add(jid)            # listed at the source, whether or not we fetch it
             cached = ctx.pages.get(url)
             if cached and cached.get("payload") and cached.get("lastmod") == lastmod:
                 d = json.loads(cached["payload"])
-            elif not ctx.want(_slug_title(url), _slug_title(url)):
+            elif not ctx.want(self.slug_title(url), self.slug_title(url)):
                 continue             # slug says the role is not relevant: don't fetch the page
             elif fetched >= ctx.max_details:
                 continue
-            elif not self.http.allowed(url):
+            elif not self.http.allowed(self.page_url(url)):
                 blocked += 1
                 continue
             else:
                 try:
-                    found = jobpostings_in_html(self.http.get(url, headers=HTML_ACCEPT).text)
+                    found = jobpostings_in_html(self.http.get(self.page_url(url), headers=HTML_ACCEPT).text)
                 except Exception as e:  # noqa: BLE001
                     log.debug("jsonld page failed %s: %s", url, e)
                     continue
@@ -176,6 +194,7 @@ class SitemapJsonLdAdapter(Adapter):
                 pages[url] = {"lastmod": lastmod, "payload": json.dumps(d)}
             raw = posting_to_raw(company.name, d, url, self.name if self.name != "jsonld_sitemap" else "jsonld")
             raw.job_id = jid
+            self.finish(raw, url)
             jobs.append(raw)
         notes = [f"{blocked} pages disallowed by robots.txt"] if blocked else []
         partial = f"page fetches capped at {ctx.max_details}" if fetched >= ctx.max_details else None
