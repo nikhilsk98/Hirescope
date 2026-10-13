@@ -753,3 +753,20 @@ def touch_source_id(conn, source: str, source_job_id: str, now: str | None = Non
     for (ck,) in conn.execute("SELECT company_key FROM job_sources WHERE source=? AND source_job_id=?",
                               (source, source_job_id)).fetchall():
         touch_job(conn, source, ck, source_job_id, now)
+
+
+def repair_moved_paths(conn, jd_dir: Path, apps_dir: Path) -> int:
+    """Point stored JD / application-JD paths at their current folder after the repo or data folder moved (the
+    stored absolute path is gone but the same file name exists under the current folder). Returns rows fixed."""
+    fixed = 0
+    for table, base in (("jobs", jd_dir), ("applications", apps_dir)):
+        rows = conn.execute(f"SELECT rowid, jd_path FROM {table} WHERE jd_path IS NOT NULL").fetchall()
+        updates = []
+        for rowid, p in rows:
+            if Path(p).parent != base and not Path(p).exists() and (base / Path(p).name).exists():
+                updates.append((str(base / Path(p).name), rowid))
+        if updates:
+            with conn:
+                conn.executemany(f"UPDATE {table} SET jd_path=? WHERE rowid=?", updates)
+            fixed += len(updates)
+    return fixed

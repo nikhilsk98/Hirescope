@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .. import paths
 from ..storage import db
 from .applications import STAGES
 
@@ -232,13 +233,13 @@ def _merge_app(conn, app_id: str, a: dict, exported: str, apps_dir: Path | None,
         res.events_added += cur.rowcount
 
     # a saved local copy of the JD, kept even after the posting disappears
-    if apps_dir is not None and not (row and row["jd_path"] and Path(row["jd_path"]).exists()):
+    if apps_dir is not None and not (row and paths.stored_file(row["jd_path"], apps_dir)):
         jd = _text(a.get("jd"), MAX_JD)
         src = None
         if not jd and pk is not None:
             r = conn.execute("SELECT jd_path FROM jobs WHERE id=?", (pk,)).fetchone()
-            src = Path(r["jd_path"]) if r and r["jd_path"] else None
-        if jd or (src and src.exists()):
+            src = paths.stored_file(r["jd_path"], paths.JD_DIR) if r else None
+        if jd or src:
             apps_dir.mkdir(parents=True, exist_ok=True)
             dest = apps_dir / f"{app_id}.txt"
             if jd:
@@ -290,8 +291,8 @@ def applications(conn, include_deleted: bool = True, with_jd: bool = True) -> li
         a = {f: r[f] or "" for f in APP_FIELDS}
         a.update(id=r["id"], stage=r["stage"], deleted=bool(r["deleted"]), created_at=r["created_at"],
                  updated_at=r["updated_at"], events=events.get(r["id"], []), job=json.loads(r["extra"] or "{}"))
-        if with_jd and r["jd_path"] and Path(r["jd_path"]).exists():
-            a["jd"] = Path(r["jd_path"]).read_text(encoding="utf-8")
+        if with_jd and (p := paths.stored_file(r["jd_path"], paths.APPS_DIR)):
+            a["jd"] = p.read_text(encoding="utf-8")
         out.append(a)
     return out
 

@@ -123,3 +123,22 @@ def test_merge_canonical_duplicates_keeps_the_job_you_acted_on(conn):
     assert db.merge_canonical_duplicates(conn, canonical_key) == 1
     assert count(conn) == 1 and conn.execute("SELECT id FROM jobs").fetchone()[0] == b
     assert conn.execute("SELECT COUNT(*) FROM job_sources WHERE job_pk=?", (b,)).fetchone()[0] == 2
+
+
+def test_stored_paths_survive_a_repo_move(tmp_path, conn):
+    """DEMO: JD paths saved before the repo moved still resolve, and the run-start repair rewrites them."""
+    from jobsearch import paths
+    jd_dir, apps_dir = tmp_path / "jd", tmp_path / "apps"
+    jd_dir.mkdir(); apps_dir.mkdir()
+    (jd_dir / "greenhouse_democo_1.txt").write_text("DEMO JD", encoding="utf-8")
+    old = "/Users/nobody/Documents/old-repo/data/jd/greenhouse_democo_1.txt"
+    assert paths.stored_file(old, jd_dir) == jd_dir / "greenhouse_democo_1.txt"
+    assert paths.stored_file("/nowhere/missing.txt", jd_dir) is None and paths.stored_file(None, jd_dir) is None
+    conn.execute("INSERT INTO jobs (company, company_key, title, normalized_title, job_id, first_seen, last_checked, "
+                 "source, jd_path) VALUES ('DemoCo','democo','DEMO','demo','1','x','x','greenhouse',?)", (old,))
+    conn.execute("INSERT INTO jobs (company, company_key, title, normalized_title, job_id, first_seen, last_checked, "
+                 "source, jd_path) VALUES ('DemoCo','democo','DEMO 2','demo 2','2','x','x','greenhouse','/gone/x.txt')")
+    assert db.repair_moved_paths(conn, jd_dir, apps_dir) == 1
+    got = [r[0] for r in conn.execute("SELECT jd_path FROM jobs ORDER BY job_id")]
+    assert got == [str(jd_dir / "greenhouse_democo_1.txt"), "/gone/x.txt"]
+    assert db.repair_moved_paths(conn, jd_dir, apps_dir) == 0

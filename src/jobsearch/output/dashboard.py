@@ -17,6 +17,7 @@ from pathlib import Path
 from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
 
+from .. import paths
 from ..config import ApplyToday
 from .packages import package_filename, render_package
 
@@ -35,8 +36,8 @@ def linkedin_search_url(company: str, title: str) -> str:
 
 
 def _jd(job: dict) -> str:
-    p = job.get("jd_path")
-    return Path(p).read_text(encoding="utf-8") if p and Path(p).exists() else ""
+    p = paths.stored_file(job.get("jd_path"), paths.JD_DIR)
+    return p.read_text(encoding="utf-8") if p else ""
 
 
 def requirement_status(lines: list[str], keywords: list[dict]) -> list[list]:

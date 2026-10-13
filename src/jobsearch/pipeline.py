@@ -181,9 +181,8 @@ def reextract_all(conn, cfg: Config) -> int:
     job from what is stored, so parser/config fixes apply without re-downloading anything."""
     n = 0
     for job in db.open_jobs(conn):
-        jd = ""
-        if job.get("jd_path") and Path(job["jd_path"]).exists():
-            jd = Path(job["jd_path"]).read_text(encoding="utf-8")
+        p = paths.stored_file(job.get("jd_path"), paths.JD_DIR)
+        jd = p.read_text(encoding="utf-8") if p else ""
         hint = {"simplify_internships": "coop_intern", "simplify_newgrad": "full_time"}.get(job["source"])
         raw = RawJob(company=job["company"], job_id=job["job_id"], title=job["title"], source=job["source"],
                      source_url=job.get("source_url") or "", apply_url=job.get("apply_url"),
@@ -544,8 +543,8 @@ def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
 
 # --- scoring -------------------------------------------------------------------------------------
 def _jd(job: dict) -> str:
-    p = job.get("jd_path")
-    return Path(p).read_text(encoding="utf-8") if p and Path(p).exists() else ""
+    p = paths.stored_file(job.get("jd_path"), paths.JD_DIR)
+    return p.read_text(encoding="utf-8") if p else ""
 
 
 def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: Embedder,

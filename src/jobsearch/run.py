@@ -215,6 +215,8 @@ def _main(args, log_file: Path) -> int:
     AggregatorAdapter.date_window = cfg.prefs.aggregator.date_posted
 
     conn = db.connect(paths.DB)
+    if moved := db.repair_moved_paths(conn, paths.JD_DIR, paths.APPS_DIR):
+        log.info("stored file paths repaired after a move", extra={"rows": moved})
     tmp = None
     if args.dry_run:  # work on an in-memory copy so nothing persists
         mem = sqlite3.connect(":memory:")

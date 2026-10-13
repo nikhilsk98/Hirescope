@@ -22,3 +22,15 @@ LOG_DIR = DATA / "logs"
 APPS_DIR = DATA / "applications"      # saved JD copies for your applications (kept after postings close)
 IMPORTS_DIR = DATA / "imports"        # archived copies of imported dashboard exports
 SYNC_JS = DASHBOARD / "sync.js"       # SQLite -> dashboard: your statuses and applications
+
+
+def stored_file(p: str | None, base: Path) -> Path | None:
+    """A file path saved in SQLite, found again after the repo or data folder moved: the stored absolute path if it
+    still exists, else the same file name under `base` (JD_DIR, APPS_DIR). None when neither exists."""
+    if not p:
+        return None
+    path = Path(p)
+    if path.exists():
+        return path
+    moved = base / path.name
+    return moved if moved.exists() else None
