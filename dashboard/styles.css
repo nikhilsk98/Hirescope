@@ -443,3 +443,6 @@ table.vgrid td { overflow: hidden; }
 .swap-in { animation: swapIn calc(var(--dur) * 1.4) ease-out; }
 @media (max-width: 980px) { .day-row { padding-left: var(--sp-3); padding-right: var(--sp-3); } }
 @media (max-width: 640px) { .day-lbl { display: none; } .skip-reasons { grid-template-columns: minmax(0, 1fr); } }
+
+/* the side panels are focus targets, not controls: no ring around the whole panel (controls inside keep theirs) */
+.panel:focus, .panel:focus-visible { outline: none; }

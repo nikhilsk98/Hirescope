@@ -166,8 +166,9 @@ def summer_only(terms: list[str], title: str, text: str) -> bool:
     seasons = {t.split()[0] for t in terms if re.match(r"(Spring|Summer|Fall|Winter) 20\d\d$", t)}
     if not seasons or seasons != {"Summer"}:
         return False
+    from .track import without_grad_phrases   # "graduating between Fall 2027 …" is not a fall work term
     other = re.search(r"\b(off[- ]cycle|off[- ]season|spring|winter|fall|autumn|year[- ]round|6[- ]month|"
-                      r"4[- ]month|8[- ]month)\b", f"{title}\n{text[:3000]}", re.I)
+                      r"4[- ]month|8[- ]month)\b", f"{title}\n{without_grad_phrases(text[:3000])}", re.I)
     return other is None
 
 

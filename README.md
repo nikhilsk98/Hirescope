@@ -64,9 +64,10 @@ python -m jobsearch.run --all                                     # ignore tier 
 python -m jobsearch.run --resume path.md --prefs path.yaml        # alternate inputs
 ```
 
-Then double-click `dashboard/index.html` (opens via `file://`, no server). The exit code is `0` when every
-source succeeded, `1` when any failed (the run still completes and the dashboard flags the missing coverage),
-`2` for missing or invalid inputs, `3` when another run holds the lock, and `75` when offline.
+Then double-click `dashboard/index.html` (opens via `file://`, no server). The exit code is `0` when no
+source failed (companies marked "Manual check needed" and partial listings are reported, not errors), `1` when any
+source failed (the run still completes and the dashboard flags the missing coverage), `2` for missing or invalid
+inputs, `3` when another run holds the lock, and `75` when offline.
 
 ### Two tracks
 Every job gets a `track`: **Co-op/Intern**, **Full-time**, or **Unclear**, decided by (in order) the title,
@@ -87,11 +88,14 @@ filtered and unknown locations are left uncertain.
 |---|---|---|
 | Greenhouse, Lever, Ashby | official public job-board APIs | full JD in one call; ETag/304 skips unchanged boards |
 | Workday | the `cxs` JSON every `*.myworkdayjobs.com` page uses | US location facet + role keyword searches; JD fetched only for relevant jobs, cached 7 days |
-| SmartRecruiters | public Posting API (`country=us`) | JD fetched only for relevant jobs |
+| SmartRecruiters | public Posting API (`country=us`) | JD fetched only for relevant jobs; ETag/304 skips unchanged listings |
 | Rippling | public board API behind `ats.rippling.com/<slug>/jobs` | whole board in one call; JD fetched only for relevant jobs |
 | Jobvite | the employer's hosted `jobs.jobvite.com/<slug>` pages (its JSON API needs an employer key) | listing pages + `JobPosting` JSON-LD on job pages; robots.txt respected |
-| Eightfold | the PCSX JSON behind `<host>/careers?domain=<domain>` (e.g. Microsoft) | ≤300 US jobs: listed in full; bigger sites: role keyword searches, capped at 200 results each |
-| Amazon | `amazon.jobs/en/search.json` (best effort) | software-development category + intern/co-op/new-grad searches |
+| Eightfold | the PCSX JSON behind `<host>/careers?domain=<domain>` (e.g. Microsoft) | ≤300 US jobs: listed in full; bigger sites: role keyword searches, capped at 200 results each; robots.txt checked |
+| Workable | the public widget API Workable provides for embedding (`apply.workable.com/api/v1/widget/accounts/<slug>?details=true`) | whole board with descriptions in one call |
+| iCIMS | the portal's `sitemap.xml` + schema.org `JobPosting` on each job page (`?in_iframe=1`); iCIMS has no public job API | robots.txt respected (some portals disallow everything: those stay manual); pages cached by `lastmod` |
+| Careers-site JSON feeds | Jibe career sites' own `/api/jobs` feed (AMD, Rivian, Schneider Electric, Publicis Sapient, N-able) | US jobs, full descriptions; detected automatically from a `careers_url` |
+| Amazon | `amazon.jobs/en/search.json` (best effort) | software-development category + intern/co-op/new-grad searches; ETag/304 skips unchanged listings |
 | Netflix | careers sitemap + schema.org `JobPosting` JSON-LD | its JSON search API is not public; pages cached by `lastmod` |
 | SimplifyJobs | `listings.json` from `SimplifyJobs/Summer2027-Internships` (incl. off-season) and `SimplifyJobs/New-Grad-Positions` | aggregator; JD pulled from the linked employer ATS for new relevant listings (capped per run). Repo names change yearly — update the URLs in `config/companies.yaml` |
 | Custom careers pages | `JobPosting` JSON-LD on the page and its job links | robots.txt respected; never logs in |
@@ -163,20 +167,26 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
 - **Co-op / Internships** and **Full-time** tabs at the top are separate workspaces (own view, filters, sort,
   search, Apply Today, stats); `#coop` / `#fulltime` are bookmarkable. Unclear jobs show in both with a "?" badge
   and **Move to Co-op / Move to Full-time** (saved in the browser and included in Export statuses).
+- Day tabs (recent days first-seen; older days in a dropdown) and a **Log** link in the header.
 - Sidebar views: Last 24h (default when it has jobs), Apply Today, All Jobs, My Companies, **My Applications**,
-  Shortlisted, **Follow-ups Due**, Closing Soon, Skill Gaps, **Stats**, Missed Matches (weekly false-negative review),
-  Filtered Out (with reasons), Coverage, **Run Log**.
-- Cards (score ring, label, badges, ATS meter) or a sortable table, remembered per view; Comfortable / Compact density.
+  **Applied / Tracker**, Shortlisted, **Follow-ups Due**, Closing Soon, Skill Gaps, **Stats**, Hiring Seasons, Missed
+  Matches (weekly false-negative review), Filtered Out (with reasons), Coverage, **Run Log**.
+- **Apply Today** is pinned above the main list (collapsible). Cards (score ring, label, New / Seen and other badges,
+  ATS meter, "More like this", Move to Co-op / Full-time on Unclear jobs) or a sortable table, remembered per view;
+  Comfortable / Compact density. Lists are virtualized (only rows near the viewport exist), so there is no row cap.
 - Filter chips (company, tier, label, level, work mode, location, status, flags, posted within, min score, **salary
-  slider**); sort by Newest posted, Best JD match, Overall, ATS coverage, Deadline, Company (secondary: newest posted).
-  Filters, search and sort live in the URL hash (`#fulltime/all?label=Strong&sort=newest`), so a view is bookmarkable.
+  min–max range**); sort by Newest posted, Best JD match, Overall, ATS coverage, Deadline, Company (secondary: newest
+  posted). **Saved views** keep named filter + sort combinations per track. Filters, search, sort and an open job live
+  in the URL hash (`#fulltime/all?label=Strong&sort=newest&job=123&tab=Keywords`), so a view is bookmarkable.
 - Detail panel: Overview (incl. "You know N people here"), Requirements (✓ / ✗ / ? per line), Keywords, Score
-  breakdown (incl. learned adjustments), Full JD (keywords highlighted, Jump to requirements), Similar jobs, Notes &
-  History; actions Generate Resume, Open Application, Shortlist, **Mark Applied**, Skip with reason, status, LinkedIn
-  search, Levels.fyi / Glassdoor / eng-blog links.
+  breakdown (incl. learned adjustments), Full JD (collapsible sections, keywords highlighted, Jump to requirements;
+  one click on a keyword chip highlights it there with its evidence), Similar jobs, Notes & History; actions Generate
+  Resume, Open Application, Shortlist, **Mark Applied**, Skip with reason, status, LinkedIn search, Levels.fyi /
+  Glassdoor / engineering blog (`config/eng_blogs.yaml`, verified URLs; a search link otherwise). The panel keeps
+  keyboard focus inside while open; `Esc` closes it and focus returns to the job's card.
 - **Bulk select** (checkbox on hover, or `Space`): shortlist, skip with a reason, or export CSV for many jobs at once.
 - **Command palette** `⌘K`: jump to any job, company, application, view or action.
-- Keys: `j`/`k`, `Enter`, `s` shortlist, `x` skip, `a` mark applied, `o` open, `g` package, `/` search, `1`/`2` tabs,
+- Keys: `j`/`k`, `Enter`, `s` shortlist, `x` skip (reason picker: `1`–`9`, `0`), `a` mark applied, `o` open, `g` package, `/` search, `1`/`2` tabs,
   `Space` select, `⌘K` palette, `[` / `]` move a board card, `?` help.
 
 ### My Applications (`#applications`)
@@ -273,7 +283,10 @@ queries); after editing, `python -m jobsearch.run --rescore` re-applies everythi
    `config/skills_synonyms.yaml`), semantic similarity (local `all-MiniLM-L6-v2` embeddings of resume
    experience/projects/coursework vs JD requirement lines), and level (title match, years of experience,
    graduation year, degree).
-3. **Preference fit**: location, company tier, freshness, employment type, salary.
+3. **Preference fit**: location, company tier, employment type, salary, and your `domains` (a job whose title,
+   company or JD mentions one gets the domain component; silence is uncertainty, never a mismatch). Freshness is a
+   separate capped bonus. `years_experience` sets the default YOE window (+1 match / +2 Stretch / +3 filtered) and,
+   inside the match window, roles asking more than your own years fit slightly less (`scoring.yoe_fit.near`).
 4. **Overall** = weighted qualification + preference − penalties (YOE above your max, soft-rule misses, explicit
    no-sponsorship/citizenship/clearance when relevant to your `work_authorization`). Components with no data
    are left out of the average and listed as *uncertain*. Labels: Strong ≥ `thresholds.strong`, Stretch ≥
@@ -393,6 +406,9 @@ that don't list it; a failed fetch never closes anything. A closed job that reap
 | `GET api.rippling.com/platform/api/ats/v1/board/<slug>/jobs[/<uuid>]` | per Rippling company | none |
 | `GET jobs.jobvite.com/<slug>/search?nl=1&p=N`, `…/job/<id>?nl=1` and `/robots.txt` | per Jobvite company | none |
 | `GET <host>/api/pcsx/search?domain=…&query=…&location=United States`, `…/position_details` | per Eightfold company | search keywords |
+| `GET apply.workable.com/api/v1/widget/accounts/<slug>?details=true` | per Workable company | none |
+| `GET <portal>.icims.com/robots.txt`, `/sitemap.xml`, `/jobs/<id>/<slug>/job?in_iframe=1` | per iCIMS company (job pages only for relevant new/changed jobs) | none |
+| `GET <careers site>/api/jobs?page=N&limit=100&country=United States` | per Jibe careers site; once during detection (`limit=1`) | none |
 | `GET www.amazon.jobs/en/search.json?...` | Amazon | search keywords |
 | `GET explore.jobs.netflix.net/careers/sitemap…` + job pages | Netflix (pages only when new/changed) | none |
 | `GET raw.githubusercontent.com/SimplifyJobs/…/listings.json` (conditional) | SimplifyJobs feeds | none |
@@ -429,10 +445,12 @@ LinkedIn search) open in your browser as normal.
 
 ```sh
 ~/.venvs/hirescope/bin/python -m pytest -q
+~/.venvs/hirescope/bin/python -m pytest -q --cov=jobsearch --cov-report=term   # line coverage (pytest-cov)
 ```
 All test data is mock data labeled DEMO (`tests/fixtures/` and inline). Tests need no network and no embedding
 model. If `node` is installed, the dashboard's tracker logic (`dashboard/core.js`) is checked against the Python
-tracker on the same DEMO applications.
+tracker on the same DEMO applications, and its view logic (`dashboard/view.js`: virtualization, JD sections, salary
+range, saved views) is tested directly. Design-token contrast is checked against WCAG AA in both themes.
 
 ## Troubleshooting
 

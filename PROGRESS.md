@@ -3,7 +3,7 @@
 Resume here: read this file and `git log --oneline` first, then continue from **In progress**.
 
 ## Current phase
-All phases (1–7) complete. Final report below.
+All phases (1–7) complete; the 2026-10-13 gap-closing pass (status-audit items) is done — see the last report.
 
 ## Completed
 - Phase 1 — vertical slice (Greenhouse → SQLite → scoring → dashboard → job package)
@@ -133,8 +133,8 @@ pages without job data), 202 not due; 36 new, 101 closed; 6,350 visible (5,505 f
 1,204 Strong; all profile checks OK.
 
 **Limitations**
-- 22 My Companies careers pages have no readable job data and 46 have no careers URL → "Manual check" (use Add job
-  by URL). Unsupported job systems: Jobvite, Eightfold, Oracle, iCIMS, Paylocity, TikTok, Google/Apple/Meta (terms).
+- *(Superseded 2026-10-13: Jobvite, Eightfold, Rippling, Workable, iCIMS and Jibe careers-site feeds are supported now;
+  see the gap-closing report for what is still manual.)*
 - Page caps leave ~42 large sources partial (closures verified per job). Netflix requirement parsing ~44%.
 - SimplifyJobs JD enrichment is capped at 200 per feed per run; aggregator/LinkedIn listings may have no JD.
 - Feedback learning has nothing to learn until you label jobs and export statuses.
@@ -142,8 +142,8 @@ pages without job data), 202 not due; 36 new, 101 closed; 6,350 visible (5,505 f
 - The LinkedIn alert parser is built from the documented layout and DEMO emails; check its first real run.
 
 **Setup checklist (Needs Nikhil)**
-1. `./scripts/schedule.sh install` → `./scripts/schedule.sh status`; Full Disk Access for /bin/zsh if launchd logs
-   "Operation not permitted".
+1. ~~`./scripts/schedule.sh install`~~ done 2026-10-12 (both jobs loaded); Full Disk Access for /bin/zsh only if
+   `data/logs/launchd-*.log` shows "Operation not permitted".
 2. Optional `.env`: `IMAP_USER`, `IMAP_APP_PASSWORD` (Gmail app password) for LinkedIn alerts; create alerts on LinkedIn.
 3. Optional `inputs/Connections.csv` (LinkedIn data export) for the referral finder.
 4. Optional `aggregator.enabled: true` + `JSEARCH_API_KEY` / `SERPAPI_API_KEY`.
@@ -158,53 +158,3 @@ pages without job data), 202 not due; 36 new, 101 closed; 6,350 visible (5,505 f
   1 duplicate (Oracle), 45 added: 25 on verified boards (Greenhouse / Ashby / Lever / Workday / Eightfold), 20 marked
   manual with the reason (Apple, Tesla, Citadel, Uber… own sites; iCIMS / Avature / Oracle / Workable). Eightfold now
   checks robots.txt. Real run: 205 of 273 OK, 0 failed, 68 manual, 9 partial; 6,147 new jobs.
-
-## In progress
-Gap-closing groups: dashboard → alerts/runs → scoring → sources → cleanup/visual QA.
-
-## Next
-Your review.
-
-## Open issues
-- 21 watchlist companies have custom careers pages without readable job data; 47 need a careers_url (Manual check).
-  One of your co-op leads is among them (no JobPosting data on its page) — add its postings with add_url.
-- 43 sources return partial listings (page caps); closures for those are verified per job.
-- Merged duplicates keep the older record until the official source is fetched again (its data then takes over).
-- HN posts with non-US remote wording ("REMOTE (European time zones)") can stay visible: the region isn't parsed.
-- OM1 (My Companies): its cached Greenhouse board returns 404; needs a careers URL or re-detection.
-- launchd jobs reading `~/Documents` (the repo) and `~/Downloads` (exports) may need Full Disk Access for /bin/zsh.
-- A quick check takes ~15 min (My Companies custom pages + tier-1 Workday tenants); fine for a 2.5 h interval.
-
-## Needs Nikhil
-- Install the schedule: `./scripts/schedule.sh install` (then `status`). If `data/logs/launchd-full.log` shows
-  "Operation not permitted", give /bin/zsh Full Disk Access (README → Running on a schedule).
-- Confirm GitHub `main` looks right → then I delete the local `backup-before-rewrite` branch.
-- Old remote branches `phase1-vertical-slice` and `phase2` still contain the 3 original commits with the Claude
-  trailer (their content is already in main). Say "delete old branches" to remove them from GitHub.
-- LinkedIn alerts: create job alerts on LinkedIn, then put `IMAP_USER` + `IMAP_APP_PASSWORD` (Gmail app password) in
-  `.env` (see `.env.example`). Built and tested with DEMO emails; the real alert layout should be checked on the
-  first run (Coverage shows how many jobs each run parsed).
-- Optional aggregator: `aggregator.enabled: true` + `JSEARCH_API_KEY` or `SERPAPI_API_KEY` in `.env`.
-- Optional: `inputs/Connections.csv` (LinkedIn data export) for the referral finder.
-- Use the dashboard: shortlist / skip with reasons / Mark Applied, then **Export statuses** — the next run imports it
-  and learning starts.
-
-## Setup (done)
-- [x] Disable Claude attribution in `.claude/settings.json` (`attribution.commit` / `.pr` = "", `sessionUrl` = false)
-- [x] Ground rule added to BUILD_PROMPT.md
-- [x] Backup branch `backup-before-rewrite` (local only), main's messages rewritten (author/dates unchanged), force-pushed;
-  `git log origin/main` has 0 Co-Authored-By: Claude lines
-
-## Next
-Phases 4 → 7 per BUILD_PROMPT.md.
-
-## Open issues
-- 21 watchlist companies have custom careers pages without readable job data; 47 need a careers_url (Manual check).
-- 45 sources return partial listings (page caps); closures for those are verified per job.
-
-## Needs Nikhil
-- Install the schedule: `./scripts/schedule.sh install` (then `status`). If `data/logs/launchd-full.log` shows
-  "Operation not permitted", give /bin/zsh Full Disk Access (README → Running on a schedule).
-- Confirm GitHub `main` looks right → then I delete the local `backup-before-rewrite` branch.
-- Old remote branches `phase1-vertical-slice` and `phase2` still contain the 3 original commits with the Claude
-  trailer (their content is already in main). Say "delete old branches" to remove them from GitHub.

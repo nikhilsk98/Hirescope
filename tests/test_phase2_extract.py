@@ -195,3 +195,19 @@ def test_member_of_technical_staff_is_not_a_staff_level():
     assert lv("Senior Member of Technical Staff", "Oracle") == "senior"
     assert lv("Member of Technical Staff - Staff Engineer") == "staff_plus"
     assert lv("Staff Software Engineer") == "staff_plus"
+
+
+def test_graduation_phrases_are_not_work_terms():
+    """'graduating between Fall 2027 to Summer 2028' is a graduation window: its seasons must not make a summer-only
+    internship look like it also runs in the fall (DoorDash Labs, Summer 2027)."""
+    from jobsearch.extract.dates import summer_only
+    from jobsearch.extract.track import parse_terms
+    title = "Software Engineer, Intern - Labs (Summer 2027) (DEMO)"
+    jd = ("- You are pursuing a B.S. or M.S. in Computer Science and are graduating between Fall 2027 to Summer 2028.\n"
+          "- You are available for a May or June 2027 start date")
+    terms = parse_terms(f"{title}\n{jd}")
+    assert terms == ["Summer 2027", "Jun 2027 start"] and summer_only(terms, title, jd)
+    assert parse_terms("Fall 2026 graduates welcome; Summer 2027 internship") == ["Summer 2027"]
+    assert parse_terms("Class of Spring 2027") == []
+    assert parse_terms("Spring 2027 Co-op (January - June)") == ["Spring 2027"]           # real terms still count
+    assert not summer_only(["Summer 2027"], "SWE Intern (DEMO)", "Summer or Fall 2027 internship")

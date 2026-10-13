@@ -98,12 +98,32 @@ _MONTH_START = re.compile(
     r"november|december)\s+(20\d\d)\b", re.I)
 
 
+_GRAD = re.compile(r"\b(graduat\w*|class of|degree (completion|conferral)|expected to (complete|finish))", re.I)
+_CLAUSE_END = re.compile(r"[.;!?\n]|\s-\s")
+
+
+def in_grad_phrase(text: str, start: int, end: int) -> bool:
+    """Is text[start:end] part of a graduation phrase ("graduating between Fall 2027 to Summer 2028", "Spring 2027
+    graduates")? Then it is a graduation window, not a work term."""
+    before = text[max(0, start - 90):start]
+    cut = max((m.end() for m in _CLAUSE_END.finditer(before)), default=0)
+    after = text[end:end + 25]
+    return bool(_GRAD.search(before[cut:])) or bool(re.match(r"\s*(\(?\w+\)?\s+)?graduat", after, re.I))
+
+
+def without_grad_phrases(text: str) -> str:
+    """The text with graduation clauses removed (for term / season checks)."""
+    return " ".join(c for c in re.split(r"(?<=[.;!?\n])", text or "") if not _GRAD.search(c))
+
+
 def parse_terms(text: str) -> list[str]:
-    """Internship/co-op terms like 'Spring 2027', 'Summer 2027', 'January 2027 start' (deduped, in order)."""
+    """Internship/co-op terms like 'Spring 2027', 'Summer 2027', 'January 2027 start' (deduped, in order).
+    Seasons inside a graduation phrase ("graduating between Fall 2027 to Summer 2028") are not terms."""
     out: list[str] = []
+    t = text or ""
     found = [(m.start(), m.group(1), m.group(2) if len(m.group(2)) == 4 else "20" + m.group(2))
-             for m in _SEASON.finditer(text or "")]
-    found += [(m.start(), m.group(2), m.group(1)) for m in _YEAR_SEASON.finditer(text or "")]
+             for m in _SEASON.finditer(t) if not in_grad_phrase(t, m.start(), m.end())]
+    found += [(m.start(), m.group(2), m.group(1)) for m in _YEAR_SEASON.finditer(t) if not in_grad_phrase(t, m.start(), m.end())]
     for _, season, year in sorted(found):
         out.append(f"{season.capitalize().replace('Autumn', 'Fall')} {year}")
     for m in _MONTH_START.finditer(text or ""):
