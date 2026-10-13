@@ -869,7 +869,7 @@ companies:
   board: capitalone
   host: capitalone.wd12.myworkdayjobs.com
   site: Capital_One
-  tier: 2
+  tier: 1
   verified: '2026-10-12'
   notes: 3 US software intern/new-grad listings in SimplifyJobs; 1960 open jobs at verification
 - name: CarGurus
@@ -909,7 +909,7 @@ companies:
 - name: Cohere
   source: ashby
   board: cohere
-  tier: 2
+  tier: 1
   verified: '2026-10-12'
   notes: 3 US software intern/new-grad listings in SimplifyJobs; 119 open jobs at verification
 - name: Collaborative Robotics
@@ -1121,7 +1121,7 @@ companies:
   board: expedia
   host: expedia.wd108.myworkdayjobs.com
   site: private
-  tier: 2
+  tier: 1
   verified: '2026-10-12'
   notes: 6 US software intern/new-grad listings in SimplifyJobs; 145 open jobs at verification
 - name: Fab2
@@ -1389,7 +1389,7 @@ companies:
 - name: Jane Street
   source: greenhouse
   board: janestreet
-  tier: 2
+  tier: 1
   verified: '2026-10-12'
   notes: 8 US software intern/new-grad listings in SimplifyJobs; 230 open jobs at verification
 - name: Jobs for Humanity
@@ -1401,7 +1401,7 @@ companies:
 - name: Jump Trading
   source: greenhouse
   board: jumptrading
-  tier: 2
+  tier: 1
   verified: '2026-10-12'
   notes: curated; 106 open jobs at verification
 - name: KBR
@@ -1997,7 +1997,7 @@ companies:
 - name: Vercel
   source: greenhouse
   board: vercel
-  tier: 2
+  tier: 1
   verified: '2026-10-12'
   notes: 2 US software intern/new-grad listings in SimplifyJobs; 89 open jobs at verification
 - name: Vermeer
@@ -2073,7 +2073,7 @@ companies:
 - name: Waymo
   source: greenhouse
   board: waymo
-  tier: 2
+  tier: 1
   verified: '2026-10-12'
   notes: curated; 372 open jobs at verification
 - name: Wellmark

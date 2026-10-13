@@ -700,3 +700,16 @@ def test_manual_by_brand_survives_alias_merge(tmp_path):
     items = parse_watchlist("company,careers_url,notes\nITA Software LLC,,a\nGoogle,https://careers.google.example,b\n")
     (g,) = resolve(items, aliases)
     assert g.company == "Google" and g.manual_reason == "custom site" and g.careers_url == "https://careers.google.example"
+
+
+def test_eightfold_respects_robots():
+    from jobsearch.adapters.base import SourceError
+    from jobsearch.adapters.eightfold import EightfoldAdapter
+    allow = router({("GET", "robots.txt"): "User-agent: *\nDisallow: /\nAllow: /api/pcsx\n",
+                    ("GET", "/api/pcsx/search"): {"data": {"count": 0, "positions": []}}})
+    co = Company(name="DemoCo", source="eightfold", host="democo.eightfold.ai", board="democo.com")
+    assert EightfoldAdapter(mock_client(allow)).fetch(co, FetchContext()).jobs == []
+    deny = router({("GET", "robots.txt"): "User-agent: *\nDisallow: /\n"})
+    with pytest.raises(SourceError, match="robots.txt"):
+        EightfoldAdapter(mock_client(deny)).fetch(co, FetchContext())
+    assert not any("/api/pcsx" in u for _, u in deny.calls)

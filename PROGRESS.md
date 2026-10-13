@@ -152,8 +152,15 @@ pages without job data), 202 not due; 36 new, 101 closed; 6,350 visible (5,505 f
 7. Confirm GitHub `main` → I delete the local `backup-before-rewrite` branch; say "delete old branches" for the remote
    `phase1-vertical-slice` / `phase2`.
 
+## 2026-10-13 gap-closing work (one commit per group)
+- **Watchlist merge**: `inputs/watchlist_additions.csv` (81 companies) merged into My Companies — 35 already covered
+  by the seed list (7 moved to tier 1: Cohere, Vercel, Jane Street, Jump Trading, Capital One, Expedia Group, Waymo),
+  1 duplicate (Oracle), 45 added: 25 on verified boards (Greenhouse / Ashby / Lever / Workday / Eightfold), 20 marked
+  manual with the reason (Apple, Tesla, Citadel, Uber… own sites; iCIMS / Avature / Oracle / Workable). Eightfold now
+  checks robots.txt. Real run: 205 of 273 OK, 0 failed, 68 manual, 9 partial; 6,147 new jobs.
+
 ## In progress
-Nothing.
+Gap-closing groups: dashboard → alerts/runs → scoring → sources → cleanup/visual QA.
 
 ## Next
 Your review.

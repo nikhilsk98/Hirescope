@@ -1,6 +1,6 @@
 """Eightfold "PCSX" career sites (the public JSON behind {host}/careers?domain=...; no auth).
 
-Verified 2026-10-12 (Microsoft apply.careers.microsoft.com, PayPal paypal.eightfold.ai; robots.txt allows /api/pcsx):
+Verified 2026-10-12 (Microsoft, PayPal, Qualcomm; their robots.txt is "Disallow: /" + "Allow: /api/pcsx"):
   GET https://{host}/api/pcsx/search?domain={domain}&query={q}&location={loc}&start={N}
     -> {"data": {"count", "positions": [{id, displayJobId, name, locations, standardizedLocations, postedTs,
         creationTs, department, workLocationOption, atsJobId, positionUrl}]}}       10 positions per page
@@ -54,16 +54,22 @@ class EightfoldAdapter(Adapter):
             raise SourceError(f"{company.name}: eightfold requires host and board (the site's domain= value)")
         return company.host, company.board
 
+    def _get(self, url: str) -> dict:
+        # not a documented public API, so robots.txt decides (Eightfold sites "Allow: /api/pcsx")
+        if not self.http.allowed(url):
+            raise SourceError(f"robots.txt disallows {url}")
+        return self.http.get_json(url)
+
     def _search(self, host: str, domain: str, query: str, location: str, start: int) -> dict:
         qs = urlencode({"domain": domain, "query": query, "location": location, "start": start})
-        d = self.http.get_json(f"https://{host}/api/pcsx/search?{qs}")
+        d = self._get(f"https://{host}/api/pcsx/search?{qs}")
         if not isinstance(d.get("data"), dict):
             raise SourceError(f"{host}: {d.get('message') or 'unexpected response'}")
         return d["data"]
 
     def _detail(self, host: str, domain: str, pid: str) -> dict:
         qs = urlencode({"position_id": pid, "domain": domain, "hl": "en"})
-        return self.http.get_json(f"https://{host}/api/pcsx/position_details?{qs}").get("data") or {}
+        return self._get(f"https://{host}/api/pcsx/position_details?{qs}").get("data") or {}
 
     def _raw(self, company: str, host: str, domain: str, p: dict, info: dict | None) -> RawJob:
         pid = str(p["id"])

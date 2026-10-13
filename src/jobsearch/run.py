@@ -235,7 +235,8 @@ def _main(args, log_file: Path) -> int:
                                          "api.ashbyhq.com": 0.5, "api.smartrecruiters.com": 0.35,
                                          "hacker-news.firebaseio.com": 0.05, "jsearch.p.rapidapi.com": 1.0,
                                          "serpapi.com": 1.0, "api.rippling.com": 0.5, "jobs.jobvite.com": 0.5,
-                                         "eightfold.ai": 1.5, "careers.microsoft.com": 1.5})
+                                         "eightfold.ai": 1.5, "careers.microsoft.com": 1.5,
+                                         "careers.qualcomm.com": 1.5})
     try:
         summary = run(conn, cfg, resume, [] if args.rescore else None, client, Embedder(conn), jd_dir, watch=watch,
                       only_company=args.company, only_source=args.source, force_all=args.all,
