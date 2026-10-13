@@ -552,3 +552,15 @@ synthetic written); an autouse fixture now drops paths frozen by monkeypatch; `v
 `reports/v1/`, `latest → v1`; READY). Dashboard (headless Chrome): all 6 resumes show "Resume ready", previews load,
 Preview / Download PDF / Download .tex / Validation report / All reports links resolve, every apply link present; Log
 link → `data.nosync/logs/jobsearch.log`. Schedule reinstalled (new log paths) and a launchd quick check started.
+
+## Reliability fixes (2026-10-13 evening)
+- The 18:00 scheduled full run was lost to a momentary network check failure → runs now wait about a minute for the
+  network (5 probes, 15 s apart) before giving up.
+- HTTP 520-524 (Cloudflare in front of Workday; Stryker, CACI) are retried with backoff like other 5xx.
+- Page caps on full runs: Workday 50 → 120 pages (2,400 results per search), Eightfold 20 → 70 pages (700).
+- Runs that never finished (run #64, from a test) are closed by the next run (finish time, no summary).
+- Missed full run re-run through launchd: exit 0; 273 sources, **0 failed**, 53 manual, 3 partial (down from ~44),
+  78,045 listings, 493 new. With the new caps, Qualcomm (+206 never-seen jobs), Microsoft (+158) and RTX (+29) are
+  complete: **0 partial sources** left. Tests: 513 passed.
+- Still manual by design: 53 companies whose sites forbid or block automated access (robots.txt / terms / bot
+  checks) or have no public job feed — the Manual Checks view lists them with their careers links.

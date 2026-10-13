@@ -23,6 +23,7 @@ from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, Sour
 from .util import join_locations
 
 PAGE = 10
+FULL_PAGES = 70           # full runs: up to 700 results per search (Qualcomm, Microsoft list 480-630)
 LIST_ALL_MAX = 300      # at most this many US jobs: list them all instead of searching by keyword
 US = "United States"
 
@@ -98,7 +99,7 @@ class EightfoldAdapter(Adapter):
             raise SourceError(f"{company.name}: https://{host}/api/pcsx/search: {e}") from e
         location = US if first.get("count") else ""     # a site without US jobs (or US naming): all locations
         # results are ranked by relevance, so the first 200 per keyword are the ones that matter
-        max_pages = 20 if ctx.full else min(ctx.max_pages, 10)
+        max_pages = FULL_PAGES if ctx.full else min(ctx.max_pages, 10)
         if (first.get("count") or 0) <= LIST_ALL_MAX:
             searches = [""]
             max_pages = max(max_pages, -(-LIST_ALL_MAX // PAGE))

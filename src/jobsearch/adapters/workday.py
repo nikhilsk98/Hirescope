@@ -24,7 +24,7 @@ from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, Sour
 from .util import join_locations, parse_dt
 
 PAGE = 20
-FULL_PAGES = 100          # full runs: up to 2,000 results per search (Leidos, NVIDIA, Capital One list 1,100-1,250)
+FULL_PAGES = 120          # full runs: up to 2,400 results per search (RTX lists ~2,050; Leidos, NVIDIA ~1,200)
 # Role searches come from config/title_rules.yaml -> search_queries.workday (why those phrases: see that file).
 # Co-op/intern roles come from each site's own early-career facets.
 _US = {"united states of america", "united states", "usa", "us"}
