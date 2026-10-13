@@ -21,11 +21,12 @@ levels:
   include: [intern, entry, mid, unknown]   # "unknown" = no level in the title (plain "Software Engineer")
   stretch: [senior]                        # kept with label capped at Stretch, if it asks <= yoe.match_max
   exclude: [staff_plus, manager]
-yoe:
+yoe:                      # leave any of these out to derive it from years_experience (+1 / +2 / +3), else 5 / 6 / 7
   match_max: 5            # roles asking 0-5 years are a full match
   stretch_max: 6          # 5-6 years -> Stretch
   filter_min: 7           # 7+ years -> Filtered Out (with the reason)
-years_experience: null    # your own years of professional experience (informational)
+years_experience: null    # your own years of professional experience: sets the YOE window above when it's left out,
+                          # and inside the match window roles asking more than this fit slightly less (yoe_fit.near)
 graduation_date: 2027-05  # YYYY-MM
 
 # --- Tracks (both searched every run) --------------------------------------
@@ -46,7 +47,8 @@ preferred_locations: []   # optional soft boost; metros from config/locations.ya
 work_modes: [remote, hybrid, onsite]
 
 # --- Domain / pay / authorization -------------------------------------
-domains: []
+domains: []              # e.g. [fintech|payments|banking, health care, robotics]: a job whose title, company or JD
+                          # mentions one gets a preference boost ("|" lists alternatives); silence never counts against
 salary:
   min: null
   currency: USD
@@ -89,7 +91,7 @@ weights:
   qualification: 0.65
   preference: 0.35
   qualification_parts: {skills: 0.4, semantic: 0.4, level: 0.2}
-  preference_parts: {location: 0.35, company_tier: 0.35, employment_type: 0.15, salary: 0.15}
+  preference_parts: {location: 0.35, company_tier: 0.35, employment_type: 0.15, salary: 0.15, domain: 0.15}
 
 # --- Freshness (an additive, capped bonus; never lifts a job past a hard filter) ----------------
 freshness: {boost_24h: 8, boost_72h: 4, decay_days: 21, cap: 10, coop_multiplier: 1.5}
@@ -146,7 +148,9 @@ scoring:
   clearance_penalty: 10          # clearance-required posting, only when work_authorization.us_citizen is not set
   title_fit: {core: 100, coop: 100, related: 85, semantic: 70}       # core/co-op title vs related vs meaning match
   level_fit: {intern: 100, entry: 100, mid: 100, senior: 60, other: 30}
-  yoe_fit: {match: 100, stretch: 60, over: 20}   # required years <= match_max / <= stretch_max / above
+  yoe_fit: {match: 100, near: 90, stretch: 60, over: 20}   # required years <= years_experience / <= match_max /
+                                 # <= stretch_max / above
+  domain_fit: {match: 100}       # the domain component when one of your domains is mentioned
   grad_fit: {match: 100, mismatch: 25}           # JD's graduation year(s) include yours / don't
   degree_above_yours: 40         # JD asks for a higher degree than your resume shows
   location_fit: {preferred: 100, remote_us: 90, other_us: 75, no_preferences: 100}   # no_preferences: when

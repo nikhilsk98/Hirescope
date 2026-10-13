@@ -42,12 +42,19 @@ class Level:
 
 
 def map_level(norm_title: str, company: str, yoe_required: float | None = None,
-              rules: LevelRules | None = None) -> Level:
+              rules: LevelRules | None = None, non_level: tuple[str, ...] | None = None) -> Level:
+    """non_level: phrases whose level-like words are not levels (title_rules non_level_phrases, e.g. "staff" in
+    "member of technical staff"); a rule match inside one is ignored, words around it still count ("senior …")."""
     rules = rules or load_level_rules()
+    if non_level is None:
+        from ..config import load_title_rules
+        non_level = tuple(load_title_rules().non_level_phrases)
+    protected = [m.span() for p in non_level for m in re.finditer(re.escape(p), norm_title)]
+    inside = lambda sp: any(a <= sp[0] and sp[1] <= b for a, b in protected)  # noqa: E731
     company_rules = rules.companies.get(company.casefold(), ())
     for source, rs in ((company, company_rules), ("generic", rules.generic)):
         for pat, lvl in rs:
-            if m := pat.search(norm_title):
+            if m := next((x for x in pat.finditer(norm_title) if not inside(x.span())), None):
                 where = f"{source} rule “{m.group(0)}”"
                 if lvl == "mid_or_senior":
                     if yoe_required is None:

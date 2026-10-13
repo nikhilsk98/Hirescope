@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from ..config import Company, Preferences
+from ..config import Company, Preferences, Scoring
 from ..extract.locations import preferred_match
 from ..extract.resume import Resume
 from ..extract.skills import extract_skills
@@ -59,6 +59,21 @@ def _resume_degree(resume: Resume) -> int:
     if re.search(r"\bb\.?s\.?\b|\bb\.?a\.?\b|bachelor|b\.?tech|b\.?e\.?\b", text):
         return 1
     return 0
+
+
+_DEFAULT_SCORING = Scoring()   # built-in values for keys a preferences file's partial dicts leave out
+
+
+def domain_match(text: str, domains: list[str]) -> tuple[str, str] | None:
+    """(your domain, the matched text) for the first domain mentioned. A domain entry may list alternatives with
+    "|" ("fintech|payments|banking"); spaces also match hyphens or nothing ("health care" ~ "health-care")."""
+    for d in domains:
+        alts = [a.strip() for a in str(d).split("|") if a.strip()]
+        for a in alts:
+            pat = r"[\s-]?".join(re.escape(w) for w in a.split())
+            if m := re.search(rf"(?<![A-Za-z0-9]){pat}(?![A-Za-z0-9])", text, re.I):
+                return alts[0], m.group(0)
+    return None
 
 
 def label_for(score: float, prefs: Preferences) -> str:
@@ -156,10 +171,12 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         level_notes.append(f"level {lvl}")
     yoe = job.get("yoe_required")
     y = prefs.yoe
+    mine = prefs.years_experience
     if yoe is not None:
-        level_bits.append(sc.yoe_fit["match"] if yoe <= y.match_max else
-                          sc.yoe_fit["stretch"] if yoe <= y.stretch_max else sc.yoe_fit["over"])
-        level_notes.append(f"{yoe:g}+ yrs required")
+        # inside the match window, roles asking more than your own years fit slightly less (yoe_fit.near)
+        level_bits.append((sc.yoe_fit["match"] if mine is None or yoe <= mine else sc.yoe_fit.get("near", _DEFAULT_SCORING.yoe_fit["near"]))
+                          if yoe <= y.match_max else sc.yoe_fit["stretch"] if yoe <= y.stretch_max else sc.yoe_fit["over"])
+        level_notes.append(f"{yoe:g}+ yrs required" + (f" (you have {mine:g})" if mine is not None else ""))
         if yoe > y.match_max:
             gaps.append(f"Requires {yoe:g}+ years; your match window is 0–{y.match_max:g}")
     grad = job.get("grad_years") or []
@@ -218,6 +235,10 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         sal_score = 100 if job["salary_max"] >= s.min else max(0, 100 * job["salary_max"] / s.min - 50)
         sal_detail = f"{job.get('salary_currency') or ''} {job['salary_min']:,}–{job['salary_max']:,}".strip()
 
+    dom_score, dom_detail = None, "No domains set in preferences" if not prefs.domains else "None of your domains mentioned"
+    if prefs.domains and (hit := domain_match(f"{job.get('title', '')}\n{job.get('company', '')}\n{jd_text}", prefs.domains)):
+        dom_score, dom_detail = sc.domain_fit.get("match", _DEFAULT_SCORING.domain_fit["match"]), f"{hit[0]} (mentions “{hit[1]}”)"
+
     w = prefs.weights.preference_parts
     pref_parts = {
         "location": Part(loc_score, w.get("location", 0),
@@ -225,6 +246,8 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
         "company_tier": Part(tier_score, w.get("company_tier", 0), f"tier {tier}" if tier else "not in your tiers or the seed list (tier 3)"),
         "employment_type": Part(et_score, w.get("employment_type", 0), et or "Not stated"),
         "salary": Part(sal_score, w.get("salary", 0), sal_detail),
+        # silence is uncertainty (left out of the average), never a mismatch
+        "domain": Part(dom_score, w.get("domain", 0.15), dom_detail),
     }
     pref, pref_missing = _weighted(pref_parts)
 

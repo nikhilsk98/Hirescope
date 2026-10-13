@@ -228,3 +228,44 @@ def test_no_jd_is_neutral_not_a_match(cfg, resume):
     res = score(cfg, resume, job(min_reqs=[], pref_reqs=[], skills=[], extra={"has_jd": False}))
     assert res.qualification == 50.0 and res.label != "Strong"
     assert any("No job description" in g for g in res.gaps)
+
+
+def test_domain_match_alternatives_and_variants():
+    from jobsearch.match.score import domain_match
+    assert domain_match("We build payments infrastructure", ["fintech|payments|banking"]) == ("fintech", "payments")
+    assert domain_match("A health-care platform", ["health care"]) == ("health care", "health-care")
+    assert domain_match("Healthcare AI", ["health care"]) == ("health care", "Healthcare")
+    assert domain_match("Robotics and autonomy", ["fintech"]) is None
+    assert domain_match("We use ML tools", ["ml"]) == ("ml", "ML") and domain_match("html", ["ml"]) is None
+
+
+def test_years_experience_sets_the_yoe_window():
+    from jobsearch.config import Preferences
+    p = Preferences(years_experience=2)
+    assert (p.yoe.match_max, p.yoe.stretch_max, p.yoe.filter_min) == (3, 4, 5)
+    q = Preferences(years_experience=4, yoe={"match_max": 6})        # explicit values win
+    assert (q.yoe.match_max, q.yoe.stretch_max, q.yoe.filter_min) == (6, 6, 7)
+    d = Preferences()
+    assert (d.yoe.match_max, d.yoe.stretch_max, d.yoe.filter_min) == (5, 6, 7)
+
+
+def test_domains_and_own_years_in_scoring(cfg, resume):
+    def scored(prefs, j, jd=""):
+        return score_job(j, resume, prefs, apply_rules(j, prefs, cfg.title_rules, NOW), no_sem(), cfg.synonyms,
+                         cfg.companies[0], NOW, jd_text=jd)
+    p = cfg.prefs.model_copy(deep=True)
+    p.domains, p.years_experience = [], 3
+    plain = scored(p, job(yoe_required=3))
+    assert plain.breakdown["preference"]["parts"]["domain"]["score"] is None          # no domains: left out
+    p.domains = ["fintech|payments"]
+    hit = scored(p, job(yoe_required=3), "We build payments infrastructure for banks.")
+    miss = scored(p, job(yoe_required=3), "We build robots.")
+    d = hit.breakdown["preference"]["parts"]["domain"]
+    assert d["score"] == 100 and "payments" in d["detail"]
+    assert miss.breakdown["preference"]["parts"]["domain"]["score"] is None          # silence is not a mismatch
+    assert hit.preference >= miss.preference
+    # years_experience grades fit inside the match window: asking more than your 3 years fits slightly less
+    near = scored(p, job(yoe_required=4))
+    lv = lambda r: r.breakdown["qualification"]["parts"]["level"]   # noqa: E731
+    assert lv(near)["score"] < lv(plain)["score"] and "you have 3" in lv(near)["detail"]
+    assert near.label != "Weak" or plain.label == "Weak"

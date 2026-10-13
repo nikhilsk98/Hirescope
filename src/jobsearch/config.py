@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from . import paths
 
@@ -155,7 +155,9 @@ class Scoring(BaseModel):
     clearance_penalty: float = 10           # only when work_authorization.us_citizen is not set
     title_fit: dict[str, float] = {"core": 100, "coop": 100, "related": 85, "semantic": 70}
     level_fit: dict[str, float] = {"intern": 100, "entry": 100, "mid": 100, "senior": 60, "other": 30}
-    yoe_fit: dict[str, float] = {"match": 100, "stretch": 60, "over": 20}   # <= match_max / <= stretch_max / above
+    # <= years_experience / <= match_max / <= stretch_max / above
+    yoe_fit: dict[str, float] = {"match": 100, "near": 90, "stretch": 60, "over": 20}
+    domain_fit: dict[str, float] = {"match": 100}   # JD / title / company mentions one of your domains
     grad_fit: dict[str, float] = {"match": 100, "mismatch": 25}
     degree_above_yours: float = 40          # JD asks for a higher degree than your resume shows
     location_fit: dict[str, float] = {"preferred": 100, "remote_us": 90, "other_us": 75, "no_preferences": 100}
@@ -184,8 +186,8 @@ class Weights(BaseModel):
     preference: float = 0.35
     qualification_parts: dict[str, float] = {"skills": 0.4, "semantic": 0.4, "level": 0.2}
     preference_parts: dict[str, float] = {
-        "location": 0.35, "company_tier": 0.35, "employment_type": 0.15, "salary": 0.15,
-    }   # freshness is a separate capped bonus (Freshness)
+        "location": 0.35, "company_tier": 0.35, "employment_type": 0.15, "salary": 0.15, "domain": 0.15,
+    }   # freshness is a separate capped bonus (Freshness); domain only counts when it matches
 
 
 class Thresholds(BaseModel):
@@ -219,9 +221,10 @@ class LevelPrefs(BaseModel):
 
 
 class YoePrefs(BaseModel):
-    match_max: float = 5          # 0..match_max years -> full match
-    stretch_max: float = 6        # (match_max, stretch_max] -> Stretch
-    filter_min: float = 7         # >= filter_min -> filtered (rules.yoe: hard)
+    """Unset values come from years_experience (your years +1 / +2 / +3), else 5 / 6 / 7."""
+    match_max: float | None = None      # 0..match_max years -> full match
+    stretch_max: float | None = None    # (match_max, stretch_max] -> Stretch
+    filter_min: float | None = None     # >= filter_min -> filtered (rules.yoe: hard)
 
 
 class Preferences(BaseModel):
@@ -231,7 +234,7 @@ class Preferences(BaseModel):
                                        "engineering manager", "architect", "head of"]
     levels: LevelPrefs = LevelPrefs()
     yoe: YoePrefs = YoePrefs()
-    years_experience: float | None = None    # your own, from the resume; informational
+    years_experience: float | None = None    # your own: sets the default YOE window and grades fit inside it
     graduation_date: str | None = None
     tracks: Tracks = Tracks()
     country: str = "US"
@@ -266,6 +269,17 @@ class Preferences(BaseModel):
     timezone: str = "America/New_York"
     my_companies_csv: str = "inputs/my_companies.csv"
     statuses_import_dir: str = "~/Downloads"
+
+    @model_validator(mode="after")
+    def _yoe_window(self):
+        y, base = self.yoe, self.years_experience
+        if y.match_max is None:
+            y.match_max = base + 1 if base is not None else 5
+        if y.stretch_max is None:
+            y.stretch_max = max(y.match_max, base + 2 if base is not None else 6)
+        if y.filter_min is None:
+            y.filter_min = max(y.stretch_max + 1, base + 3 if base is not None else 7)
+        return self
 
     @field_validator("graduation_date", mode="before")
     @classmethod

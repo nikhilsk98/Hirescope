@@ -149,3 +149,30 @@ def test_two_runs_same_day_one_tab_no_duplicates(conn, cfg, resume, embedder, gr
 def test_local_day_uses_timezone():
     # 02:00 UTC on Oct 12 is still Oct 11 in New York
     assert local_day("2026-10-12T02:00:00+00:00", "America/New_York") == "2026-10-11"
+
+
+def test_discovered_label_only_for_jobs_new_after_the_first_scan(conn, cfg, resume, embedder, greenhouse_payload, tmp_path):
+    """No posting date: first_seen stands in (labeled "Discovered … (posting date unknown)") only for jobs that
+    appeared after earlier runs of their source; jobs from the first scan get no freshness bonus at all."""
+    import copy
+    co = [Company(name="DemoCo", source="greenhouse", board="democo")]
+    undated = copy.deepcopy(greenhouse_payload)
+    for j in undated["jobs"]:
+        j.pop("first_published", None)
+    first = {**undated, "jobs": [j for j in undated["jobs"] if str(j["id"]) != "1001"]}     # 1001 appears later
+    run(conn, cfg, resume, co, mock_client(gh_handler({"democo": first})), embedder, tmp_path)
+    conn.execute("UPDATE jobs SET first_seen = '2026-01-01T00:00:00+00:00'")            # the first scan was long ago
+    conn.commit()
+    run(conn, cfg, resume, co, mock_client(gh_handler({"democo": undated})), embedder, tmp_path)
+    by_id = {j["job_id"]: j for j in db.open_jobs(conn)}
+    new, old = by_id["1001"], by_id["1002"]
+    assert not new["filtered"] and not old["filtered"]
+    assert new["posted_date"] is None and old["posted_date"] is None
+    assert new["signals"]["discovered_proxy"] is True and old["signals"]["discovered_proxy"] is False
+    assert "discovered (posting date unknown)" in new["breakdown"]["freshness"]["detail"]
+    assert "no freshness bonus" in old["breakdown"]["freshness"]["detail"]
+    out = tmp_path / "data.js"
+    write_data_js(out, db.open_jobs(conn), {"summary": {}}, "America/New_York", resume.version_hash, 200, lambda j: 1)
+    _, jobs = load_data_js(out)
+    e = {j["job_id"]: j for j in jobs}
+    assert e["1001"]["discovered"] is True and e["1002"]["discovered"] is False

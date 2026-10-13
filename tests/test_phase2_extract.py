@@ -180,3 +180,18 @@ def test_terms_with_year_before_season():
     from jobsearch.extract.track import parse_terms
     assert parse_terms("2027 Summer Intern, MS/PhD, Perception") == ["Summer 2027"]
     assert parse_terms("Spring 2027 co-op; also 2027 Fall") == ["Spring 2027", "Fall 2027"]
+
+
+def test_member_of_technical_staff_is_not_a_staff_level():
+    """At AI labs "Member of Technical Staff" is the plain engineer title: the "staff" inside it is not a level,
+    but level words around it still count."""
+    from jobsearch.config import load_title_rules
+    from jobsearch.extract.levels import map_level
+    from jobsearch.extract.normalize import normalize_title
+    r = load_title_rules()
+    lv = lambda t, co="Perplexity": map_level(normalize_title(t, r), co, None, non_level=tuple(r.non_level_phrases)).level  # noqa: E731
+    assert lv("Member of Technical Staff (Software Engineer, Monetization)") == "unknown"
+    assert lv("MTS, Backend") == "unknown"
+    assert lv("Senior Member of Technical Staff", "Oracle") == "senior"
+    assert lv("Member of Technical Staff - Staff Engineer") == "staff_plus"
+    assert lv("Staff Software Engineer") == "staff_plus"

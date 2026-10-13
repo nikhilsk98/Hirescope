@@ -38,7 +38,7 @@ from .watchlist import WatchItem
 log = logging.getLogger(__name__)
 
 # Bump when extraction logic changes; stored jobs are then re-extracted from their saved title/location/JD.
-EXTRACT_VERSION = "2026-10-12.14"  # .14: "2027 Summer Intern" term order; .13: "Toronto, CA" = Canada
+EXTRACT_VERSION = "2026-10-12.15"  # .15: "staff" inside "member of technical staff" is not a level; .14: "2027 Summer Intern" term order; .13: "Toronto, CA" = Canada
 EXTRACT_CONFIGS = ("title_rules.yaml", "levels.yaml", "locations.yaml", "skills_synonyms.yaml", "ats_keywords.yaml")
 DIRECTORY_KEY = "ats_directory:simplify"
 WORKERS = 16
@@ -133,7 +133,7 @@ def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None, official: bool = Tr
     loc = normalize_location(raw.location)
     et = normalize_employment_type(raw.employment_type) or employment_type_from_title(norm, rules)
     track = classify_track(raw.title, raw.employment_type, text, raw.track_hint)
-    level = map_level(norm, raw.company, yoe.min)
+    level = map_level(norm, raw.company, yoe.min, non_level=tuple(rules.non_level_phrases))
     terms = list(dict.fromkeys([*raw.terms, *parse_terms(f"{raw.title}\n{text[:4000]}")]))
     deadline, deadline_ev = parse_deadline(text, raw.extra.get("deadline"))
     y = parse_yoe(reqs.preferred)
