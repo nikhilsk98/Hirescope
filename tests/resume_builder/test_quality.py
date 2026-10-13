@@ -128,7 +128,7 @@ def test_unsupported_claim_blocks_ready_and_keeps_last_good_version(rb_env):
     with versions.JobLock(jd):
         good = pipeline.finalize(pipeline.build(str(rb_env.job)))
     assert good["status"] == "ready"
-    pipeline.prepare(str(rb_env.job))
+    pipeline.prepare(str(rb_env.job), regenerate=True)
 
     def invent(c):
         c.experience[0].bullets[0].text = "Led a 12-person team building REST APIs in Java on GCP for millions of users"

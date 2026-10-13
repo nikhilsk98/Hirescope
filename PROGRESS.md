@@ -228,7 +228,7 @@ Built from `RESUME_BUILDER_PROMPT.md`, all 5 phases back to back. Resume here: r
 ## Status
 - [x] Phase 1 — core pipeline (2026-10-13)
 - [x] Phase 2 — quality (drafter → reviewer, truth verification, reports, evidence interview) (2026-10-13)
-- [ ] Phase 3 — versioning (manifests, dedupe, diff, rollback, locks, manual edits)
+- [x] Phase 3 — versioning (manifests, dedupe, diff, rollback, locks, manual edits) (2026-10-13)
 - [ ] Phase 4 — HireScope integration (button, statuses, bridge, dashboard, applications, batch)
 - [ ] Phase 5 — hardening (failure tests, docs, cleanup) + final E2E, tag `resume-builder-v1.0`
 
@@ -333,6 +333,46 @@ current, coverage / change / defense reports, evidence interview with DEMO answe
 - DoorDash — Software Engineer I (full-time, 16070): v1 READY, 0 unsupported (40 checked), coverage 68%; missing
   resume keyword "code reviews" (the bullet says "reviewing code"); missing qualifications: data structures, Kotlin.
 - Inspected: page images, extracted text, truth / coverage / changes / defense / review reports.
+
+## Phase 3 report (2026-10-13)
+**Built** (`versions.py`, `pipeline.prepare/build`, CLI)
+- Manifest per version: job, generation time, input hashes (master resume, additions, template, rules, config),
+  template / rules version, profile, track, settings hash, JD package hash, validation, truth and coverage results,
+  attempts, repairs, font, tool versions, file hashes, locks, hand edits carried, **dedupe key**.
+- Dedupe: `prepare` returns **REUSED** with the current version when job + JD package + inputs + settings + profile +
+  locks are unchanged and the version passed and wasn't edited by hand; `--regenerate` builds a new version anyway.
+- Versions kept (`v1`, `v2`, … written as `.vN.tmp` then renamed); `current.json` only ever points at a passing
+  version; `history.jsonl` (built / rollback / lock / reviewed); `rollback <job> N`; `diff <job> [A B]` (bullet
+  changes incl. rewordings, section order, skills, content.tex lines; notes hand-edited versions);
+  `mark-reviewed` (only a ready version).
+- Locks: `lock <job> <bullet id | entry id | section:skills|education|summary>` from the current version
+  (`show --bullets` lists ids); applied to the baseline, restored at build if the drafter changed or dropped them,
+  never trimmed by the repair loop; locks are part of the dedupe key.
+- Hand edits: each version keeps an untouched `.generated/` copy; edits to `content.json` (changed / deleted / added
+  bullets) and to bullet text in `content.tex` are detected and carried into the next generation (origin "manual",
+  restored at build, kept from trimming). Conflicts are flagged and block "ready" instead of overwriting: tex edits
+  beyond bullet text, the same bullet edited differently in json and tex, an edited bullet whose evidence changed in
+  the master resume since. `--discard-edits` is an explicit choice; the edited version itself is never modified.
+- Concurrency: a job lock (pid + time; stale locks replaced) around prepare / build / lock / rollback, and a
+  "generation in progress" guard (2 h, `--force` to start over).
+
+**Fixed along the way**: the diff missed rewordings of the same bullet (ids are stable across rewrites); "restored"
+notes for locked/hand-edited bullets fired when only priority/origin differed.
+
+**Tests**: 477 passed (71 Resume Builder; 11 new: manifest fields, duplicate request reuses, `--regenerate` → v2 with v1
+kept, input change → no reuse, diff + rollback + history, failed versions can't be current or reviewed, locked
+bullet / entry / section survive a drafter that ignores them, locked bullets never trimmed, hand edits in
+content.json and in content.tex preserved, unmappable tex edits and json-vs-tex disagreement and changed evidence
+flagged, `--discard-edits`, a second process holding the lock blocks a run, stale lock replaced, generation-in-progress
+guard, unique atomic version folders + PDF hash in the manifest).
+
+**Real data**
+- DoorDash (16070): locked the "Java-based back-end services … 70%" bullet; hand-edited v1's Spring Boot bullet to
+  "performing debugging and code reviews" (the JD's term, the evidence's own wording); `prepare --regenerate` carried
+  1 edit + 1 lock → v2 READY with both unchanged; same request again → **REUSED v2**; diff v1 → v2 shows the line;
+  rollback v1 → v2 works. (v1 predates dedupe keys, so the first request after this phase regenerated, as expected.)
+- Copart (32534): regenerated → v3 READY (the one-word last line is gone); same request again → **REUSED v3**; diff
+  v2 → v3 shows the reworded bullet.
 
 ## Needs Nikhil
 1. Two Accenture bullets both claim a **70% reliability** gain ("processing reliability" and "distributed storage

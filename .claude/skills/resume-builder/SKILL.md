@@ -50,3 +50,16 @@ scripts do everything deterministic. Run every command from the repo root with `
 6. **Evidence interview** (optional, when strong matches lack detail): `python -m resume_builder interview <job_id>`
    lists up to 5 questions. Ask Nikhil; save an answer only after Nikhil explicitly confirms it:
    `python -m resume_builder add-evidence --entry <id> --question "..." --answer "..." --confirm`.
+
+## Versions, locks and hand edits
+- `prepare` prints **REUSED** when the current version was built from the same job, inputs (master resume, additions,
+  template, rules, config), profile and locks and still passes: report that version; no new generation. Only
+  `--regenerate` (the user asked for it) builds a new version.
+- A generation in progress (prepared, not built) blocks a second `prepare` for the job; never use `--force` unless
+  the user says the earlier run was abandoned.
+- Locked items (`lock <job> <bullet id | entry id | section:skills|education|summary>`) and hand edits the user
+  made to the current version's `content.json` / `content.tex` are already in `baseline.json` and listed in
+  `brief.md`. Keep them exactly; the build restores them anyway. Report hand-edit **conflicts** to the user; never
+  pass `--discard-edits` on your own.
+- `show <job> [--bullets]`, `diff <job> [A B]`, `rollback <job> N`, `mark-reviewed <job> [N]` (only when the user says
+  they reviewed it). A failed build never replaces the current version.

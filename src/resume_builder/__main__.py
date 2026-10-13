@@ -1,14 +1,21 @@
 """python -m resume_builder <command> — the deterministic half of /resume-builder (see SKILL.md).
 
   check                      dependencies and inputs
-  prepare <job> [--profile]  evidence bank, JD analysis, baseline + brief for the drafter (work/)
+  prepare <job> [--profile X] [--regenerate] [--force] [--discard-edits]
+                             evidence bank, JD analysis, baseline + brief for the drafter (work/); reuses the
+                             current version when nothing changed (unless --regenerate)
   review <job>               reviewer packet for work/draft.json (rule findings + truth check), once per generation
   verify <job> [--content F] truth check of a content file against the evidence it cites
   build <job> [--content F]  reviewed content → truth check, render, compile, check the PDF, repair (max 3), save v<N>
   interview <job>            evidence-interview questions for this job (answers are saved only with add-evidence)
   add-evidence --entry ID --question Q --answer A --confirm
                              save one answer you confirmed to inputs/evidence_additions.md
-  show <job>                 versions and the current one
+  show <job> [--bullets]     versions, the current one, locks (and bullet ids to lock)
+  diff <job> [A B]           what changed between two versions (default: previous → latest)
+  rollback <job> N           make v<N> current again (it must have passed every check)
+  lock <job> TARGET          keep a bullet id, an entry (exp-…/proj-…) or section:skills|education|summary
+  unlock <job> TARGET        as approved in the current version, unchanged on regeneration
+  mark-reviewed <job> [N]    you reviewed/approved the current (or given) version
   schema                     the content JSON schema
 Job = the HireScope job ID (the number in the dashboard URL: #…&job=123).
 """
@@ -51,8 +58,14 @@ def cmd_check(args) -> int:
 
 
 def cmd_prepare(args) -> int:
-    out = pipeline.prepare(args.job, args.profile)
+    out = pipeline.prepare(args.job, args.profile, regenerate=args.regenerate, force=args.force,
+                           discard_edits=args.discard_edits)
     a = out["analysis"]
+    if out.get("reused"):
+        r = out["reused"]
+        print(f"REUSED: v{r['version']} ({r['status']}) was built from the same job, inputs, settings and locks; "
+              f"nothing to regenerate.\n  PDF: {r['pdf']}\n  (--regenerate builds a new version anyway)")
+        return 0
     cats = {}
     for r in a["requirements"]:
         cats[r["category"]] = cats.get(r["category"], 0) + 1
@@ -63,6 +76,17 @@ def cmd_prepare(args) -> int:
     print(f"  brief:    {out['work']}/brief.md\n  baseline: {out['baseline']}\n  write:    {out['work']}/content.json")
     for w in out["bank_warnings"]:
         print(f"  note: {w}")
+    car = out.get("carried") or {}
+    if car.get("manual"):
+        print(f"  hand edits carried from v{car['from_version']}: {len(car['manual'])} bullet(s)")
+    if car.get("discarded"):
+        print(f"  hand edits in v{car['from_version']} discarded (--discard-edits); that version keeps them")
+    for c in car.get("conflicts") or []:
+        print(f"  ⚠ conflict: {c}")
+    locks = out.get("locks") or {}
+    n = sum(len(v) for v in locks.values())
+    if n:
+        print(f"  locks applied: {n}")
     return 0
 
 
@@ -166,6 +190,54 @@ def cmd_add_evidence(args) -> int:
     return 0
 
 
+def cmd_diff(args) -> int:
+    _job, jd = _job_dir(args.job)
+    print(versions.diff(jd, args.a, args.b))
+    return 0
+
+
+def cmd_rollback(args) -> int:
+    _job, jd = _job_dir(args.job)
+    with versions.JobLock(jd):
+        cur = versions.rollback(jd, args.version)
+    _bridge_refresh(_job)
+    print(f"Current: v{cur['version']} ({cur['status']}) — {cur['pdf']}")
+    return 0
+
+
+def cmd_lock(args) -> int:
+    _job, jd = _job_dir(args.job)
+    with versions.JobLock(jd):
+        what = versions.lock(jd, args.target, args.version)
+    print(f"Locked {what}: regeneration keeps it unchanged.")
+    return 0
+
+
+def cmd_unlock(args) -> int:
+    _job, jd = _job_dir(args.job)
+    with versions.JobLock(jd):
+        hit = versions.unlock(jd, args.target)
+    print("Unlocked." if hit else f"'{args.target}' was not locked.")
+    return 0 if hit else 1
+
+
+def cmd_mark_reviewed(args) -> int:
+    job, jd = _job_dir(args.job)
+    with versions.JobLock(jd):
+        m = versions.mark_reviewed(jd, args.version)
+    _bridge_refresh(job)
+    print(f"v{m['version']} marked reviewed ({m['reviewed_at']}).")
+    return 0
+
+
+def _bridge_refresh(job) -> None:
+    try:
+        from . import hirescope_bridge
+        hirescope_bridge.update_job(job["id"])
+    except ImportError:
+        pass
+
+
 def cmd_show(args) -> int:
     from jobsearch.storage import db as hs_db
     from jobsearch import paths as hs_paths
@@ -176,7 +248,17 @@ def cmd_show(args) -> int:
     finally:
         conn.close()
     jd = pipeline.job_dir(job["company"], job["id"])
-    _print({"job_dir": str(jd), "current": versions.current(jd), "versions": versions.versions_summary(jd)})
+    out = {"job_dir": str(jd), "current": versions.current(jd), "versions": versions.versions_summary(jd),
+           "locks": sorted(versions.locked_ids(versions.load_locks(jd))) + sorted(
+               f"section:{k}" for k in versions.load_locks(jd)["sections"])}
+    cur = versions.current(jd)
+    if cur:
+        ed = versions.detect_edits(jd / f"v{cur['version']}")
+        out["hand_edits"] = {k: ed[k] for k in ("edited", "json", "tex", "bullets", "removed", "conflicts")}
+        if args.bullets:
+            c = versions._content_of(jd / f"v{cur['version']}")
+            out["bullets"] = [{"id": b.id, "text": b.text} for _s, _e, b in c.all_bullets()]
+    _print(out)
     return 0
 
 
@@ -188,6 +270,9 @@ def main(argv=None) -> int:
     p = sub.add_parser("prepare")
     p.add_argument("job")
     p.add_argument("--profile")
+    p.add_argument("--regenerate", action="store_true", help="build a new version even if nothing changed")
+    p.add_argument("--force", action="store_true", help="start over even if a generation is in progress")
+    p.add_argument("--discard-edits", action="store_true", help="don't carry hand edits of the current version")
     p = sub.add_parser("build")
     p.add_argument("job")
     p.add_argument("--content")
@@ -205,6 +290,23 @@ def main(argv=None) -> int:
     p.add_argument("--confirm", action="store_true", help="you confirm the answer is true and may be used")
     p = sub.add_parser("show")
     p.add_argument("job")
+    p.add_argument("--bullets", action="store_true")
+    p = sub.add_parser("diff")
+    p.add_argument("job")
+    p.add_argument("a", nargs="?", type=int)
+    p.add_argument("b", nargs="?", type=int)
+    p = sub.add_parser("rollback")
+    p.add_argument("job")
+    p.add_argument("version", type=int)
+    for name in ("lock", "unlock"):
+        p = sub.add_parser(name)
+        p.add_argument("job")
+        p.add_argument("target")
+        if name == "lock":
+            p.add_argument("--version", type=int)
+    p = sub.add_parser("mark-reviewed")
+    p.add_argument("job")
+    p.add_argument("version", nargs="?", type=int)
     sub.add_parser("schema")
     args = ap.parse_args(argv)
     try:
@@ -213,8 +315,9 @@ def main(argv=None) -> int:
             return 0
         return {"check": cmd_check, "prepare": cmd_prepare, "build": cmd_build, "show": cmd_show,
                 "review": cmd_review, "verify": cmd_verify, "interview": cmd_interview,
-                "add-evidence": cmd_add_evidence}[args.cmd](args)
-    except (InputError, ContentError, CompileError, versions.LockedError) as e:
+                "add-evidence": cmd_add_evidence, "diff": cmd_diff, "rollback": cmd_rollback, "lock": cmd_lock,
+                "unlock": cmd_unlock, "mark-reviewed": cmd_mark_reviewed}[args.cmd](args)
+    except (InputError, ContentError, CompileError, versions.LockedError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 2
 
