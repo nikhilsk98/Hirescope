@@ -217,3 +217,81 @@ watchlist no longer show stale "manual" / "failed" rows.
    `backups.dir` (e.g. iCloud Drive).
 5. Use the dashboard and **Export statuses** regularly (learning, applications in SQLite, backups).
 6. Old branches: local `backup-before-rewrite`, remote `phase1-vertical-slice` / `phase2` (say "delete old branches").
+
+---
+
+# Resume Builder (`/resume-builder`)
+
+Built from `RESUME_BUILDER_PROMPT.md`, all 5 phases back to back. Resume here: read this section and
+`git log --oneline`, then continue from the first phase not marked done.
+
+## Status
+- [x] Phase 1 — core pipeline (2026-10-13)
+- [ ] Phase 2 — quality (drafter → reviewer, truth verification, reports, evidence interview)
+- [ ] Phase 3 — versioning (manifests, dedupe, diff, rollback, locks, manual edits)
+- [ ] Phase 4 — HireScope integration (button, statuses, bridge, dashboard, applications, batch)
+- [ ] Phase 5 — hardening (failure tests, docs, cleanup) + final E2E, tag `resume-builder-v1.0`
+
+## Phase 1 report (2026-10-13)
+**Setup**: Tectonic 0.17.0 and poppler 26.10.0 (Homebrew). Calibri is not installed system-wide (only inside
+Microsoft Word's app bundle, which XeTeX can't see), so the build copy of the template selects Calibri when it exists
+and **Carlito** (installed with `brew install --cask font-carlito`; metric-compatible, same line breaks) otherwise;
+the font used is reported in every validation report and manifest. Your template file is never modified.
+`pdfplumber` added to `requirements.txt` (MIT; PDF text, glyph sizes, links).
+
+**Built** (`src/resume_builder/`, `config/resume_builder.yaml`, `.claude/skills/resume-builder/SKILL.md`)
+- `evidence.py`: evidence bank from `master_resume.md` (+ confirmed `evidence_additions.md`): entries (role,
+  organization, location, dates exactly as written) and items with ids (`exp-accenture-b5`), technologies (HireScope
+  keyword vocabulary), actions, outcomes, metrics only as written. Experience / projects / coursework / education /
+  skills kept separate. Cached by input hashes. Malformed or contradictory input (no dates, end before start, the
+  same role twice with different dates, bullets outside an entry, unknown addition targets) stops with the exact
+  line. Template bullets missing from the master resume are reported.
+- `jd_analysis.py`: starts from the job package v2 (`render_package` / `parse_package`); responsibilities,
+  required / preferred / mentioned lines, ATS keywords, eligibility, profile auto-pick (backend / fullstack / cloud /
+  ml), requirement → evidence mapping (direct / transferable / gap / needs_judgment; transferable only through
+  `related_groups`, never equivalent), instruction-like JD lines listed and dropped.
+- `content_schema.py` (pydantic, unknown fields rejected; titles/employers/dates are not in the JSON, the renderer
+  takes them from the bank), `draft.py` (deterministic baseline: your bullets verbatim, ranked for the JD, track
+  section order), `render.py` (template split into header + `\input{content.tex}`, full escaping, safe links, font
+  fallback, no syllable hyphenation so an ATS never sees "produc-tion"), `compile.py` (Tectonic `--untrusted`,
+  isolated build dir, timeout, log parsing, contact details redacted from logs), `validate.py` (page count, blank
+  pages, compiler errors / overfull boxes / missing glyphs, fonts embedded, min font size, margins, clipping,
+  overlapping lines, line spacing, stretched lines, bottom whitespace, bullets over 2 lines, one-word last lines,
+  hyphenation, pdftotext vs content incl. reading order, headings, bullet characters, contact details, links on their
+  own text, rendered page images + ink in the margins), bounded repair (max 3: repetition → lowest-priority bullets →
+  summary / courses / extra projects / an irrelevant old role → entry spacing; never fonts or margins),
+  `versions.py` (v<N> folders, source bundle with fonts, manifest, current pointer, job lock), CLI
+  `python -m resume_builder check | prepare | build | show | schema`.
+
+**Fixed along the way**
+- HireScope: **3,288 visible jobs had no JD** since the repo moved to `~/Projects` (absolute `jd_path` values
+  pointed at the old folder): read sites now fall back to the same file under `data/jd`, and each run repairs the
+  stored paths (16,526 rows fixed; separate commit). Rescored: 7,025 visible.
+- Master resume: the four Accenture bullets from the template (Solace, OSGi, Spring Boot, MySQL/Oracle) added at
+  your request, in your wording; then rescored HireScope.
+- Line pitch was measured from glyph tops (bullet symbols are taller than text) → measured from baselines; overlap
+  test uses baseline distance (the template's `\linespread{0.90}` makes glyph boxes touch); right-aligned dates are
+  checked for presence, not position; the header is excluded from the stretched-line check; GCP's "related" terms were
+  everything (the vocabulary puts all skills in one category) → explicit `related_groups`.
+- Your surname is kept out of the public repo: the PDF name comes from the `# First Last` heading of your master
+  resume.
+
+**Tests**: 443 passed (406 HireScope + 37 Resume Builder: bank parsing, metrics, rebuild on hash change, 6
+malformed/contradictory inputs, additions, template drift, mapping categories incl. AWS≠GCP, profile override, job ID
+validation incl. traversal, ambiguous IDs, baseline order per track, schema rejects raw LaTeX fields / empty evidence /
+control chars, misattributed evidence, every LaTeX special char, unsafe links, template untouched + font fallback,
+special chars + a long link compile and extract correctly, DEMO resume passes every check, missing and garbled text
+detected, overflow trimmed in priority order through the real build loop, repair order, naming / path validation,
+settings validation, prepare → build → v1, contact details redacted, stretched lines).
+
+**Real data** (baseline content = your bullets verbatim; tailoring starts in Phase 2):
+- Copart — Software Engineering Intern (co-op, job 32534, fullstack profile): READY, 1 page, Carlito, 26 checks pass;
+  warnings: one-word last line ("CSS."), one stretched line.
+- DoorDash — Software Engineer I (full-time, job 16070, backend profile, 12 requirements: 4 direct, 1 transferable,
+  3 gap, 4 needs judgment): READY, 1 page; warnings: two one-word last lines, two stretched lines.
+- Inspected: page images (layout matches the template), pdftotext output (reading order, headings, bullets), links
+  (mailto / tel / LinkedIn on their own text), logs and reports (no email or phone outside the resume itself).
+
+## Needs Nikhil
+1. Two Accenture bullets both claim a **70% reliability** gain ("processing reliability" and "distributed storage
+   reliability"). If they are the same result, say which wording to keep; the drafter will not use both together.

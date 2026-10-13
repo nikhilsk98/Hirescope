@@ -1,0 +1,35 @@
+\documentclass[10pt,letterpaper]{article}
+% DEMO template for Resume Builder tests (same structure as a typical one-column resume)
+\usepackage[top=1.4cm,bottom=1.4cm,left=1.4cm,right=1.4cm]{geometry}
+\usepackage{titlesec,enumitem,hyperref,xcolor,iftex}
+\definecolor{primaryColor}{RGB}{0,0,0}
+\hypersetup{colorlinks=true,urlcolor=primaryColor}
+\pagestyle{empty}
+\setlength{\parskip}{0pt}
+\linespread{0.90}
+\setlength{\parindent}{0pt}\pagenumbering{gobble}
+\titleformat{\section}{\large\bfseries}{}{0pt}{}[\vspace{2pt}\titlerule]
+\titlespacing{\section}{0pt}{0.25cm}{0.1cm}
+\renewcommand\labelitemi{$\vcenter{\hbox{\small$\bullet$}}$}
+\setlist[itemize]{leftmargin=10pt,itemsep=0pt,topsep=0pt,parsep=0pt}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{lmodern}
+\else
+  \usepackage{fontspec}
+  \setmainfont{Calibri}
+\fi
+\begin{document}
+\begin{center}
+  {\Large \textbf{Demo Candidate}}\\
+  Boston, MA \,|\, \href{mailto:demo.candidate@example.com}{demo.candidate@example.com} \,|\, \href{tel:+1-555-010-0000}{+1 (555) 010-0000}\\
+  \href{https://linkedin.com/in/demo-candidate}{linkedin.com/in/demo-candidate}
+\end{center}
+
+\section{Experience}
+\textbf{Software Engineer — Demo Systems Inc, Boston MA} \hfill \textbf{Jan 2022 – Present}
+\begin{itemize}
+\item Built REST APIs in Java and Spring Boot for a payments service handling 2,000+ daily requests.
+\end{itemize}
+\end{document}
