@@ -134,6 +134,10 @@ class Schedule(BaseModel):
     quick_hours: float = 2.5                     # quick checks (My Companies + tier 1) between full runs; 0 = off
 
 
+class ManualChecks(BaseModel):
+    remind_days: int = 7      # Manual Checks view + weekly digest: flag a company not checked in this many days
+
+
 class Notifications(BaseModel):
     enabled: bool = True
     early_bird_hours: int = 48       # "early bird": Strong matches posted within this many hours
@@ -267,6 +271,7 @@ class Preferences(BaseModel):
     backups: Backups = Backups()
     schedule: Schedule = Schedule()
     notifications: Notifications = Notifications()
+    manual_checks: ManualChecks = ManualChecks()
     scoring: Scoring = Scoring()
     apply_today: ApplyToday = ApplyToday()
     health: Health = Health()

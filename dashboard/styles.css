@@ -447,3 +447,8 @@ table.vgrid td { overflow: hidden; }
 
 /* the side panels are focus targets, not controls: no ring around the whole panel (controls inside keep theirs) */
 .panel:focus, .panel:focus-visible { outline: none; }
+
+/* ---------- Manual Checks ---------- */
+.view-btn .n.due { color: var(--warn); background: var(--warn-bg); padding: 0 6px; border-radius: var(--r-pill); font-weight: 700; }
+table.manual-table td { vertical-align: middle; }
+table.manual-table tr.due-row td:first-child { box-shadow: inset 3px 0 0 var(--stretch); }

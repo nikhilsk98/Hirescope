@@ -230,6 +230,16 @@ MIGRATIONS: list[str] = [
         UNIQUE(app_id, at, kind, to_stage, note)
     );
     """,
+    # 7: Manual Checks (companies checked by hand; merged from dashboard exports)
+    """
+    CREATE TABLE manual_checks (
+        company_key TEXT PRIMARY KEY,
+        company TEXT NOT NULL,
+        checked_at TEXT,
+        history TEXT,
+        updated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 

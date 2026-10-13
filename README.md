@@ -183,7 +183,12 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
 - Day tabs (recent days first-seen; older days in a dropdown) and a **Log** link in the header.
 - Sidebar views: Last 24h (default when it has jobs), Apply Today, All Jobs, My Companies, **My Applications**,
   **Applied / Tracker**, Shortlisted, **Follow-ups Due**, Closing Soon, Skill Gaps, **Stats**, Hiring Seasons, Missed
-  Matches (weekly false-negative review), Filtered Out (with reasons), Coverage, **Run Log**.
+  Matches (weekly false-negative review), Filtered Out (with reasons), Coverage, **Manual Checks**, **Run Log**.
+- **Manual Checks**: every company HireScope can't read, with the reason and its careers link. Open the page, look
+  for roles, press **Mark checked** (saves today's date; Undo available). A company not checked in
+  `manual_checks.remind_days` (default 7) — or never — gets a "Check due" badge, the sidebar shows how many are due,
+  a banner links to the view, and the weekly digest lists them. Dates go out with **Export statuses** (format 4) and
+  are kept in SQLite (`manual_checks`).
 - **Apply Today** is pinned above the main list (collapsible). Cards (score ring, label, New / Seen and other badges,
   ATS meter, "More like this", Move to Co-op / Full-time on Unclear jobs) or a sortable table, remembered per view;
   Comfortable / Compact density. Lists are virtualized (only rows near the viewport exist), so there is no row cap.

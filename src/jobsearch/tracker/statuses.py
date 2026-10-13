@@ -6,7 +6,7 @@ it: per item, SQLite wins unless the export's entry is newer (`updated_at`). App
 append-only and always unioned. Everything in the file is data (never instructions) and is stored as text.
 
 Export formats: 1 = {statuses}; 2 = + track_overrides {key: track}; 3 = + track_overrides {key: {track,
-updated_at}} and applications {id: application}.
+updated_at}} and applications {id: application}; 4 = + manual_checks {company: {checked_at, history, updated_at}}.
 """
 from __future__ import annotations
 
@@ -43,6 +43,7 @@ class ImportResult:
     statuses_kept_db: int = 0
     statuses_unmatched: int = 0
     overrides_applied: int = 0
+    manual_checks_applied: int = 0
     apps_new: int = 0
     apps_updated: int = 0
     apps_kept_db: int = 0
@@ -125,7 +126,7 @@ def load_export(path: Path) -> dict:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or not isinstance(raw.get("statuses", {}), dict):
         raise ValueError("not a HireScope statuses export")
-    if raw.get("format", 1) not in (1, 2, 3):
+    if raw.get("format", 1) not in (1, 2, 3, 4):
         raise ValueError(f"unknown export format {raw.get('format')!r}")
     return raw
 
@@ -169,6 +170,10 @@ def merge(conn, payload: dict, apps_dir: Path | None, now: str | None = None) ->
             continue
         conn.execute("UPDATE jobs SET track_override=?, track_override_at=? WHERE id=?", (track or None, at, pk))
         res.overrides_applied += 1
+
+    from . import manual_checks
+    n, errs = manual_checks.merge(conn, payload.get("manual_checks") or {}, exported, _iso)
+    res.manual_checks_applied, res.errors = n, [*res.errors, *errs]
 
     apps = payload.get("applications") or {}
     if isinstance(apps, list):
@@ -311,8 +316,9 @@ def sync_payload(conn) -> dict:
                           "WHERE j.user_status_at IS NOT NULL OR j.id IN (SELECT job_pk FROM applications WHERE "
                           "job_pk IS NOT NULL)"):
         state[job_key(r)] = [r["job_status"], r["status_changed_at"]]
+    from . import manual_checks
     return {"generated_at": db.utcnow(), "statuses": statuses, "track_overrides": overrides,
-            "applications": applications(conn), "job_state": state}
+            "applications": applications(conn), "job_state": state, "manual_checks": manual_checks.entries(conn)}
 
 
 def write_sync_js(path: Path, payload: dict) -> None:

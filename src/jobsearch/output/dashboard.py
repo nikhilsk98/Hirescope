@@ -254,6 +254,8 @@ def coverage_rows(conn, summary, watch) -> list[dict]:
     rows = []
     for r in conn.execute("SELECT * FROM source_status WHERE COALESCE(origin, '') != 'ad_hoc' ORDER BY company"):
         r = dict(r)
+        if r["status"] == "manual" and watch and r["company"].casefold() not in watch_keys:
+            continue   # left the watchlist (or renamed by an alias, e.g. Juniper -> HPE): not a manual check any more
         o = this_run.get((r["company"].casefold(), r["source"]))
         multi = r["source"].startswith("simplify")
         rows.append({
@@ -270,7 +272,19 @@ def coverage_rows(conn, summary, watch) -> list[dict]:
                            else open_counts.get((r["company_key"], r["source"]), 0)),
             "checked_this_run": bool(o and o.status != "skipped"),
         })
-    return rows
+    return latest_per_company(rows)
+
+
+def latest_per_company(rows: list[dict]) -> list[dict]:
+    """One row per company: its most recently checked source. A company whose source changed (manual -> a new
+    adapter, JSON-LD -> manual) keeps its old source_status row; only the latest one is current."""
+    best: dict[str, dict] = {}
+    for r in rows:
+        k = r["company"].casefold()
+        if k not in best or (r.get("last_checked") or "") > (best[k].get("last_checked") or ""):
+            best[k] = r
+    keep = {id(r) for r in best.values()}
+    return [r for r in rows if id(r) in keep]
 
 
 def select_visible(jobs: list[dict], top_n: int) -> list[dict]:

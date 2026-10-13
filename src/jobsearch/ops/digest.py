@@ -30,7 +30,8 @@ def _short(s: str, n: int = 110) -> str:
     return s if len(s) <= n else s[:n].rsplit(" · ", 1)[0] + " · …"
 
 
-def build(conn, today: date, seasons: list[dict] | None = None, window: tuple[int, int] = (7, 10)) -> str:
+def build(conn, today: date, seasons: list[dict] | None = None, window: tuple[int, int] = (7, 10),
+          remind_days: int = 7, companies: set[str] | None = None) -> str:
     since = (datetime.combine(today, datetime.min.time(), timezone.utc) - timedelta(days=7)).isoformat()
     jobs = db.open_jobs(conn)
     strong = [j for j in jobs if not j.get("filtered") and j.get("label") == "Strong" and j["first_seen"] >= since]
@@ -73,6 +74,19 @@ def build(conn, today: date, seasons: list[dict] | None = None, window: tuple[in
         parts.append(f"<div><b>{_e(name)}:</b> " + (", ".join(f"{_e(s['skill'])} ({s['jobs']})" for s in sk) or
                                                      "<span class=muted>none</span>") + "</div>")
     parts.append("<div class=muted style='margin-top:6px'>Gaps only — never add a skill you don't have.</div></div>")
+    from ..tracker import manual_checks
+    todo = [m for m in manual_checks.report(conn, today, remind_days, companies) if m["state"] != "ok"]
+    parts.append(f"<h2>Manual checks due ({len(todo)})</h2><div class=card>")
+    for m in todo[:40]:
+        when = "never checked" if m["state"] == "never" else f"last checked {m['checked_at']} ({m['days']} days ago)"
+        name = (f"<a href='{_e(m['url'])}'>{_e(m['company'])}</a>" if (m.get("url") or "").startswith("http")
+                else _e(m["company"]))
+        parts.append(f"<div>{name} <span class=muted>· {_e(when)}</span></div>")
+    if len(todo) > 40:
+        parts.append(f"<div class=muted>… and {len(todo) - 40} more (dashboard → Manual Checks)</div>")
+    parts.append((f"<div class=muted style='margin-top:6px'>Companies HireScope can't read; flagged when not checked in "
+                  f"{remind_days} days. Mark them checked in the dashboard's Manual Checks view.</div>" if todo else
+                  "<span class=muted>All manual companies checked recently.</span>") + "</div>")
     soon = [s for s in seasons or [] if s.get("remind")][:10]
     if soon:
         parts.append("<h2>Hiring seasons coming up</h2><div class=card>")
@@ -88,8 +102,9 @@ def due(today: date, weekday: str, out_dir: Path) -> bool:
     return today.strftime("%A").lower() == weekday.lower() and not (out_dir / f"{today}.html").exists()
 
 
-def write(conn, out_dir: Path, today: date, seasons=None, window=(7, 10)) -> Path:
+def write(conn, out_dir: Path, today: date, seasons=None, window=(7, 10), remind_days: int = 7,
+          companies: set[str] | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     p = out_dir / f"{today}.html"
-    p.write_text(build(conn, today, seasons, window), encoding="utf-8")
+    p.write_text(build(conn, today, seasons, window, remind_days, companies), encoding="utf-8")
     return p

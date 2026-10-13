@@ -97,6 +97,7 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
         "coverage": coverage,
         "learned": (learned or feedback.learn(db.labeled_jobs(conn), cfg.prefs)).describe(),
         "applications_cfg": cfg.prefs.applications.model_dump(),
+        "manual_checks_cfg": cfg.prefs.manual_checks.model_dump(),
         "statuses_import": imported or {},
         "runs": db.recent_runs(conn),
         "seasons": seasons or [],
@@ -314,7 +315,8 @@ def _main(args, log_file: Path) -> int:
                     log.error("backup failed: %s", e)
             dg_dir = paths.DATA / "digests"
             if args.digest or digest.due(today, cfg.prefs.notifications.digest_weekday, dg_dir):
-                p = digest.write(conn, dg_dir, today, seasons, tuple(cfg.prefs.applications.follow_up_days))
+                p = digest.write(conn, dg_dir, today, seasons, tuple(cfg.prefs.applications.follow_up_days),
+                                 cfg.prefs.manual_checks.remind_days, {w.company for w in watch})
                 s["digest"] = str(p)
                 notify.notify("HireScope weekly digest", f"Your week in review is ready: {p.name}", "data/digests")
         if args.export_excel is not None:

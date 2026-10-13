@@ -185,6 +185,12 @@ overall), 0 roles needing 7+ years, 0 senior or 5-6-year roles labeled Strong, 0
 no-sponsorship / citizens-only / clearance roles, 3,515 roles in Boston / Atlanta / Seattle / SF Bay Area. A follow-up `--quick` run: 220 of 273 OK, 0 failed;
 consecutive SmartRecruiters runs answered 304 for all 18 companies.
 
+**Manual Checks view** (2026-10-13): the 53 manual companies with reason, careers link, "Mark checked" (date saved,
+Undo), a "Check due" badge after `manual_checks.remind_days` (7), a due count in the sidebar + banner, Export statuses
+format 4 → SQLite `manual_checks` (migration 7) → sync.js, and a "Manual checks due" section in the weekly digest.
+Coverage now shows one row per company (its newest source), so companies that moved to an adapter or left the
+watchlist no longer show stale "manual" / "failed" rows.
+
 ## Known limitations
 - **53 companies are manual** (reason in `config/company_aliases.yaml`, link in My Companies): own careers sites
   whose robots.txt / terms forbid automated access or that are bot-blocked (Google, Meta, Apple, Tesla, Citadel,

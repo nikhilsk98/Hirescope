@@ -107,6 +107,20 @@
   }
   const keyForIndex = (i) => (i < 9 ? String(i + 1) : i === 9 ? "0" : "");
 
+  // ---------- manual checks: never checked / due (remindDays or more since the last check) / ok ----------
+  // Mirrors src/jobsearch/tracker/manual_checks.py state().
+  function manualState(checkedAt, today, remindDays) {
+    if (!checkedAt || !/^\d{4}-\d{2}-\d{2}$/.test(checkedAt)) return { state: "never", days: null };
+    const d = (s) => { const [y, m, dd] = s.split("-").map(Number); return Date.UTC(y, m - 1, dd) / 864e5; };
+    const days = d(today) - d(checkedAt);
+    return { state: days >= remindDays ? "due" : "ok", days };
+  }
+  function markChecked(entry, today, at) {
+    const prev = entry || {};
+    const history = [...(prev.history || []).filter((x) => x !== today), today].slice(-20);
+    return { checked_at: today, history, updated_at: at };
+  }
+
   // ---------- day tabs: the most recent days as tabs, older ones in a dropdown ----------
   function dayTabs(days, n) {
     const d = days || []; const k = n == null ? 4 : n;
@@ -114,5 +128,5 @@
   }
 
   return { Heights, visibleRange, jdBlocks, jdSections, salaryMatch, salaryLabel, snapshot, saveView, applyView,
-           deleteView, reasonForKey, keyForIndex, dayTabs, REQ_HEAD };
+           deleteView, reasonForKey, keyForIndex, dayTabs, manualState, markChecked, REQ_HEAD };
 });

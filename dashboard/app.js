@@ -8,7 +8,8 @@
   const META = window.META || {};
   const BY_ID = new Map(JOBS.map((j) => [j.id, j]));
   const K = { statuses: "jobsearch.statuses.v1", overrides: "jobsearch.trackOverrides.v1", theme: "jobsearch.theme", apps: "jobsearch.applications.v1",
-              ui: "jobsearch.ui.v2", exported: "jobsearch.lastExport", tip: "jobsearch.tipDismissed.v2" };
+              ui: "jobsearch.ui.v2", exported: "jobsearch.lastExport", tip: "jobsearch.tipDismissed.v2",
+              manual: "jobsearch.manualChecks.v1" };
   const STATUSES = ["", "interested", "shortlisted", "package exported", "applied", "interviewing", "offer", "rejected", "skipped"];
   const SKIP_REASONS = ["not interested in role", "location", "too senior", "too junior", "missing skills", "company",
                         "compensation", "visa/sponsorship", "start date", "duplicate", "other"];
@@ -59,6 +60,10 @@
   const overrides = {};
   for (const [k, v] of Object.entries(store.get(K.overrides, {}))) overrides[k] = typeof v === "string" ? { track: v, updated_at: "1970-01-01T00:00:00Z" } : v;
   let apps = store.get(K.apps, {});
+  // manualChecks: {company: {checked_at (YYYY-MM-DD), history: [dates], updated_at}} — the Manual Checks view
+  const manualChecks = store.get(K.manual, {});
+  const saveManual = () => store.set(K.manual, manualChecks);
+  const MANUAL_DAYS = Number((META.manual_checks_cfg || {}).remind_days) || 7;   // preferences manual_checks.remind_days
   const ui = Object.assign({ track: "full_time", both: false, mode: "cards", compact: false, perTrack: {}, appTab: "board" }, store.get(K.ui, {}));
   const tstate = () => (ui.perTrack[ui.track] = ui.perTrack[ui.track] || { view: null, sort: "overall", filters: {}, q: "", modes: {} });
   const saveUI = () => store.set(K.ui, ui);
@@ -80,7 +85,8 @@
     for (const [k, v] of Object.entries(S.statuses || {})) if (!statuses[k] || String(v.updated_at) > String(statuses[k].updated_at || "")) { statuses[k] = Object.assign({}, statuses[k] || {}, v); changed = true; }
     for (const [k, v] of Object.entries(S.track_overrides || {})) if (!overrides[k] || String(v.updated_at) > String(overrides[k].updated_at || "")) { overrides[k] = v; changed = true; }
     for (const a of S.applications || []) { const m = C.mergeApp(apps[a.id], a); if (JSON.stringify(m) !== JSON.stringify(apps[a.id])) { apps[a.id] = m; changed = true; } }
-    if (changed) { store.set(K.statuses, statuses); saveOverrides(); saveApps(); }
+    for (const [k, v] of Object.entries(S.manual_checks || {})) if (!manualChecks[k] || String(v.updated_at) > String(manualChecks[k].updated_at || "")) { manualChecks[k] = v; changed = true; }
+    if (changed) { store.set(K.statuses, statuses); saveOverrides(); saveApps(); saveManual(); }
   })();
 
   const STAGE_STATUS = { applied: "applied", oa: "applied", interviewing: "interviewing", offer: "offer", rejected: "rejected", ghosted: "applied", withdrawn: "applied" };
@@ -165,6 +171,7 @@
     { id: "missed", label: "Missed Matches", ic: "◎", jobs: () => (META.missed || []).map((id) => BY_ID.get(id)).filter((j) => j && inTrack(j)) },
     { id: "filtered", label: "Filtered Out", ic: "⊘", jobs: () => JOBS.filter((j) => j.filtered && inTrack(j)) },
     { id: "coverage", label: "Coverage", ic: "◍", group: "System", special: true, count: () => (META.coverage || []).length },
+    { id: "manual", label: "Manual Checks", ic: "☐", special: true, count: () => manualRows().filter((r) => r.st.state !== "ok").length, alert: true },
     { id: "runlog", label: "Run Log", ic: "≡", special: true, count: () => (META.runs || []).length },
   ];
   const viewById = (id) => VIEWS.find((v) => v.id === id) || VIEWS[2];
@@ -276,16 +283,18 @@
   }
   // unsynced = changed in this browser after the last export and after SQLite's copy (sync.js) of the same item
   const SYNC_AT = (() => {
-    const S = window.SYNC || {}; const m = { s: {}, o: {}, a: {} };
+    const S = window.SYNC || {}; const m = { s: {}, o: {}, a: {}, m: {} };
     for (const [k, v] of Object.entries(S.statuses || {})) m.s[k] = v.updated_at || "";
     for (const [k, v] of Object.entries(S.track_overrides || {})) m.o[k] = v.updated_at || "";
     for (const a of S.applications || []) m.a[a.id] = a.updated_at || "";
+    for (const [k, v] of Object.entries(S.manual_checks || {})) m.m[k] = v.updated_at || "";
     return m;
   })();
   function unsynced() {
     const last = store.get(K.exported, null) || "";
     const newer = (map) => ([k, x]) => { const t = String(x.updated_at || ""); return t > last && t > (map[k] || ""); };
-    return Object.entries(statuses).some(newer(SYNC_AT.s)) || Object.entries(overrides).some(newer(SYNC_AT.o)) || Object.entries(apps).some(newer(SYNC_AT.a));
+    return Object.entries(statuses).some(newer(SYNC_AT.s)) || Object.entries(overrides).some(newer(SYNC_AT.o)) || Object.entries(apps).some(newer(SYNC_AT.a)) ||
+      Object.entries(manualChecks).some(newer(SYNC_AT.m));
   }
   function renderBanners() {
     const box = $("#banners"); box.textContent = "";
@@ -302,6 +311,11 @@
       box.append(el("div", { class: "banner info" }, manualList(`No failures. ${manual.length} companies to check by hand (job systems HireScope can't read)${partial.length ? `; ${partial.length} partial listings` : ""} — see Coverage`)));
     } else if (partial.length) {
       box.append(el("div", { class: "banner warn" }, `${partial.length} sources returned partial listings (page caps); closures for those are verified per job. See Coverage.`));
+    }
+    const manDue = manualRows().filter((x) => x.st.state !== "ok").length;
+    if (manDue && (tstate().view || "") !== "manual") {
+      box.append(el("div", { class: "banner warn" }, el("span", { text: `${manDue} manual compan${manDue === 1 ? "y" : "ies"} not checked in ${MANUAL_DAYS} days (or never).` }),
+        el("button", { class: "btn small x", type: "button", onclick: () => setView("manual") }, "Open Manual Checks")));
     }
     if (META.partial_run) box.append(el("div", { class: "banner warn", text: (META.summary || {}).scope === "quick"
       ? "Last run was a quick check (My Companies and tier-1 sources); everything else was refreshed by the last full run."
@@ -356,8 +370,10 @@
     for (const v of VIEWS) {
       if (v.group && v.group !== group) { group = v.group; nav.append(el("div", { class: "group", text: group })); }
       const n = v.special ? v.count() : v.jobs().length;
-      nav.append(el("button", { class: "view-btn", type: "button", "aria-current": String(v.id === cur), onclick: () => setView(v.id) },
-        el("span", { class: "ic", "aria-hidden": "true", text: v.ic }), v.label, el("span", { class: "n", text: n.toLocaleString() })));
+      nav.append(el("button", { class: "view-btn", type: "button", "aria-current": String(v.id === cur), onclick: () => setView(v.id),
+        title: v.alert && n ? `${n} to check (not checked in ${MANUAL_DAYS} days or never)` : null },
+        el("span", { class: "ic", "aria-hidden": "true", text: v.ic }), v.label,
+        el("span", { class: "n" + (v.alert && n ? " due" : ""), text: n.toLocaleString(), "aria-label": v.alert && n ? `${n} due` : null })));
     }
   }
 
@@ -611,10 +627,11 @@
   }
 
   let current = []; let selectedId = null; let vlist = null;
-  function setView(id) { tstate().view = id; saveUI(); closePop(); renderAll(); }
+  function setView(id) { tstate().view = id; saveUI(); closePop(); renderBanners(); renderAll(); }
   const modeOf = (vid) => (tstate().modes || {})[vid] || ui.mode || "cards";
   const SPECIAL = { coverage: () => renderCoverage, skillgaps: () => renderSkillGaps, applications: () => renderApplications,
-    followups: () => renderFollowups, stats: () => renderStatsView, runlog: () => renderRunLog, seasons: () => renderSeasons };
+    followups: () => renderFollowups, stats: () => renderStatsView, runlog: () => renderRunLog, seasons: () => renderSeasons,
+    manual: () => renderManualChecks };
   function renderList(keepScroll) {
     const st = tstate();
     const v = viewById(st.view || defaultView());
@@ -725,6 +742,51 @@
     }
     box.append(el("div", { class: "table-wrap" }, el("table", { class: "grid cov-table" },
       el("thead", null, el("tr", null, ["Company", "Status", "Source", "Detected via", "Last checked", "Open roles", "Notes"].map((h) => el("th", { text: h })))), tb)));
+  }
+
+  // ---------- Manual Checks: companies HireScope can't read; you check their careers page and mark the date ----------
+  function manualRows() {
+    return (META.coverage || []).filter((r) => r.status === "manual").map((r) => {
+      const e = manualChecks[r.company] || null;
+      return { r, e, st: V.manualState(e && e.checked_at, today(), MANUAL_DAYS) };
+    }).sort((a, b) => ({ never: 0, due: 1, ok: 2 }[a.st.state] - { never: 0, due: 1, ok: 2 }[b.st.state]) ||
+      (b.st.days ?? 0) - (a.st.days ?? 0) || a.r.company.localeCompare(b.r.company));
+  }
+  function markManualChecked(company, undoable = true) {
+    const before = manualChecks[company] ? JSON.parse(JSON.stringify(manualChecks[company])) : null;
+    manualChecks[company] = V.markChecked(manualChecks[company], today(), new Date().toISOString()); saveManual();
+    renderBanners(); renderCounts(); renderList(true);
+    if (undoable) toast(`Checked ${company} today`, () => { if (before) manualChecks[company] = before; else delete manualChecks[company];
+      saveManual(); renderBanners(); renderCounts(); renderList(true); });
+  }
+  function renderManualChecks(box) {
+    const rows = manualRows(); const dueN = rows.filter((x) => x.st.state !== "ok").length;
+    box.append(el("p", { class: "muted", style: "margin-top:0", text: `Companies whose jobs HireScope can't read (unsupported job system, or the site's rules forbid it). ` +
+      `Open each careers page, look for roles, then press Mark checked. A company is flagged when it hasn't been checked in ${MANUAL_DAYS} days ` +
+      `(preferences manual_checks.remind_days). Dates save in this browser and go out with Export statuses.` }));
+    if (!rows.length) { box.append(el("div", { class: "empty", text: "No manual companies in the last run." })); return; }
+    box.append(el("div", { class: "toolbar" }, el("b", { text: `${dueN} of ${rows.length} to check` }), el("span", { class: "spacer" }),
+      dueN ? el("button", { class: "btn small", type: "button", title: "Mark every flagged company as checked today",
+        onclick: async () => { if (await confirmDialog(`Mark ${dueN} companies checked today?`, ["Only do this if you looked at their careers pages."], "Mark all checked")) {
+          const before = JSON.parse(JSON.stringify(manualChecks)); for (const x of rows) if (x.st.state !== "ok") markManualChecked(x.r.company, false);
+          toast(`Marked ${dueN} checked`, () => { for (const k of Object.keys(manualChecks)) delete manualChecks[k]; Object.assign(manualChecks, before); saveManual(); renderBanners(); renderCounts(); renderList(true); }); } } }, "Mark all due as checked") : null));
+    const tb = el("tbody");
+    for (const { r, e, st } of rows) {
+      const chip = st.state === "never" ? el("span", { class: "chip warn", text: "Never checked" }) :
+        st.state === "due" ? el("span", { class: "chip warn", title: `Last checked ${st.days} days ago`, text: `Check due · ${st.days}d` }) :
+          el("span", { class: "chip good", text: st.days === 0 ? "Checked today" : `Checked ${st.days}d ago` });
+      tb.append(el("tr", { class: st.state === "ok" ? "" : "due-row" },
+        el("td", null, el("b", { text: r.company })),
+        el("td", null, chip),
+        el("td", { class: "nowrap", text: e && e.checked_at ? fmtDate(e.checked_at) : "—" }),
+        el("td", null, r.error ? el("div", { class: "muted", style: "font-size:12px", text: r.error }) : null),
+        el("td", { class: "nowrap" },
+          safeUrl(r.url) ? el("a", { class: "btn small", href: r.url, target: "_blank", rel: "noopener noreferrer", title: `Open ${r.company}'s careers page` }, "Open careers page") :
+            el("span", { class: "muted", text: "no link" }), " ",
+          el("button", { class: "btn small" + (st.state === "ok" ? " ghost" : " primary"), type: "button", onclick: () => markManualChecked(r.company) }, "Mark checked"))));
+    }
+    box.append(el("div", { class: "table-wrap" }, el("table", { class: "grid manual-table" },
+      el("thead", null, el("tr", null, ["Company", "Status", "Last checked", "Why manual", ""].map((h) => el("th", { scope: "col", text: h })))), tb)));
   }
 
   // ---------- My Applications ----------
@@ -1453,7 +1515,8 @@
     d.showModal(); box.querySelector("button").focus();
   }
   function exportStatuses() {
-    const payload = { exported_at: new Date().toISOString(), format: 3, statuses, track_overrides: overrides, applications: apps };
+    const payload = { exported_at: new Date().toISOString(), format: 4, statuses, track_overrides: overrides, applications: apps,
+                      manual_checks: manualChecks };
     download("jobsearch-statuses.json", JSON.stringify(payload, null, 2), "application/json");
     store.set(K.exported, payload.exported_at); renderBanners(); toast("Exported jobsearch-statuses.json");
   }
@@ -1549,6 +1612,7 @@
     const items = [
       ...VIEWS.map((v) => ({ kind: "View", label: v.label, run: () => setView(v.id) })),
       { kind: "Action", label: "Export statuses", run: exportStatuses },
+      ...manualRows().map(({ r }) => ({ kind: "Manual check", label: r.company, sub: "Mark checked today", run: () => markManualChecked(r.company) })),
       { kind: "Action", label: "Add application", run: () => openAddApp() },
       { kind: "Action", label: "Switch to Co-op / Internships", run: () => switchTrack("coop_intern") },
       { kind: "Action", label: "Switch to Full-time", run: () => switchTrack("full_time") },

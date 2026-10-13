@@ -128,6 +128,8 @@ aggregator:
   queries: ["software engineer new grad 2027", "software engineer intern spring 2027", "software engineering co-op 2027", "entry level software engineer"]
   date_posted: week
 # --- Notifications / digest / seasons -----------------------------------------------------------------
+# Manual Checks view + weekly digest: flag a manual company not checked in this many days
+manual_checks: {remind_days: 7}
 notifications: {enabled: true, early_bird_hours: 48, digest_weekday: Sunday, season_remind_days: 21}   # early_bird_hours is also the "Fresh" badge window
 
 # ======================================================================================================
