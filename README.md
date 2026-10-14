@@ -190,7 +190,10 @@ pbpaste | ./scripts/add_job.sh --company "Acme" --role "Backend Engineer" --past
 - **Dashboard → "+ Add external job"** (sidebar, or ⌘K): company, role, location, job URL (optional), track, and the
   JD pasted or as a file. The page can't write to disk, so it saves `hirescope-external-job-<Company>-<time>.json` to
   your Downloads; the next run imports it, or run the command it shows (`./scripts/add_job.sh --pending`). Scheduled
-  runs can't read ~/Downloads without Full Disk Access — move the file to `inputs/statuses/` or `inputs/external_jobs/`.
+  runs read ~/Downloads through the venv's Python, which macOS allows per program (tested under launchd on
+  2026-10-14: Python could list, read and move files there while `/bin/ls` in the same job was denied). After a Python
+  upgrade or `setup.sh` the permission can stop applying; the run summary then says "can't read ~/Downloads" — run
+  `./scripts/add_job.sh --pending` yourself, or save the file to `inputs/external_jobs/`.
   With only a URL it copies the Add job by URL command instead.
 - **Drop folder `inputs/external_jobs/`**: put any JD file there; the next run imports it. Company / role / URL /
   location / track come from a small header at the top of a text file (`Company: …`, `Role: …`, `URL: …`, blank line,

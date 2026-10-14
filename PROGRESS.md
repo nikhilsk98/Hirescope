@@ -600,3 +600,10 @@ and detection stays from the JD; a "different job" decision could still fuzzy-me
 the drop folder pointed at the real `inputs/` in tests → it follows the repo root; `apps mark-applied` recorded no
 PDF name; a `run.main` test leaked `--no-email` into later tests. Tests: 526 passed (13 new).
 
+
+**~/Downloads under launchd (tested 2026-10-14)**: a temporary agent with the same chain as the schedule (launchd →
+`/bin/zsh` script → venv Python) could list, read and move files in `~/Downloads`; `/bin/ls` in the same job got
+"Operation not permitted". macOS grants this per program (here Homebrew's `python3.12` 3.12.15), so the scheduled
+import works today, but a Python upgrade can lose it. The external-job import now reports a blocked `~/Downloads`
+(it used to skip it silently) and both messages say what to run (`./scripts/add_job.sh --pending`,
+`./scripts/run.sh --rescore`). The earlier "needs Full Disk Access" wording in the README was wrong and is corrected.

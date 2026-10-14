@@ -454,8 +454,12 @@ def import_pending(conn, cfg, drop_dir: Path | None = None, json_dirs: list[Path
     imported once (by content hash); imported files are moved out of the way (drop folder → the saved original
     under data.nosync/external_jobs/, JSON → data.nosync/imports/external/). Not scored here."""
     drop_dir = paths.EXTERNAL_INBOX if drop_dir is None else drop_dir
+    from .tracker.statuses import access
     seen = _seen(conn)
-    out = []
+    out = [Outcome("error", message=f"can't read {d} (macOS privacy protection for this Python, e.g. after an "
+                   "upgrade): files the dashboard saved there wait — run ./scripts/add_job.sh --pending yourself, "
+                   "or save them to inputs/external_jobs/", file=str(d))
+           for d in json_dirs or [] if access(d) == "blocked"]
     for p in pending_files(drop_dir, json_dirs or []):
         try:
             sig = _sig(p)

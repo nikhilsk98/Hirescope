@@ -109,7 +109,8 @@ def _date(v) -> str | None:
 
 
 def access(directory: Path) -> str:
-    """"ok", "missing" or "blocked". macOS denies scheduled jobs ~/Downloads without Full Disk Access (even is_dir()
+    """"ok", "missing" or "blocked". macOS privacy protection decides ~/Downloads access per program: under launchd the
+    venv's Python has been allowed (tested) while /bin/ls is not, and a Python upgrade can lose it (even is_dir()
     says False there), and Python's glob would silently return nothing, so the listing error is what tells."""
     try:
         os.listdir(directory)
@@ -282,8 +283,9 @@ def import_newest(conn, directory: Path | list[Path], apps_dir: Path | None, arc
     path = newest_export(dirs)
     if path is None:
         blocked = [str(d) for d in dirs if access(d) == "blocked"]
-        note = (f"; can't read {', '.join(blocked)} (macOS privacy protection: scheduled runs need Full Disk Access "
-                f"for that folder — save the export to {dirs[-1]} instead)") if blocked else ""
+        note = (f"; can't read {', '.join(blocked)} (macOS privacy protection for this Python, e.g. after an upgrade)"
+                f" — run ./scripts/run.sh --rescore yourself (it imports the export), or save the export to {dirs[-1]}"
+                ) if blocked else ""
         return ImportResult(skipped_reason=f"no {EXPORT_GLOB} in {', '.join(map(str, dirs))}{note}")
     st = path.stat()
     sig = f"{path.name}:{st.st_mtime_ns}:{st.st_size}"

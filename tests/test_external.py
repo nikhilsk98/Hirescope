@@ -260,6 +260,17 @@ def test_drop_folder_and_dashboard_json(conn, cfg, tmp_path, data_dir):
         X.from_json({"kind": "something else"})
 
 
+def test_blocked_download_folder_is_reported(conn, cfg, tmp_path, monkeypatch, data_dir):
+    """macOS can deny a scheduled run ~/Downloads (e.g. after a Python upgrade): say so instead of skipping silently."""
+    from jobsearch.tracker import statuses as S
+    blocked = tmp_path / "Downloads"
+    monkeypatch.setattr(S, "access", lambda d: "blocked" if d == blocked else "ok" if d.exists() else "missing")
+    (tmp_path / "inbox").mkdir()
+    outs = X.import_pending(conn, cfg, tmp_path / "inbox", [blocked])
+    assert [o.status for o in outs] == ["error"] and "add_job.sh --pending" in outs[0].message
+    assert "run.sh --rescore" in S.import_newest(conn, [blocked], None).skipped_reason
+
+
 # --- CLI -------------------------------------------------------------------------------------------------------------
 def _cli_env(monkeypatch, tmp_path, cfg):
     from jobsearch import add_job, add_url
