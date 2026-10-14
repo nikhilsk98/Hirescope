@@ -28,7 +28,8 @@ never logs in, never scrapes LinkedIn, never applies or messages anyone, and sen
    for Claude Code; see [Resume Builder](#resume-builder)), apply, then **Mark
    Applied** (`a`). Shortlist (`s`) or skip with a reason (`x`) as you go — that is what feedback learning learns from.
 3. Click **Export statuses** at the end of a session. The next run imports it from `~/Downloads` into SQLite (and
-   backups), so nothing you did lives only in the browser.
+   backups), so nothing you did lives only in the browser. To import right away (or if a run reports it can't read
+   ~/Downloads): `./scripts/import_pending.sh`.
 4. Found a job somewhere else? **+ Add external job** on the dashboard, a JD file in `inputs/external_jobs/`, or
    `./scripts/add_job.sh` (see [External jobs](#external-jobs-found-outside-hirescope)).
 5. Weekly: skim **Missed Matches** (false negatives) and **Coverage** (companies to check by hand); follow up on
@@ -189,11 +190,12 @@ pbpaste | ./scripts/add_job.sh --company "Acme" --role "Backend Engineer" --past
 ```
 - **Dashboard → "+ Add external job"** (sidebar, or ⌘K): company, role, location, job URL (optional), track, and the
   JD pasted or as a file. The page can't write to disk, so it saves `hirescope-external-job-<Company>-<time>.json` to
-  your Downloads; the next run imports it, or run the command it shows (`./scripts/add_job.sh --pending`). Scheduled
+  your Downloads; the next run imports it, or run the command it shows (`./scripts/import_pending.sh`). Scheduled
   runs read ~/Downloads through the venv's Python, which macOS allows per program (tested under launchd on
   2026-10-14: Python could list, read and move files there while `/bin/ls` in the same job was denied). After a Python
   upgrade or `setup.sh` the permission can stop applying; the run summary then says "can't read ~/Downloads" — run
-  `./scripts/add_job.sh --pending` yourself, or save the file to `inputs/external_jobs/`.
+  `./scripts/import_pending.sh` yourself (see [Statuses, sync and feedback learning](#statuses-sync-and-feedback-learning)),
+  or save the file to `inputs/external_jobs/`.
   With only a URL it copies the Add job by URL command instead.
 - **Drop folder `inputs/external_jobs/`**: put any JD file there; the next run imports it. Company / role / URL /
   location / track come from a small header at the top of a text file (`Company: …`, `Role: …`, `URL: …`, blank line,
@@ -279,6 +281,13 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
   `statuses_import_dir` (default `~/Downloads`; `--statuses FILE` for a specific one, `--no-import` to skip) and merges
   it into SQLite: per item, **SQLite wins unless the export's entry is newer**; application timelines are unioned.
   Imported files are archived in `data.nosync/imports/`.
+- **Import now: `./scripts/import_pending.sh`** — the fallback after a dashboard session. It imports the newest
+  Export statuses file and every "Add external job" file (plus the `inputs/external_jobs/` drop folder) from the same
+  folders a run reads, then rewrites the dashboard once (no fetching; a few seconds). Each file is imported once, so
+  running it before a scheduled run is harmless. Use it when you don't want to wait for the next run, or when a run
+  reports "can't read ~/Downloads": scheduled runs read it through the venv's Python, which macOS allows per program
+  (tested under launchd), and a Python upgrade can lose that permission; from Terminal it always works. Exit codes:
+  `0` done (also when nothing was waiting), `2` an import error, `3` a run is in progress (the run imports the files).
 - Each run writes `dashboard/sync.js` from SQLite, and the page merges it on load (newer wins), so clearing browser
   data or opening the dashboard in another browser loses nothing that was exported.
 - **Feedback learning** (`feedback` in preferences): shortlist / package / applied / interviewing / offer are

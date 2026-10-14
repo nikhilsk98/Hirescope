@@ -267,8 +267,8 @@ def test_blocked_download_folder_is_reported(conn, cfg, tmp_path, monkeypatch, d
     monkeypatch.setattr(S, "access", lambda d: "blocked" if d == blocked else "ok" if d.exists() else "missing")
     (tmp_path / "inbox").mkdir()
     outs = X.import_pending(conn, cfg, tmp_path / "inbox", [blocked])
-    assert [o.status for o in outs] == ["error"] and "add_job.sh --pending" in outs[0].message
-    assert "run.sh --rescore" in S.import_newest(conn, [blocked], None).skipped_reason
+    assert [o.status for o in outs] == ["error"] and "import_pending.sh" in outs[0].message
+    assert "import_pending.sh" in S.import_newest(conn, [blocked], None).skipped_reason
 
 
 # --- CLI -------------------------------------------------------------------------------------------------------------
@@ -354,6 +354,39 @@ def test_next_run_imports_drop_folder_and_dashboard_file(monkeypatch, tmp_path, 
     assert R.main(args) == 0                                                       # the next run: nothing re-added
     with sqlite_conn(tmp_path) as c:
         assert c.execute("SELECT COUNT(*) FROM jobs WHERE source='external'").fetchone()[0] == 2
+
+
+def test_import_pending_script_imports_dashboard_files_now(monkeypatch, tmp_path, capsys, cfg):
+    """./scripts/import_pending.sh: the newest Export statuses + "Add external job" files, then the dashboard, once."""
+    from jobsearch import import_pending as IP
+    from jobsearch.ops.lock import RunLock
+    _, common = _cli_env(monkeypatch, tmp_path, cfg)
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    prefs = cfg.prefs.model_copy(update={"statuses_import_dir": [str(downloads)],
+                                         "my_companies_csv": "inputs/companies/my_companies.csv"})
+    monkeypatch.setattr(IP, "load_config", lambda *a, **k: cfg.model_copy(update={"prefs": prefs}))
+    (downloads / "hirescope-external-job-DemoAir.json").write_text(json.dumps(
+        {"kind": "hirescope_external_job", "format": 1, "company": "DemoAir", "role": "Software Engineer (DEMO)",
+         "track": "full_time", "jd_text": JD.replace("DemoCorp", "DemoAir")}))
+    (downloads / "jobsearch-statuses.json").write_text(json.dumps({
+        "exported_at": "2026-10-14T20:00:00Z", "format": 5, "statuses": {}, "applications": {
+            "a1": {"company": "Elsewhere (DEMO)", "title": "SWE Co-op", "track": "coop_intern", "source": "Career fair",
+                   "applied_date": "2026-10-13", "updated_at": "2026-10-13T12:00:00Z"}}}))
+    assert IP.main(common) == 0
+    out = capsys.readouterr().out
+    assert "statuses: imported" in out and "apps_new 1" in out
+    assert "external job added: DemoAir — Software Engineer (DEMO)" in out and "dashboard updated" in out
+    assert '"DemoAir"' in (tmp_path / "dashboard" / "data.js").read_text()
+    assert "Elsewhere (DEMO)" in (tmp_path / "dashboard" / "sync.js").read_text()
+    assert not list(downloads.glob("hirescope-external-job*"))                 # moved out after import
+    before = (tmp_path / "dashboard" / "data.js").stat().st_mtime_ns
+    assert IP.main(common) == 0                                                 # again: nothing waiting
+    out = capsys.readouterr().out
+    assert "already imported" in out and "nothing waiting" in out and "dashboard updated" not in out
+    assert (tmp_path / "dashboard" / "data.js").stat().st_mtime_ns == before
+    with RunLock(paths.STATE_DIR / "run.lock", what="run"):                      # a run in progress: leave it to the run
+        assert IP.main(common) == 3
 
 
 class sqlite_conn:

@@ -607,3 +607,11 @@ PDF name; a `run.main` test leaked `--no-email` into later tests. Tests: 526 pas
 import works today, but a Python upgrade can lose it. The external-job import now reports a blocked `~/Downloads`
 (it used to skip it silently) and both messages say what to run (`./scripts/add_job.sh --pending`,
 `./scripts/run.sh --rescore`). The earlier "needs Full Disk Access" wording in the README was wrong and is corrected.
+
+**`./scripts/import_pending.sh`** (fallback after a dashboard session): imports the newest Export statuses file and
+every "Add external job" file (+ the drop folder) from the folders a run reads, then rewrites the dashboard once; no
+fetching, a few seconds; takes the run lock (exit 3 while a run is in progress). The dashboard form, the Export
+statuses message and the blocked-~/Downloads warnings now point to it. Tested: unit test (import, nothing-waiting
+re-run leaves the dashboard alone, lock); a sandbox run (empty scratch database, copy of your preferences) with files
+made by the dashboard itself in headless Chrome; a no-op run on the real setup (nothing waiting; dashboard not
+rewritten). Tests: 528 passed.

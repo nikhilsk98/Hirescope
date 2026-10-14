@@ -1646,7 +1646,7 @@
     const payload = { exported_at: new Date().toISOString(), format: 5, statuses, track_overrides: overrides, applications: apps,
                       manual_checks: manualChecks, resume_reviews: resumeReviews };
     download("jobsearch-statuses.json", JSON.stringify(payload, null, 2), "application/json");
-    store.set(K.exported, payload.exported_at); renderBanners(); toast("Exported jobsearch-statuses.json");
+    store.set(K.exported, payload.exported_at); renderBanners(); toast("Exported jobsearch-statuses.json — the next run imports it, or now: ./scripts/import_pending.sh");
   }
   $("#export-statuses").addEventListener("click", exportStatuses);
 
@@ -1664,9 +1664,9 @@
   const extPending = () => store.get(EXT_KEY, []).filter((x) => !JOBS.some((j) => j.company.toLowerCase() === x.company.toLowerCase() && C.tokenSortRatio(C.normTitle(j.title), C.normTitle(x.role)) >= 90));
   function renderExtPending() {
     const n = extPending(); store.set(EXT_KEY, n);
-    $("#ext-pending").textContent = n.length ? `${n.length} external job${n.length === 1 ? "" : "s"} saved, waiting for the next run (or ./scripts/add_job.sh --pending): ${n.map((x) => x.company).join(", ")}` : "";
+    $("#ext-pending").textContent = n.length ? `${n.length} external job${n.length === 1 ? "" : "s"} saved, waiting for the next run (or ./scripts/import_pending.sh): ${n.map((x) => x.company).join(", ")}` : "";
   }
-  const importCmd = () => `cd ${JSON.stringify(META.repo_root || ".")} && ./scripts/add_job.sh --pending`;
+  const importCmd = () => `cd ${JSON.stringify(META.repo_root || ".")} && ./scripts/import_pending.sh`;   // statuses export + external jobs
   let extForce = false;
   function openAddExt(prefill) {
     const d = $("#add-ext"); const f = $("#add-ext-form");

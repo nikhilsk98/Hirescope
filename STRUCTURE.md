@@ -9,7 +9,7 @@ hirescope/
 ├── config/          tuning and source lists (companies.yaml, title_rules.yaml, resume_builder.yaml, …)
 ├── dashboard/       the static dashboard (index.html, app.js, …) + generated data.js, details/, sync.js, resumes.js
 ├── docs/            notes; docs/prompts/ = the build prompts this project was built from
-├── scripts/         run.sh, setup.sh, schedule.sh (+ launchd/ templates), add_url.sh, add_job.sh, migrate_layout.py
+├── scripts/         run.sh, setup.sh, schedule.sh (+ launchd/ templates), add_url.sh, add_job.sh, import_pending.sh, migrate_layout.py
 ├── src/jobsearch/   HireScope (discovery → scoring → dashboard)
 ├── src/resume_builder/   the Resume Builder (/resume-builder)
 ├── tests/           DEMO data only

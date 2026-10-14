@@ -284,7 +284,7 @@ def import_newest(conn, directory: Path | list[Path], apps_dir: Path | None, arc
     if path is None:
         blocked = [str(d) for d in dirs if access(d) == "blocked"]
         note = (f"; can't read {', '.join(blocked)} (macOS privacy protection for this Python, e.g. after an upgrade)"
-                f" — run ./scripts/run.sh --rescore yourself (it imports the export), or save the export to {dirs[-1]}"
+                f" — run ./scripts/import_pending.sh yourself, or save the export to {dirs[-1]}"
                 ) if blocked else ""
         return ImportResult(skipped_reason=f"no {EXPORT_GLOB} in {', '.join(map(str, dirs))}{note}")
     st = path.stat()

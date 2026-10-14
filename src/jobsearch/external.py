@@ -4,7 +4,7 @@ normal job record with source "external", scored like any other job and given a 
 Ways in (all end in import_external):
   - CLI: ./scripts/add_job.sh --company X --role Y --file jd.pdf [--url …] [--track coop|fulltime]   (now)
   - Dashboard "Add external job": saves hirescope-external-job-*.json (to ~/Downloads); each run imports it, or
-    ./scripts/add_job.sh --pending now
+    ./scripts/import_pending.sh now (with the newest Export statuses; or ./scripts/add_job.sh --pending)
   - Drop folder inputs/external_jobs/: any JD file is imported on the next run. Company / role / URL come from a
     small header at the top of the file ("Company: …", "Role: …", "URL: …", "Location: …", "Track: …") or from the
     file name ("Company - Role.pdf"). Imported files move to data.nosync/external_jobs/<Company>/ (the saved
@@ -457,7 +457,7 @@ def import_pending(conn, cfg, drop_dir: Path | None = None, json_dirs: list[Path
     from .tracker.statuses import access
     seen = _seen(conn)
     out = [Outcome("error", message=f"can't read {d} (macOS privacy protection for this Python, e.g. after an "
-                   "upgrade): files the dashboard saved there wait — run ./scripts/add_job.sh --pending yourself, "
+                   "upgrade): files the dashboard saved there wait — run ./scripts/import_pending.sh yourself, "
                    "or save them to inputs/external_jobs/", file=str(d))
            for d in json_dirs or [] if access(d) == "blocked"]
     for p in pending_files(drop_dir, json_dirs or []):
