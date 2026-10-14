@@ -174,3 +174,36 @@ def to_csv(apps: list[dict], today: date, window: tuple[int, int] = (7, 10)) -> 
         w.writerow([("'" + v) if isinstance(v, str) and v[:1] in ("=", "+", "-", "@") else v
                     for v in (row.get(c, "") if row.get(c) is not None else "" for c in CSV_COLUMNS)])
     return buf.getvalue()
+
+
+def _ck(company: str) -> str:
+    return " ".join((company or "").casefold().split())
+
+
+def applied_companies(apps: list[dict]) -> list[dict]:
+    """Applied Companies: one row per company (newest application first) with the number of applications, the
+    latest application's stage ("latest status"), dates, sources, tracks and every application's link."""
+    groups: dict[str, list[dict]] = {}
+    for a in apps:
+        if not a.get("deleted"):
+            groups.setdefault(_ck(a.get("company")), []).append(a)
+    rows = []
+    for items in groups.values():
+        items = sorted(items, key=lambda a: (a.get("applied_date") or "", a.get("updated_at") or ""), reverse=True)
+        latest = items[0]
+        rows.append({
+            "company": latest.get("company") or "",
+            "count": len(items),
+            "active": sum(1 for a in items if a.get("stage") in ACTIVE),
+            "latest_stage": latest.get("stage") or "applied",
+            "latest_applied": latest.get("applied_date") or "",
+            "first_applied": min((a.get("applied_date") or "9999") for a in items).replace("9999", ""),
+            "sources": sorted({a.get("source") or "Unknown" for a in items}),
+            "tracks": sorted({a.get("track") for a in items if a.get("track")}),
+            "applications": [{"id": a.get("id"), "title": a.get("title") or "", "stage": a.get("stage") or "applied",
+                              "applied_date": a.get("applied_date") or "", "link": a.get("link") or "",
+                              "source": a.get("source") or "", "track": a.get("track") or ""} for a in items],
+        })
+    rows.sort(key=lambda r: r["company"].casefold())
+    rows.sort(key=lambda r: r["latest_applied"], reverse=True)       # stable: newest first, then A–Z
+    return rows

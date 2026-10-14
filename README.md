@@ -29,7 +29,9 @@ never logs in, never scrapes LinkedIn, never applies or messages anyone, and sen
    Applied** (`a`). Shortlist (`s`) or skip with a reason (`x`) as you go — that is what feedback learning learns from.
 3. Click **Export statuses** at the end of a session. The next run imports it from `~/Downloads` into SQLite (and
    backups), so nothing you did lives only in the browser.
-4. Weekly: skim **Missed Matches** (false negatives) and **Coverage** (companies to check by hand); follow up on
+4. Found a job somewhere else? **+ Add external job** on the dashboard, a JD file in `inputs/external_jobs/`, or
+   `./scripts/add_job.sh` (see [External jobs](#external-jobs-found-outside-hirescope)).
+5. Weekly: skim **Missed Matches** (false negatives) and **Coverage** (companies to check by hand); follow up on
    **Follow-ups Due**. A Sunday digest lands in `data.nosync/digests/`.
 
 ## How it works (data flow)
@@ -170,6 +172,39 @@ Test one company: `python -m jobsearch.run --company "Stripe" --verbose`.
 The dashboard's "Add job by URL" box copies this command for you. Added jobs are scored and tracked like any
 other; if an ATS adapter later finds the same posting, the records merge.
 
+### External jobs (found outside HireScope)
+A job from a school co-op board, a referral, a career fair or any site, added from its **JD text or file** (.txt,
+.md, .pdf, .docx). It becomes a normal job with source `external`: scored like the rest (tracks, level, sponsorship /
+citizenship / clearance flags, ATS keywords), given a job package (`data.nosync/job_packages/<Company>/`), always shown
+on the dashboard with an **External** badge (also when your rules would hide it — the Overview tab then lists the
+rules it fails), and listed under **External Jobs** in the sidebar. **Generate Resume** and `/resume-builder <job_id>`
+work exactly as for any other job. Three ways in:
+
+```sh
+./scripts/add_job.sh --company "Acme" --role "Software Engineer Co-op" --file jd.pdf \
+    [--url https://…] [--track coop|fulltime] [--location "Boston, MA"]          # now: imported, scored, packaged
+pbpaste | ./scripts/add_job.sh --company "Acme" --role "Backend Engineer" --paste  # a copied JD
+./scripts/add_job.sh --pending        # import everything waiting (drop folder + files saved by the dashboard)
+./scripts/add_job.sh --url https://…  # URL only: exactly ./scripts/add_url.sh (Add job by URL)
+```
+- **Dashboard → "+ Add external job"** (sidebar, or ⌘K): company, role, location, job URL (optional), track, and the
+  JD pasted or as a file. The page can't write to disk, so it saves `hirescope-external-job-<Company>-<time>.json` to
+  your Downloads; the next run imports it, or run the command it shows (`./scripts/add_job.sh --pending`). Scheduled
+  runs can't read ~/Downloads without Full Disk Access — move the file to `inputs/statuses/` or `inputs/external_jobs/`.
+  With only a URL it copies the Add job by URL command instead.
+- **Drop folder `inputs/external_jobs/`**: put any JD file there; the next run imports it. Company / role / URL /
+  location / track come from a small header at the top of a text file (`Company: …`, `Role: …`, `URL: …`, blank line,
+  then the JD) or from the file name (`Acme - Software Engineer Co-op.pdf`). Imported files move out of the folder
+  (PDF / DOCX originals are kept in `data.nosync/external_jobs/<Company>/`); a file that can't be imported stays, with
+  the reason in the log and the run summary. Each file is imported once.
+- **Duplicates**: an external job that matches a job HireScope already has — the same posting URL (tracking
+  parameters ignored) or ATS posting, the same JD text, or the same company + role with a similar JD — is **not**
+  created; you get a warning naming the existing job and a link to it (the dashboard form checks company + role and
+  URL before saving; the import checks the JD text too). `--force` (or "add it anyway" in the form) adds it as a
+  separate job. Exit codes: `0` added, `3` duplicate, `2` error.
+- PDFs need a text layer (scans can't be read: paste the text). Browser-printed PDFs draw list bullets as shapes;
+  the reader turns those back into `- item` lines and joins wrapped lines, so requirements are found.
+
 ### Coverage
 The header shows "X of Y companies/sources checked successfully this run". The **Coverage** tab lists every
 company with status (OK / Failed / Manual check / Not due), source, how it was detected, last checked time,
@@ -210,10 +245,16 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
   `Space` select, `⌘K` palette, `[` / `]` move a board card, `?` help.
 
 ### My Applications (`#applications`)
-- **Mark Applied** (or `a`) moves a job here with today's date (editable), its apply link, the exact tailored resume
-  version (if one is ready), the job package you
-  generated, and a **saved local copy of the JD** (kept after the posting disappears). **Add application** covers jobs
-  you applied to elsewhere (company, role, track, link, date, source, optional pasted JD).
+- **Mark Applied** (or `a`, or status → applied) on any job — HireScope or External — moves it here with today's date
+  (editable), company, role, track, source (**HireScope** or **External**), its application link, the exact tailored
+  resume version (if one is ready: version, PDF and the PDF's hash), the job package you generated, and a **saved local
+  copy of the JD** (kept after the posting disappears). Every job whose status is applied / interviewing / offer gets
+  an application even if it was set some other way (each run adds the missing ones). From the terminal:
+  `python -m jobsearch.apps mark-applied <job_id> [--date YYYY-MM-DD]`. **Add application** covers jobs you applied
+  to without adding them to HireScope (company, role, track, link, date, source, optional pasted JD).
+- **Applied Companies** tab: one row per company — number of applications, latest status (the stage of your most
+  recent application there), latest applied date, sources, and every application with its link (click one for its
+  drawer). CLI: `python -m jobsearch.apps companies`.
 - **Board**: Applied → Online Assessment → Interviewing → Offer, plus Rejected · Ghosted · Withdrawn. Drag cards, or
   focus one and press `[` / `]`. Every move is logged on the card's timeline with its date. Cards show the track, days
   since applying, next step, follow-up state, referral, and "Posting closed".
@@ -227,7 +268,7 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
   near-duplicate title at the same company, or other applications there in the last `same_company_window_days`.
 - **Stats** per track: applications per week, response / OA / interview rates, offers, median days to first
   response (inline SVG), plus response rates by source, company tier, score label and level.
-- CLI (SQLite copy, as of the last import): `python -m jobsearch.apps list | followups | stats | csv [FILE] | import FILE`.
+- CLI (SQLite copy, as of the last import): `python -m jobsearch.apps list | followups | stats | companies | csv [FILE] | import FILE | mark-applied JOB_ID`.
 
 ### Statuses, sync and feedback learning
 - Statuses, notes, track overrides and applications save in the browser instantly. **Export statuses** downloads
@@ -516,10 +557,12 @@ Plists are rendered from `scripts/launchd/com.nikhil.jobsearch{,.quick}.plist.te
 |---|---|
 | `data.nosync/db/jobs.db` | SQLite: `jobs`, `job_sources` (per-source presence), `applications`, `application_events`, `runs`, `source_status`, `embeddings` cache, `resume_versions` |
 | `data.nosync/jd/<Company>/` | full JD text per posting (`_unassigned/`: files no job refers to any more) |
-| `data.nosync/job_packages/<Company>/` | job packages saved on disk (the dashboard downloads them to ~/Downloads) |
+| `data.nosync/job_packages/<Company>/` | job packages of external jobs (rewritten each run); other jobs' packages download from the dashboard |
 | `data.nosync/logs/jobsearch.log` | JSON-lines log, rotated at 2 MB × 5 |
 | `data.nosync/applications/` | saved JD copies for your applications |
-| `data.nosync/imports/` | archived dashboard exports that were imported |
+| `inputs/external_jobs/` | drop folder: JD files of jobs found outside HireScope (imported by the next run) |
+| `data.nosync/external_jobs/<Company>/` | original PDF / DOCX files of imported external jobs; `_imported/` = drop-folder files after import |
+| `data.nosync/imports/` | archived dashboard exports that were imported (`external/`: imported "Add external job" files) |
 | `data.nosync/backups/` | daily backups (last 14) |
 | `data.nosync/digests/`, `data.nosync/exports/` | weekly digest pages, Excel exports |
 | `data.nosync/state/run.lock`, `data.nosync/logs/last_run_summary.txt` | run lock, last run's summary |
@@ -574,6 +617,10 @@ any resume-scoring service); its drafting and review happen in **your Claude Cod
 
 All requests use per-host rate limits, timeouts, retries with backoff, and the User-Agent
 `jobsearch-local/0.2`. No request carries resume content; the only personal data sent anywhere is your IMAP login, to your own mail provider.
+
+External jobs added from a JD (`add_job.sh --file/--paste/--json/--pending`, the drop folder, the dashboard form) make
+no requests at all: the file is read locally (a URL you give is stored, never fetched). With only a URL, Add job by
+URL's requests above apply.
 
 The dashboard makes no network calls (enforced by its Content-Security-Policy). Links you click (apply,
 LinkedIn search) open in your browser as normal.

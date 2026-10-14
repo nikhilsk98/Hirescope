@@ -164,6 +164,46 @@
     return Object.assign({}, win, { events, jd: win.jd || (win === a ? b.jd : a.jd) || "" });
   }
 
-  return { STAGES, STAGE_LABELS, ACTIVE, CSV_COLUMNS, followUp, lastActivity, ghostSuggestion, duplicateWarnings, tokenSortRatio, normTitle,
+  // ---- Applied Companies (mirrors applications.applied_companies) ----
+  const ck = (s) => String(s || "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+  function appliedCompanies(apps) {
+    const groups = new Map();
+    for (const a of apps) if (!a.deleted) { const k = ck(a.company); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(a); }
+    const rows = [];
+    for (const items0 of groups.values()) {
+      const key = (a) => `${a.applied_date || ""}\u0000${a.updated_at || ""}`;
+      const items = [...items0].sort((x, y) => (key(x) < key(y) ? 1 : key(x) > key(y) ? -1 : 0));
+      const latest = items[0];
+      const dates = items.map((a) => a.applied_date).filter(Boolean).sort();
+      rows.push({ company: latest.company || "", count: items.length, active: items.filter((a) => ACTIVE.includes(a.stage)).length,
+        latest_stage: latest.stage || "applied", latest_applied: latest.applied_date || "", first_applied: dates[0] || "",
+        sources: [...new Set(items.map((a) => a.source || "Unknown"))].sort(), tracks: [...new Set(items.map((a) => a.track).filter(Boolean))].sort(),
+        applications: items.map((a) => ({ id: a.id, title: a.title || "", stage: a.stage || "applied", applied_date: a.applied_date || "", link: a.link || "", source: a.source || "", track: a.track || "" })) });
+    }
+    rows.sort((x, y) => (ck(x.company) < ck(y.company) ? -1 : ck(x.company) > ck(y.company) ? 1 : 0));
+    rows.sort((x, y) => (x.latest_applied < y.latest_applied ? 1 : x.latest_applied > y.latest_applied ? -1 : 0));
+    return rows;
+  }
+
+  // ---- external jobs: is it already on the dashboard? (the import repeats this with the JD text too) ----
+  function normUrl(u) {
+    if (!u || !/^https?:\/\//i.test(String(u).trim())) return null;
+    let x; try { x = new URL(String(u).trim()); } catch (e) { return null; }
+    const q = x.search.replace(/^\?/, "").split("&").filter((p) => p && !/^(?:utm_[a-z]+|gh_src|source|ref|src|lever-source[^=]*)=/i.test(p)).join("&");
+    return `${x.protocol.toLowerCase()}//${x.host.toLowerCase().replace(/^www\./, "")}${x.pathname.replace(/\/+$/, "")}${q ? "?" + q : ""}`;
+  }
+  function externalDuplicate(jobs, f, sameRole) {
+    const u = normUrl(f.url); const co = ck(f.company); const role = normTitle(f.role || "");
+    for (const j of jobs) if (u && normUrl(j.apply_url) === u) return { id: j.id, company: j.company, title: j.title, kind: "same_url", message: `Already on the dashboard: ${j.company} — ${j.title} (same posting URL)` };
+    let best = null;
+    for (const j of jobs) {
+      if (ck(j.company) !== co) continue;
+      const r = tokenSortRatio(normTitle(j.title), role);
+      if (r >= (sameRole || 90) && (!best || r > best.r)) best = { r, j };
+    }
+    return best ? { id: best.j.id, company: best.j.company, title: best.j.title, kind: "same_role", message: `Same company and role already on the dashboard: ${best.j.company} — ${best.j.title}` } : null;
+  }
+
+  return { STAGES, STAGE_LABELS, ACTIVE, CSV_COLUMNS, appliedCompanies, normUrl, externalDuplicate, followUp, lastActivity, ghostSuggestion, duplicateWarnings, tokenSortRatio, normTitle,
     firstResponse, furthest, trackStats, outcomeBreakdown, toCsv, newApp, moveStage, logFollowUp, edit, mergeApp, day, iso };
 });

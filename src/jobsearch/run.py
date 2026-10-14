@@ -14,7 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from . import paths
+from . import external, paths
 from .adapters.base import HttpClient
 from .config import load_config
 from .extract.resume import parse_resume
@@ -114,12 +114,16 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
             meta["connections"] = len(people)
         except (OSError, ValueError) as e:
             log.warning("referral finder: %s: %s", conn_file, e)
-    statuses.write_sync_js(paths.SYNC_JS, statuses.sync_payload(conn))
+    if made := statuses.ensure_applications(conn, paths.APPS_DIR):     # every job marked applied is in My Applications
+        log.info("applications created for jobs marked applied", extra={"n": len(made)})
+    external.write_packages(conn, resume.version_hash)                 # job packages of the jobs you added
+    conn.commit()
     try:   # Resume Builder: resume statuses + versions → dashboard/resumes.js (and application links)
         from resume_builder.hirescope_bridge import refresh_all
         refresh_all(paths.DB)
     except Exception as e:  # noqa: BLE001 — the job run must not fail because of resume data
         log.warning("resume statuses not refreshed", extra={"error": str(e)[:200]})
+    statuses.write_sync_js(paths.SYNC_JS, statuses.sync_payload(conn))   # after refresh_all: includes resume links
     compute_similar(conn, Embedder(conn), shown, min_sim=cfg.prefs.scoring.similar_min)   # "More like this"
     jobs = db.open_jobs(conn)
     if paths.ENG_BLOGS.exists():
@@ -254,6 +258,11 @@ def _main(args, log_file: Path) -> int:
         except (OSError, ValueError) as e:
             log.error("statuses import failed: %s", e)
             imported = {"skipped_reason": f"failed: {e}"}
+    ext = []
+    if not args.dry_run:   # external jobs: the drop folder + "Add external job" files from the dashboard
+        ext = external.import_pending(conn, cfg, paths.EXTERNAL_INBOX, import_dirs(cfg.prefs.statuses_import_dir))
+        for o in ext:
+            (log.info if o.status == "new" else log.warning)("external job %s", external.summary_line(o))
     learned = feedback.learn(db.labeled_jobs(conn), cfg.prefs)
     if learned.labeled:
         log.info("feedback learning: %s", learned.describe()["status"])
@@ -284,6 +293,7 @@ def _main(args, log_file: Path) -> int:
     s["reopened"] = [f"{r['company']}: {r['title']}" for r in statuses.reopened_shortlisted(conn, run_started)]
     for r in s["reopened"]:
         log.warning("REOPENED (you had it shortlisted): %s", r)
+    s["external"] = [external.summary_line(o) for o in ext]
     s["scope"] = "rescore" if args.rescore else "quick" if args.quick else (
         "partial" if (args.company or args.source or args.watchlist) else "full")
     s["health_alerts"] = [] if args.rescore else health.check(
@@ -302,7 +312,7 @@ def _main(args, log_file: Path) -> int:
         if last:
             last_fetch = last[1]
             s = {**json.loads(last[0]), "scored": s["scored"], "filtered": s["filtered"], "strong": s["strong"],
-                 "reopened": s["reopened"],
+                 "reopened": s["reopened"], "external": s["external"],
                  "by_track": s["by_track"], "rescored_at": db.utcnow(), "scope": "full"}
     if not args.dry_run:
         tz = ZoneInfo(cfg.prefs.timezone)

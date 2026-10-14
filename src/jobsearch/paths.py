@@ -36,7 +36,8 @@ _UNDER_DATA = {
     "JD_DIR": ("jd",),                    # jd/<Company>/<source>_<job id>.txt
     "PACKAGES_DIR": ("job_packages",),    # job_packages/<Company>/
     "LOG_DIR": ("logs",),
-    "APPS_DIR": ("applications",),        # saved JD copies for your applications (kept after postings close)
+    "APPS_DIR": ("applications",),
+    "EXTERNAL_DIR": ("external_jobs",),   # external_jobs/<Company>/: the original files of imported external jobs        # saved JD copies for your applications (kept after postings close)
     "IMPORTS_DIR": ("imports",),          # archived copies of imported dashboard exports
     "BACKUPS_DIR": ("backups",),
     "DIGESTS_DIR": ("digests",),
@@ -52,6 +53,8 @@ def __getattr__(name: str):
         return DATA.joinpath(*_UNDER_DATA[name])
     if name == "SYNC_JS":                 # SQLite -> dashboard: your statuses and applications
         return DASHBOARD / "sync.js"
+    if name == "EXTERNAL_INBOX":          # drop folder: JD files of jobs found outside HireScope (the next run imports)
+        return ROOT / "inputs" / "external_jobs"
     raise AttributeError(name)
 
 

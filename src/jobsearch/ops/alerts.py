@@ -111,6 +111,8 @@ def summary_text(s: dict) -> str:
         lines.append(f"  HEALTH: {a['message']}")
     for r in s.get("reopened") or []:
         lines.append(f"  REOPENED: {r}")
+    for x in s.get("external") or []:
+        lines.append(f"  external job {x}")
     for f in (s.get("failures") or [])[:10]:
         lines.append(f"  failed: {f['company']} ({f['source']})")
     if s.get("backup"):

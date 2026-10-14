@@ -410,11 +410,12 @@ def _add_source(conn, pk: int, rec: JobRecord, ck: str, now: str) -> None:
     )
 
 
-def upsert_job(conn: sqlite3.Connection, rec: JobRecord, now: str | None = None) -> tuple[int, str]:
+def upsert_job(conn: sqlite3.Connection, rec: JobRecord, now: str | None = None, fuzzy: bool = True) -> tuple[int, str]:
     """Insert or update one job. Returns (job pk, 'new' | 'updated' | 'seen').
 
     Match order: same source + company + job id -> same canonical ATS key from any source -> fuzzy
     (company + normalized title + location). An official ATS source replaces an aggregator's data.
+    fuzzy=False skips the fuzzy step (external jobs: their own duplicate check already decided).
     """
     now = now or utcnow()
     ck = company_key(rec.company)
@@ -422,7 +423,7 @@ def upsert_job(conn: sqlite3.Connection, rec: JobRecord, now: str | None = None)
         "SELECT job_pk FROM job_sources WHERE source=? AND company_key=? AND source_job_id=?",
         (rec.source, ck, rec.job_id),
     ).fetchone()
-    pk = row["job_pk"] if row else (find_by_canonical(conn, rec) or find_fuzzy(conn, rec))
+    pk = row["job_pk"] if row else (find_by_canonical(conn, rec) or (find_fuzzy(conn, rec) if fuzzy else None))
 
     if pk is None:
         cols = ["company", "company_key", "job_id", "source", "first_seen", "last_checked",

@@ -305,6 +305,94 @@ def import_newest(conn, directory: Path | list[Path], apps_dir: Path | None, arc
     return res
 
 
+# --- every job marked applied is in My Applications ---------------------------------------------------------
+APPLIED_STATUSES = {"applied": "applied", "interviewing": "interviewing", "offer": "offer"}
+ADDED_BY_YOU = ("external", "added_url")
+
+
+def app_source(job_source: str | None) -> str:
+    """The application's Source: jobs you added yourself (external / by URL) are "External"."""
+    return "External" if job_source in ADDED_BY_YOU else "HireScope"
+
+
+def _save_jd_copy(conn, app_id: str, job_pk: int, apps_dir: Path | None) -> None:
+    if apps_dir is None:
+        return
+    r = conn.execute("SELECT jd_path FROM jobs WHERE id=?", (job_pk,)).fetchone()
+    src = paths.stored_file(r["jd_path"], paths.JD_DIR) if r else None
+    if src:
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        dest = apps_dir / f"{app_id}.txt"
+        shutil.copyfile(src, dest)
+        conn.execute("UPDATE applications SET jd_path=? WHERE id=?", (str(dest), app_id))
+
+
+def ensure_applications(conn, apps_dir: Path | None, now: str | None = None) -> list[str]:
+    """Jobs you marked applied / interviewing / offer (on the dashboard, in an older export, or with
+    `python -m jobsearch.apps mark-applied`) that have no application yet get one: applied date, company, role,
+    source (HireScope / External), track, application link, a saved JD copy, and the resume version current when you
+    applied (resume_builder's link_applications fills that in). Returns the new application ids."""
+    now = now or db.utcnow()
+    have_pk = {r[0] for r in conn.execute("SELECT job_pk FROM applications WHERE job_pk IS NOT NULL")}
+    have_key = {r[0] for r in conn.execute("SELECT job_key FROM applications WHERE job_key IS NOT NULL")}
+    out = []
+    for j in conn.execute("SELECT * FROM jobs WHERE user_status IN ('applied', 'interviewing', 'offer')").fetchall():
+        key = job_key(j)
+        if j["id"] in have_pk or key in have_key:
+            continue
+        app_id = f"job-{j['id']}"
+        at = j["user_status_at"] or now
+        extra = json.loads(j["extra"] or "{}")
+        track = j["track_override"] or j["track"]
+        conn.execute(
+            "INSERT OR IGNORE INTO applications (id, job_key, job_pk, company, company_key, title, track, link, source, "
+            "applied_date, stage, deleted, created_at, updated_at, extra) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)",
+            (app_id, key, j["id"], j["company"], j["company_key"], j["title"], track if track in TRACKS else None,
+             j["apply_url"] or j["source_url"] or None, app_source(j["source"]), at[:10],
+             APPLIED_STATUSES[j["user_status"]], at, at,
+             json.dumps({"source": j["source"], "label": j["label"], "level": j["level"], "job_id": j["job_id"],
+                         "score": None if j["score"] is None else round(j["score"]),
+                         **({"external": True} if j["source"] in ADDED_BY_YOU else {}),
+                         **({"origin": extra["external"].get("origin")} if isinstance(extra.get("external"), dict) else {})})))
+        conn.execute("INSERT OR IGNORE INTO application_events (app_id, at, kind, from_stage, to_stage, note) "
+                     "VALUES (?,?,?,?,?,?)", (app_id, at, "created", "", APPLIED_STATUSES[j["user_status"]], ""))
+        _save_jd_copy(conn, app_id, j["id"], apps_dir)
+        out.append(app_id)
+    conn.commit()
+    return out
+
+
+def mark_applied(conn, job_pk: int, apps_dir: Path | None, applied_date: str | None = None) -> str:
+    """Mark one job applied from the command line (as the dashboard's Mark Applied does): status "applied" and its
+    application with the resume version that is current right now. Returns the application id."""
+    j = conn.execute("SELECT * FROM jobs WHERE id=?", (job_pk,)).fetchone()
+    if j is None:
+        raise ValueError(f"no HireScope job {job_pk}")
+    now = db.utcnow()
+    day = applied_date or now[:10]
+    if not _DATE.match(day):
+        raise ValueError(f"applied date must be YYYY-MM-DD (got {day!r})")
+    existing = conn.execute("SELECT id FROM applications WHERE deleted=0 AND (job_pk=? OR job_key=?)",
+                            (job_pk, job_key(j))).fetchone()
+    if existing:
+        return existing["id"]
+    if j["user_status"] not in APPLIED_STATUSES:
+        conn.execute("UPDATE jobs SET user_status='applied', skip_reason=NULL, user_status_at=? WHERE id=?", (now, job_pk))
+    ids = ensure_applications(conn, apps_dir, now)
+    app_id = ids[0] if ids else f"job-{job_pk}"
+    conn.execute("UPDATE applications SET applied_date=? WHERE id=?", (day, app_id))
+    try:   # the exact resume version you are sending: the current ready/reviewed build
+        from resume_builder.hirescope_bridge import resume_ref
+        ref = resume_ref(conn, job_pk)
+        if ref:
+            ref = {**ref, "linked": "applied", **({"pdf_name": Path(ref["pdf"]).name} if ref.get("pdf") else {})}
+            conn.execute("UPDATE applications SET resume=? WHERE id=?", (json.dumps(ref), app_id))
+    except ImportError:
+        pass
+    conn.commit()
+    return app_id
+
+
 # --- SQLite -> dashboard -----------------------------------------------------------------------------
 def applications(conn, include_deleted: bool = True, with_jd: bool = True) -> list[dict]:
     events: dict[str, list] = {}

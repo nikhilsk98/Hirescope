@@ -564,3 +564,39 @@ link → `data.nosync/logs/jobsearch.log`. Schedule reinstalled (new log paths) 
   complete: **0 partial sources** left. Tests: 513 passed.
 - Still manual by design: 53 companies whose sites forbid or block automated access (robots.txt / terms / bot
   checks) or have no public job feed — the Manual Checks view lists them with their careers links.
+
+## External jobs + applied tracking (2026-10-14)
+**Extended, not duplicated**: Add job by URL (`add_url.sh`) is unchanged and is what `add_job.sh --url` (URL only) and
+the dashboard form (no JD) fall back to; the Add application form stays for jobs you don't add to HireScope.
+
+- **Import paths**: `./scripts/add_job.sh` (`--file` .txt/.md/.pdf/.docx, `--paste`, `--text`, `--json`, `--pending`),
+  the dashboard's **+ Add external job** form (saves `hirescope-external-job-*.json`; imported by the next run or
+  `--pending`), and the drop folder `inputs/external_jobs/` (header or file name gives company / role / URL / track).
+  Jobs get source `external`, full scoring, a job package, the External badge and an **External Jobs** view, and are
+  always shown (rules that would hide them become a note). PDFs via pdfplumber (bullets drawn as shapes and wrapped
+  lines are rebuilt), DOCX via the standard library.
+- **Duplicates**: same URL / ATS posting, same JD text, or same company + role with a similar JD → not created; the
+  existing job is named and linked (`--force` / "add it anyway"). External imports never fuzzy-merge into another job.
+- **Applied tracking**: Mark Applied records source HireScope / External; every job marked applied / interviewing /
+  offer gets an application (applied date, company, role, source, track, resume version, saved JD, link) even when
+  set elsewhere; `apps mark-applied JOB_ID`; **Applied Companies** tab (one row per company: count, latest status,
+  links) and `apps companies`.
+
+**Real test** (on a copy of the real data — `JOBSEARCH_DATA_DIR` / `JOBSEARCH_DASHBOARD_DIR` in the scratchpad — so
+the real My Applications got no test applications): two real postings at companies HireScope doesn't track.
+Squarespace "Software Engineer, Frontend" (pasted JD) → job 141813, full-time, mid (3+ YOE), 66 Stretch, ATS 55%;
+Mercury "Software Engineer - Product" (browser-printed PDF) → job 141814, entry (1+ YOE), 65 Stretch, ATS 51%. A
+re-paste of the Squarespace JD under another title was refused as a duplicate (exit 3). `/resume-builder` on both
+(prepare → draft → review → verify → build): **READY v1**, one page, every claim supported (one stretched-line
+warning each). Dashboard in headless Chrome: External view + badges, Generate Resume, Mark Applied (source External,
+resume v1 + PDF hash, 5,530-char saved JD, link), Export statuses → `apps import`; Mercury marked applied with
+`apps mark-applied`; **Applied Companies** shows both; the form flagged Mercury as a duplicate and saved a third real
+job (Squarespace Security Engineer, Dublin), imported with `--json` (shown despite the location/title rules, with
+the note). No console errors.
+
+**Found and fixed during the real test**: the PDF's list structure was lost (no requirements found) → paragraph /
+bullet reconstruction; your chosen track was stored as a feed hint ("listed in a new-grad feed") → it's an override
+and detection stays from the JD; a "different job" decision could still fuzzy-merge into the existing posting;
+the drop folder pointed at the real `inputs/` in tests → it follows the repo root; `apps mark-applied` recorded no
+PDF name; a `run.main` test leaked `--no-email` into later tests. Tests: 526 passed (13 new).
+

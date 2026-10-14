@@ -82,5 +82,5 @@ def unfreeze_data_paths():
     which would pin later tests to the real data folder: drop those after every test."""
     yield
     from jobsearch import paths as _p
-    for name in [*_p._UNDER_DATA, "SYNC_JS"]:
+    for name in [*_p._UNDER_DATA, "SYNC_JS", "EXTERNAL_INBOX"]:
         _p.__dict__.pop(name, None)

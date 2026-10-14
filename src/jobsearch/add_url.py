@@ -99,6 +99,22 @@ def add_job(conn, cfg, url: str, client: HttpClient, *, company: str | None = No
     return pk, status, how
 
 
+def rescore_and_publish(conn, cfg, resume, log_file: Path) -> None:
+    """Score stored jobs and rewrite the dashboard, keeping the last run's summary and coverage in the header."""
+    from .run import publish
+    score_all(conn, cfg, resume, Embedder(conn), RunSummary())
+    conn.commit()
+    last = conn.execute("SELECT summary FROM runs WHERE summary IS NOT NULL AND dry_run=0 ORDER BY id DESC LIMIT 1"
+                        ).fetchone()
+    prev = json.loads(last[0]) if last else {}
+    data_js = paths.DASHBOARD / "data.js"
+    cov = (json.loads(data_js.read_text(encoding="utf-8").split("window.META = ", 1)[1].split(";\n", 1)[0])
+           .get("coverage", []) if data_js.exists() else [])
+    publish(conn, cfg, resume, prev, cov, resolve_watchlist(load_watchlist(paths.ROOT / cfg.prefs.my_companies_csv),
+                                                 paths.CONFIG / "company_aliases.yaml"), log_file)
+    conn.commit()
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="jobsearch.add_url", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -114,7 +130,7 @@ def main(argv=None) -> int:
     p.add_argument("--resume", type=Path, default=paths.RESUME)
     args = p.parse_args(argv)
 
-    from .run import publish, setup_logging
+    from .run import setup_logging
     log_file = setup_logging(False)
     cfg = load_config(args.prefs)
     resume = parse_resume(args.resume, cfg.synonyms)
@@ -129,17 +145,8 @@ def main(argv=None) -> int:
         return 2
     finally:
         client.close()
-    summary = RunSummary()
-    score_all(conn, cfg, resume, Embedder(conn), summary)
-    conn.commit()
+    rescore_and_publish(conn, cfg, resume, log_file)
     row = db.decode_row(conn.execute("SELECT * FROM jobs WHERE id=?", (pk,)).fetchone())
-    last = conn.execute("SELECT summary FROM runs WHERE summary IS NOT NULL AND dry_run=0 ORDER BY id DESC LIMIT 1"
-                        ).fetchone()
-    prev = json.loads(last[0]) if last else {}
-    cov = (json.loads(open(paths.DASHBOARD / "data.js").read().split("window.META = ", 1)[1].split(";\n", 1)[0])
-           .get("coverage", []) if (paths.DASHBOARD / "data.js").exists() else [])
-    publish(conn, cfg, resume, prev, cov, resolve_watchlist(load_watchlist(paths.ROOT / cfg.prefs.my_companies_csv),
-                                                 paths.CONFIG / "company_aliases.yaml"), log_file)
     conn.close()
     state = "Filtered: " + "; ".join(row["filter_reasons"] or []) if row["filtered"] else \
         f"score {row['score']} ({row['label']})"

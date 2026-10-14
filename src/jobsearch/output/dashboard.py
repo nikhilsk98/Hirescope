@@ -85,6 +85,8 @@ def _badges(job: dict, today: str, latest_day: str, tz: str, mine: set[str], clo
         b.append("meaning")
     if job["company"].casefold() in mine:
         b.append("mine")
+    if job.get("source") in ADDED_BY_YOU:
+        b.append("external")
     return b
 
 
@@ -165,6 +167,7 @@ def build_detail(job: dict, resume_hash: str) -> dict:
         "level_evidence": job.get("level_evidence"), "track_evidence": job.get("track_evidence"),
         "deadline_evidence": job.get("deadline_evidence"), "eligibility": job.get("eligibility_note"),
         "link_status": job.get("link_status"),
+        "external": x.get("external"),          # how you added it (external jobs only)
     }
 
 
@@ -288,14 +291,20 @@ def latest_per_company(rows: list[dict]) -> list[dict]:
     return [r for r in rows if id(r) in keep]
 
 
+ADDED_BY_YOU = ("external", "added_url")   # jobs you added (external.EXTERNAL_SOURCES): always shown, badge "External"
+
+
 def select_visible(jobs: list[dict], top_n: int) -> list[dict]:
-    """Highest-scoring visible jobs, top_n per track (so one track never crowds out the other)."""
+    """Highest-scoring visible jobs, top_n per track (so one track never crowds out the other), plus every job you
+    added yourself (external / by URL) whatever its rank."""
     ranked = sorted((j for j in jobs if not j.get("filtered")), key=lambda j: -(j.get("score") or 0))
     per_track: dict[str, int] = {}
     out = []
     for j in ranked:
         t = j.get("track_override") or j.get("track") or "full_time"
-        if per_track.get(t, 0) < top_n:
+        if j.get("source") in ADDED_BY_YOU:
+            out.append(j)
+        elif per_track.get(t, 0) < top_n:
             per_track[t] = per_track.get(t, 0) + 1
             out.append(j)
     return out

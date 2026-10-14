@@ -581,6 +581,13 @@ def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: E
                 rescued += not results[j["id"]].hidden
     summary.rescued = rescued
 
+    # external jobs (you added them yourself) are always shown and scored; rules that would hide them become a note
+    for j in jobs:
+        r = results[j["id"]]
+        if r.hidden and j["source"] == "external":
+            r.signals = {**r.signals, "rules_would_hide": r.reasons}
+            r.hidden, r.reasons = False, []
+
     score_prefs = learned.apply_weights(prefs) if learned else prefs
     vocab = vocab_for(cfg.synonyms)
     rt = resume_terms(resume)
