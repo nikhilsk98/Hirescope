@@ -18,6 +18,7 @@ dashboard/data.js
 data.nosync/
 dashboard/details/
 dashboard/sync.js
+dashboard/search.js
 
 # coverage data (pytest --cov)
 .coverage

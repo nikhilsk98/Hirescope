@@ -145,6 +145,9 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
                            fresh_hours=cfg.prefs.notifications.early_bird_hours)
     log.info("dashboard: %d visible, %d filtered (%d listed), %d detail chunks -> %s", counts["visible"],
              counts["filtered"], counts["filtered_listed"], counts["chunks"], paths.DASHBOARD / "index.html")
+    from .output.dashboard import write_search_js
+    n = write_search_js(paths.DASHBOARD / "search.js", conn, counts["ids_visible"], counts["ids_listed"])
+    log.info("search index: %d jobs -> %s", n, paths.DASHBOARD / "search.js")
     return counts
 
 

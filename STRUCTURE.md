@@ -7,7 +7,8 @@ All locations are defined in `src/jobsearch/paths.py`. Folder names are ASCII wo
 hirescope/
 ├── README.md  PROGRESS.md  STRUCTURE.md  requirements.txt  pyproject.toml  .env.example
 ├── config/          tuning and source lists (companies.yaml, title_rules.yaml, resume_builder.yaml, …)
-├── dashboard/       the static dashboard (index.html, app.js, …) + generated data.js, details/, sync.js, resumes.js
+├── dashboard/       the static dashboard (index.html, app.js, …) + generated data.js, details/, sync.js, resumes.js,
+│                    search.js (every job, for the ⌘K palette)
 ├── docs/            notes; docs/prompts/ = the build prompts this project was built from
 ├── scripts/         run.sh, setup.sh, schedule.sh (+ launchd/ templates), add_url.sh, add_job.sh, import_pending.sh, migrate_layout.py
 ├── src/jobsearch/   HireScope (discovery → scoring → dashboard)

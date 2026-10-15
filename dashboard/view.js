@@ -127,6 +127,40 @@
     return { recent: d.slice(0, k), older: d.slice(k) };
   }
 
-  return { Heights, visibleRange, jdBlocks, jdSections, salaryMatch, salaryLabel, snapshot, saveView, applyView,
+  // ---------- ⌘K: every job (search.js), across both tracks and every view ----------
+  const STATE_ORDER = { v: 0, f: 1, b: 2, u: 3, c: 4 };
+  const STATE_VIEW = { v: "All Jobs", f: "Filtered Out", b: "Not shown (beyond the top N per track)",
+    u: "Filtered Out (not listed)", c: "Closed" };
+  const TRACK_NAMES = ["Co-op / Intern", "Full-time", "Unclear"];
+  /** idx = window.SEARCH ({companies, reasons, rows}); rows [id, company#, title, track, state, reason#, date].
+      Every word must appear in the title or company. Ranked: in the lists first, then Filtered Out, beyond the top
+      N, unlisted filtered, closed; the current track first within each; then title match before company match. */
+  function searchJobs(idx, query, currentTrack, limit) {
+    const words = String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
+    if (!idx || !words.length) return [];
+    if (!idx._hay) idx._hay = idx.rows.map((r) => `${r[2]} ${idx.companies[r[1]]}`.toLowerCase());
+    const cur = currentTrack === "coop_intern" ? 0 : 1;
+    const out = [];
+    for (let i = 0; i < idx.rows.length; i++) {
+      const h = idx._hay[i];
+      if (!words.every((w) => h.includes(w))) continue;
+      const r = idx.rows[i];
+      const titleHit = words.every((w) => r[2].toLowerCase().includes(w));
+      out.push([STATE_ORDER[r[4]] ?? 9, r[3] === cur || r[3] === 2 ? 0 : 1, titleHit ? 0 : 1, i]);
+    }
+    out.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]);
+    return out.slice(0, limit || 50).map((x) => resultOf(idx, idx.rows[x[3]]));
+  }
+  function resultOf(idx, r) {
+    return { id: r[0], company: idx.companies[r[1]], title: r[2], track: ["coop_intern", "full_time", "unclear"][r[3]] || "full_time",
+      trackLabel: TRACK_NAMES[r[3]] || "Full-time", state: r[4], view: STATE_VIEW[r[4]] || "",
+      viewId: r[4] === "v" ? "all" : r[4] === "f" ? "filtered" : null, reason: r[5] >= 0 ? idx.reasons[r[5]] : null, date: r[6] || null };
+  }
+  /** Where to open a job: the tab (track) and view. Unclear jobs show in both tabs: stay on the current one. */
+  function openTarget(res, currentTrack) {
+    return { track: res.track === "unclear" ? currentTrack : res.track, view: res.viewId };
+  }
+
+  return { searchJobs, openTarget, STATE_VIEW, Heights, visibleRange, jdBlocks, jdSections, salaryMatch, salaryLabel, snapshot, saveView, applyView,
            deleteView, reasonForKey, keyForIndex, dayTabs, manualState, markChecked, REQ_HEAD };
 });

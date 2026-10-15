@@ -1829,8 +1829,66 @@
     for (const a of liveApps()) items.push({ kind: "Application", label: a.title, sub: `${a.company} · ${STAGE_LABEL[a.stage]}`, run: () => openDrawer(a.id) });
     return items;
   }
+  // every job (search.js, written by each run; loaded the first time the palette opens): both tracks, every view,
+  // Filtered Out, beyond the top N, closed. Until it loads (or if it is missing) the palette searches the loaded jobs.
+  let SEARCH = null; let searchState = "idle";
+  function loadSearch() {
+    if (searchState !== "idle") return;
+    searchState = "loading";
+    window.__search = (d) => { SEARCH = d; searchState = "ready"; if ($("#palette").open) drawPalette($("#palette-q").value); };
+    const s = el("script", { src: "search.js" });
+    s.onerror = () => { searchState = "missing"; };
+    document.head.append(s);
+  }
+  let JOBS_INDEX = null;
+  function jobsIndex() {        // the same shape as search.js, from the jobs this page has loaded
+    if (JOBS_INDEX) return JOBS_INDEX;
+    const cos = new Map(); const rows = [];
+    for (const j of JOBS) {
+      if (!cos.has(j.company)) cos.set(j.company, cos.size);
+      rows.push([j.id, cos.get(j.company), j.title, { coop_intern: 0, full_time: 1, unclear: 2 }[trackOf(j)] ?? 1, j.filtered ? "f" : "v", -1, ""]);
+    }
+    JOBS_INDEX = { companies: [...cos.keys()], reasons: [], rows };
+    return JOBS_INDEX;
+  }
+  function openFromPalette(res) {
+    const j = BY_ID.get(res.id);
+    if (!j) { showJobInfo(res); return; }
+    const tgt = V.openTarget({ ...res, track: trackOf(j) }, ui.track);
+    if (tgt.track !== ui.track) switchTrack(tgt.track);
+    const want = j.filtered ? "filtered" : (["all", "last24", "apply", "mine", "external", "closing", "missed", "tracker",
+      "shortlisted", "resumes"].includes(tstate().view) ? tstate().view : "all");
+    const st = tstate();
+    const inView = (v) => viewById(v).jobs && viewById(v).jobs().some((x) => x.id === j.id);
+    st.view = inView(want) ? want : j.filtered ? "filtered" : "all";
+    if (!applyFilters(viewById(st.view).jobs()).some((x) => x.id === j.id)) {
+      st.filters = {}; st.q = ""; st.salary = 0; st.salaryMax = 0; st.salaryKnown = false; ui.day = null; $("#q").value = "";
+      toast("Filters cleared to show this job");
+    }
+    saveUI(); renderBanners(); renderAll();
+    const i = current.findIndex((x) => x.id === j.id);
+    if (vlist && i >= 0) vlist.ensureVisible(i);
+    openPanel(j.id);
+  }
+  function showJobInfo(res) {            // closed / unlisted jobs: the dashboard holds no details for them
+    const d = $("#job-info");
+    $("#job-info-title").textContent = res.title;
+    $("#job-info-sub").textContent = `${res.company} · ${res.trackLabel}`;
+    const body = $("#job-info-body"); body.textContent = "";
+    const where = { c: `Closed${res.date ? ` on ${fmtDate(res.date)}` : ""}: the posting disappeared from its source.`,
+      u: "Filtered out by your rules and not in the Filtered Out list (it lists the most relevant ones).",
+      b: "Open and scored, but below the top N jobs per track that the dashboard shows." }[res.state] || res.view;
+    body.append(facts([["Where", res.view], ["Status", where], res.reason ? ["Filter reason", res.reason] : null,
+      ["HireScope ID", String(res.id)]]),
+      el("p", { class: "muted", style: "font-size:12px", text: "Full details aren't loaded for this job. Generate Resume works from the command line: claude \"/resume-builder " + res.id + "\"." }));
+    $("#job-info-li").href = linkedinSearch(res.company, res.title);
+    d.showModal(); $("#job-info-close").focus();
+  }
+  $("#job-info-close").addEventListener("click", () => $("#job-info").close());
+  const linkedinSearch = (co, t) => "https://www.linkedin.com/jobs/search/?keywords=" + encodeURIComponent(`${co} ${t}`);
   function openPalette() {
     const d = $("#palette"); if (d.open) return;
+    loadSearch();
     const q = $("#palette-q"); q.value = ""; d.showModal(); drawPalette(""); q.focus();
   }
   function drawPalette(qs) {
@@ -1838,9 +1896,16 @@
     const hit = (x) => words.every((w) => `${x.label} ${x.sub || ""} ${x.kind}`.toLowerCase().includes(w));
     let items = paletteSource().filter(hit);
     if (words.length) {
-      const jobs = [];
-      for (const j of JOBS) { if (jobs.length >= 40) break; if (!j.filtered && words.every((w) => `${j.title} ${j.company}`.toLowerCase().includes(w))) jobs.push(j); }
-      items = items.concat(jobs.map((j) => ({ kind: "Job", label: j.title, sub: `${j.company} · ${TRACKS[trackOf(j)]}${j.score != null ? ` · ${Math.round(j.score)}` : ""}`, run: () => openPanel(j.id) })));
+      const found = V.searchJobs(SEARCH || jobsIndex(), qs, ui.track, 50);
+      items = items.concat(found.map((r) => {
+        const j = BY_ID.get(r.id);
+        const track = j ? TRACKS[trackOf(j)] : r.trackLabel;
+        return { kind: r.state === "c" ? "Closed job" : "Job", label: r.title,
+          sub: `${r.company} · ${track} · ${r.view}${j && j.score != null ? ` · ${Math.round(j.score)}` : ""}`,
+          run: () => openFromPalette(r) };
+      }));
+      if (searchState === "loading") items.push({ kind: "Note", label: "Loading every job (closed, filtered, beyond the top N)…", run: () => {} });
+      if (searchState === "missing") items.push({ kind: "Note", label: "search.js not found: searching the loaded jobs only (the next run writes it)", run: () => {} });
     } else items = items.filter((x) => x.kind === "View" || x.kind === "Action" || x.kind === "Saved view");
     palItems = items.slice(0, 60); palSel = 0; renderPaletteList();
   }

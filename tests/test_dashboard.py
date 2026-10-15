@@ -171,3 +171,52 @@ def test_design_tokens_meet_wcag_aa(theme):
     t = theme_tokens()[theme]
     low = [(fg, bg, round(contrast(t[fg], t[bg]), 2)) for fg, bgs in PAIRS.items() for bg in bgs if contrast(t[fg], t[bg]) < 4.5]
     assert not low, f"{theme}: pairs below 4.5:1: {low}"
+
+
+# --- ⌘K: every job, both tracks, every view -------------------------------------------------------------------------
+def test_search_index_covers_every_job_and_view(tmp_path):
+    from jobsearch.output.dashboard import write_search_js
+    from jobsearch.storage import db
+    conn = db.connect(":memory:")
+    rows = [  # id, company, title, track, override, status, filtered, reasons
+        (1, "DemoCo", "Software Engineer Co-op (DEMO)", "coop_intern", None, "new", 0, None),
+        (2, "DemoCo", "Backend Engineer (DEMO)", "full_time", None, "seen", 1, '["Not in the US: Dublin"]'),
+        (3, "Acme (DEMO)", "Data Engineer (DEMO)", "full_time", None, "seen", 1, '["Not in the US: Dublin"]'),
+        (4, "Acme (DEMO)", "Platform Engineer (DEMO)", "unclear", "coop_intern", "seen", 0, None),
+        (5, "Gone (DEMO)", "Cloud Developer (DEMO)", "full_time", None, "closed", 0, None)]
+    for i, co, t, tr, ov, st, f, rs in rows:
+        conn.execute("INSERT INTO jobs (id, company, company_key, title, normalized_title, job_id, first_seen, "
+                     "last_checked, source, jd_hash, job_status, status_changed_at, track, track_override, filtered, "
+                     "filter_reasons) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                     (i, co, co.lower(), t, t.lower(), f"j{i}", "2026-10-01T00:00:00+00:00", "2026-10-01", "demo", "h",
+                      st, "2026-10-12T09:00:00+00:00", tr, ov, f, rs))
+    p = tmp_path / "search.js"
+    assert write_search_js(p, conn, ids_visible=[1], ids_listed=[2]) == 5
+    d = json.loads(p.read_text().split("window.__search(", 1)[1].rsplit(");", 1)[0])
+    by = {r[0]: r for r in d["rows"]}
+    assert [by[i][4] for i in (1, 2, 3, 4, 5)] == ["v", "f", "u", "b", "c"]
+    assert by[4][3] == 0 and by[2][3] == 1                     # the track override counts
+    assert by[5][6] == "2026-10-12" and d["companies"].count("DemoCo") == 1 and len(d["reasons"]) == 1
+
+
+@needs_node
+def test_palette_search_ranks_across_tracks_and_views():
+    idx = {"companies": ["DemoCo", "Acme"], "reasons": ["Not in the US"],
+           "rows": [[10, 0, "Data Engineer (closed)", 1, "c", -1, "2026-10-01"],
+                    [11, 1, "Data Engineer Intern", 0, "u", 0, ""],
+                    [12, 0, "Senior Data Engineer", 1, "v", -1, ""],
+                    [13, 1, "Data Engineer Co-op", 0, "v", -1, ""],
+                    [14, 0, "Analytics Lead", 1, "f", 0, ""],
+                    [15, 1, "Platform", 2, "b", -1, ""]]}
+    js = _node(f"""const idx = {json.dumps(idx)};
+console.log(JSON.stringify({{coop: V.searchJobs(idx, "data engineer", "coop_intern", 10).map(r => [r.id, r.view, r.trackLabel]),
+  ft: V.searchJobs(idx, "data engineer", "full_time", 10).map(r => r.id),
+  company: V.searchJobs(idx, "acme", "full_time", 10).map(r => r.id),
+  none: V.searchJobs(idx, "  ", "full_time", 10),
+  reason: V.searchJobs(idx, "data intern", "full_time", 1)[0].reason,
+  target: [V.openTarget({{track: "unclear"}}, "full_time"), V.openTarget({{track: "coop_intern", viewId: "all"}}, "full_time")]}}));""")
+    assert js["coop"] == [[13, "All Jobs", "Co-op / Intern"], [12, "All Jobs", "Full-time"],
+                          [11, "Filtered Out (not listed)", "Co-op / Intern"], [10, "Closed", "Full-time"]]
+    assert js["ft"] == [12, 13, 11, 10]                          # the current track first within each view
+    assert js["company"] == [13, 15, 11]          # in the lists, then beyond the top N, then unlisted filtered and js["none"] == [] and js["reason"] == "Not in the US"
+    assert js["target"] == [{"track": "full_time"}, {"track": "coop_intern", "view": "all"}]

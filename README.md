@@ -245,7 +245,12 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
   Glassdoor / engineering blog (`config/eng_blogs.yaml`, verified URLs; a search link otherwise). The panel keeps
   keyboard focus inside while open; `Esc` closes it and focus returns to the job's card.
 - **Bulk select** (checkbox on hover, or `Space`): shortlist, skip with a reason, or export CSV for many jobs at once.
-- **Command palette** `⌘K`: jump to any job, company, application, view or action.
+- **Command palette** `⌘K`: jump to any job, company, application, view or action. Jobs are searched across **both
+  tracks and every view** — the lists, Filtered Out, jobs below the top N per track, filtered jobs the Filtered Out
+  list doesn't show, and closed jobs (`dashboard/search.js`, written by each run, loaded the first time you open the
+  palette). Each result shows its track and view; opening one switches to that tab and view (clearing filters that
+  would hide it) and opens the job; a job the dashboard holds no details for (closed, not listed, beyond the top N)
+  opens a short info card with its status and filter reason.
 - Keys: `j`/`k`, `Enter`, `s` shortlist, `x` skip (reason picker: `1`–`9`, `0`), `a` mark applied, `o` open, `g` Generate Resume (copy command), `/` search, `1`/`2` tabs,
   `Space` select, `⌘K` palette, `[` / `]` move a board card, `?` help.
 

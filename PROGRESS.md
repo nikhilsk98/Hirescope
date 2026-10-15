@@ -702,3 +702,14 @@ never in bullets); Prometheus / Grafana stay planned. All kept in `evidence_addi
 too). Fixed while rebuilding: the truth check compared "Go (coursework)" with the label attached ("Go" isn't in the
 keyword vocabulary). Amazon SDE Early Career rebuilt: **READY v4**, first attempt — Go / Rust (coursework) in
 Languages, no C#. Old answers archived in `inputs/resume/archive/before-decisions/`. Tests: 559 passed.
+
+## ⌘K palette: every job (2026-10-15)
+The palette searched only the jobs the page loads (and skipped filtered ones). Each run now also writes
+`dashboard/search.js` — all 142,511 jobs (open, Filtered Out, filtered but not listed, beyond the top N per track,
+closed; 9.6 MB, companies and filter reasons stored once), loaded the first time the palette opens. Search and ranking
+live in `view.js` (tested in Node): jobs in the lists first, then Filtered Out, beyond the top N, unlisted filtered,
+closed; the current track first within each. Results show track and view; opening one switches tab and view (clearing
+filters that hide it) and opens the panel; jobs without details open an info card. Real test (headless Chrome, the
+real dashboard): a co-op job from the Full-time tab → Co-op tab, All Jobs, panel, card focused; a listed filtered job →
+Filtered Out; an unlisted filtered, a beyond-top-N and a closed job → info card with status / reason; a search that hid
+the job → filters cleared. No console errors. Tests: 561 passed.
