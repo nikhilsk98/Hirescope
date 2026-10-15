@@ -722,4 +722,4 @@ the job → filters cleared. No console errors. Tests: 561 passed.
   or "0 ticked tools". `tags` explains that v4 needs no tags and lists the same exclusions.
 - JSON API calls retry a non-JSON 200 body with backoff (the Workday "Expecting value" failures at Xcel Energy and Palo
   Alto Networks). Still failing: the failure is marked transient; a quick check logs a warning and exits 0 unless the
-  same source also failed on its previous check. Full runs unchanged. Tests: 563 passed.
+  same source also failed on its previous check. Full runs unchanged. Tests: 564 passed.
