@@ -9,12 +9,11 @@ naming:
 
 page_count: 1
 
-# Section order by audience (rules 15–16; summary is placed first when on). The audience comes from HireScope's track
-# and level: co-op / internship / new-grad roles are "student", mid-level and up "experienced". The drafter may put
-# Projects before Experience when they are clearly the strongest evidence (rule 17); nothing else may move.
+# Section order (rules 24–25, v4.1): the same for every application and every level, never reordered. The audience
+# (student vs experienced, from HireScope's track and level) still decides the project count (rules 46–48).
 section_order:
   student: [education, skills, experience, projects]
-  experienced: [skills, experience, projects, education]
+  experienced: [education, skills, experience, projects]
 audience:
   experienced_levels: [mid, senior, staff_plus, manager]
   experienced_min_yoe: 3       # a full-time role with no level in its title counts as mid-level when it asks this many years
@@ -43,7 +42,7 @@ limits:
   projects: {min: 1, max: 3}
   bullets_per_project: {min: 2, max: 2}     # rule 36: 2 bullets each
   bullets_per_role: {min: 1, max: 4}
-  bullet_max_words: 25
+  bullet_max_words: 34          # a review hint; the real limit is 2 rendered lines (rule 43)
   bullet_max_lines: 2
   keyword_max_repeats: 3       # a JD keyword more than this many times across the resume is flagged
   courses: {min: 0, max: 3}                  # rule 46: 0–3 relevant courses
@@ -52,7 +51,7 @@ limits:
 # Layout limits the repair loop may never cross. The template is 10pt with 1.4cm margins.
 layout:
   min_font_pt: 10.0            # rule 53: never below 10 pt (bullet symbols are excluded)
-  min_margin_cm: 1.3           # text may not come closer to any page edge than this
+  min_margin_cm: 1.25          # text may not come closer to any page edge (rule 17: 0.5 in = 1.27 cm)
   max_bottom_whitespace: 0.30  # warn when more than this share of the page height is empty at the bottom
   entry_gap_pt: 6              # space between experience/project entries (as in the template)
   education_gap_pt: 4
@@ -84,6 +83,10 @@ profiles:
     signals: [cloud, aws, azure, gcp, kubernetes, docker, devops, ci/cd, infrastructure, distributed systems,
               platform, reliability, sre, terraform, linux, networking, release]
     lead_with: [Docker, AWS, Azure, Jenkins, CI/CD, Linux, Azure SQL, Java]
+  data:
+    signals: [data engineer, data engineering, data pipeline, data pipelines, etl, elt, airflow, spark, kafka,
+              data warehouse, warehouse, bigquery, snowflake, redshift, dbt, sql, python, ingestion, lambda]
+    lead_with: [Python, SQL, PostgreSQL, AWS Lambda, Amazon S3, Kafka, Docker]
   ml:
     signals: [machine learning, ml, mlops, deep learning, pytorch, tensorflow, scikit-learn, nlp, data science,
               data pipelines, model, models, llm, ai, data engineer, data engineering, etl, spark]

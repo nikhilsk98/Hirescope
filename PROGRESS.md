@@ -646,3 +646,42 @@ check flagged 25% in three bullets and, on Anduril, two of them together (kept u
 Found and fixed while testing: degree fields asked as "have you used"; a trailing skills-list tag covered the whole
 line; the bank cache ignored code changes (now part of its key); OSGi conflicts missed (not in the keyword
 vocabulary); the additions header's format example parsed as an entry. Tests: 540 passed (12 new).
+
+## Master v4 + resume rules v4.1 (2026-10-15)
+- **Master v4 parser** (`master_v4.py`): Education (`**Degree:**` / `**Graduation:**` / `**GPA:**`, coursework table —
+  "Yes" rows only), per-role fields, Metrics tables with statuses, Bullet banks (groups A–F, core / extended, variants),
+  "In my own words", Legacy bullets, Excluded roles / projects / skills, the Default one-page snapshot, Skills
+  inventory tiers (core / extended / self-reported max 4 / planned / concepts), Certifications, Contact, Target roles.
+  Italic "Builder:" lines are instructions (listed in the brief), never content. Statuses from the master's labels:
+  verified / estimated usable; unverified / pending / planned / Legacy / Excluded never — a bullet stating an
+  unverified metric's number is dropped too. The `[confirmed]` tag requirement is gone (older format: untagged = usable).
+- **Rules v4.1 checks** (`rules_v4.py`): precedence (notes set selection, never relax truth), the snapshot as the start
+  (no JD → reproduced unchanged), one section order for every level, rule 8 metric kinds, 11–14, 29, 31, 37–39
+  (review), 45, 50, 53 tiers (the master's Excluded list beats the tool checklist; checklist ticks without master
+  evidence are self-reported), 78, the A3/C2 and B3/Material UI overlaps, the master's per-role pick ranges.
+  Rendering uses the template's own macros (`v4build.py`); f-ligatures are broken in generated text so "fi" extracts as
+  letters (Tectonic writes the single glyph "ﬁ" otherwise), dashes are TeX ligature input. The layout specification is a
+  set of validation checks (T1 + lmodern, 0.5 in, 10.5/12 pt, hyphenation off, 12.5 pt headings, 1.2 em math bullets,
+  hidelinks, 3 pt gaps, Letter, Latin Modern only, no Type 3, "•" bullets, "–" dates, 10.5 pt body, 20 pt name, contact
+  on one line). Overflow follows rule 67, ending with `\entrygap` 3 → 2 pt and leading 12.0 → 11.8 pt.
+- **Engine**: only Tectonic is installed (no pdfLaTeX); with lmodern it reproduces the template on one page — the
+  default build's extracted text is identical, line for line, to the template compiled as written.
+- **HireScope**: graduation date May 2027; Data Engineer and Cloud / AWS Developer are core titles; HireScope's own
+  resume parser now reads the v4 master (it had been reading Builder notes, field labels and planned skills as resume
+  content); rescored: 7,134 visible (6,260 full-time, 868 co-op); 280 visible Data Engineer / Cloud-AWS Developer jobs.
+
+**Real runs** (your real inputs and data):
+- Default resume (no JD): **READY** `_default/v1`, identical to the template compiled as written; every check passed.
+- Co-op: HPE Cloud Developer Intern (job 34877, out of state): **READY v5** — freelance D2 + D4 swapped in (cloud /
+  ML), scikit-learn in Skills, AZ-900 (cloud role), relocation line, both projects, 4 / 3 / 2 bullets. One warning:
+  the relocation contact line wraps even without "+1" (open decision, see README).
+- Full-time: Amazon SDE Early Career (job 19540, Cambridge MA): **READY v2**, first attempt, no repairs — D2 in for C1
+  (backend-distributed), NoSQL in Skills, default contact line, coursework kept.
+
+**Found and fixed during the real runs**: the PDF would have been named after "# Master Resume — …" (now the Contact
+name); `C++` and `C` shared an id; the ML profile (not one of your tracks) picked for a cloud role; keyword questions
+about "OE", "OR" and "code review"; snapshot bullets were "weak" by position, so overflow trimming cut the approved
+GitHub Actions bullet; repairs could cut a role below the master's minimum and nothing re-checked the rules afterwards
+(HPE v2 was built that way and is superseded; failed / superseded versions stay in the folder, never current); the
+TeX-comment portfolio link and the `\bfseries` name in the header; link boxes shorter than their glyphs.
+Tests: 557 passed (DEMO v4 master + template fixtures; the default-resume regression compares extracted text).

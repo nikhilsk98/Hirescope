@@ -104,6 +104,8 @@ class Item:
     where_entries: list[str] = field(default_factory=list)   # tools: entry ids that "Where" names
     level: str | None = None        # tools / additions: production | project | coursework | tutorial
     line: int | None = None         # line in its source file
+    kind: str = "bullet"            # v4: bullet | snapshot | own_words | context | metric | course | skill | cert
+    variant: bool = False           # v4: a compact / combined variant of another bullet
 
 
 @dataclass
@@ -118,6 +120,7 @@ class Bank:
     metric_flags: list[dict] = field(default_factory=list)   # rule 3: {metric, items: [ids], detail}
     tool_index: dict[str, dict] = field(default_factory=dict)  # every checklist tool: name -> {ticked, family}
     conflicts: list[str] = field(default_factory=list)       # tools the master names but the checklist leaves unticked
+    v4: dict = field(default_factory=dict)                   # master v4 extras (master_v4.V4), {} for the older format
 
     def by_entry(self, entry_id: str) -> list[Item]:
         return [i for i in self.items.values() if i.entry_id == entry_id]
@@ -134,7 +137,7 @@ class Bank:
 
     def to_json(self) -> dict:
         return {"version": self.version, "hashes": self.hashes, "warnings": self.warnings, "excluded": self.excluded,
-                "metric_flags": self.metric_flags, "tool_index": self.tool_index, "conflicts": self.conflicts,
+                "metric_flags": self.metric_flags, "tool_index": self.tool_index, "conflicts": self.conflicts, "v4": self.v4,
                 "entries": {k: asdict(v) for k, v in self.entries.items()},
                 "items": {k: asdict(v) for k, v in self.items.items()},
                 "skill_categories": [[c, ids] for c, ids in self.skill_categories]}
@@ -146,7 +149,7 @@ class Bank:
                    skill_categories=[(c, ids) for c, ids in d["skill_categories"]],
                    hashes=d["hashes"], warnings=d.get("warnings", []), version=d.get("version", 0),
                    excluded=d.get("excluded", []), metric_flags=d.get("metric_flags", []),
-                   tool_index=d.get("tool_index", {}), conflicts=d.get("conflicts", []))
+                   tool_index=d.get("tool_index", {}), conflicts=d.get("conflicts", []), v4=d.get("v4", {}))
 
 
 # --- term helpers (shared with jd_analysis / verify) ------------------------------------------------------------
@@ -382,13 +385,14 @@ def parse_master(text: str, source_name: str = "master_resume.md", strict: bool 
 def confirmed_only(entries: dict[str, Entry], items: dict[str, Item], cats: list[tuple[str, list[str]]],
                    source_name: str = "master_resume.md") -> tuple[dict, dict, list, list[dict]]:
     """Keep confirmed entries and items (rule 1); the rest is listed in `excluded`."""
-    excluded = [{"id": i.id, "line": i.line, "text": i.text, "status": i.status or "untagged", "source": source_name,
-                 "section": i.section} for i in items.values() if i.status != "confirmed"]
-    keep_e = {k: e for k, e in entries.items() if e.status == "confirmed"}
-    keep_i = {k: i for k, i in items.items() if i.status == "confirmed" and (i.entry_id is None or i.entry_id in keep_e)}
-    excluded += [{"id": i.id, "line": i.line, "text": i.text, "status": "entry not confirmed", "source": source_name,
+    ok = lambda st: st in (None, "confirmed")       # noqa: E731 — untagged is usable (older format)
+    excluded = [{"id": i.id, "line": i.line, "text": i.text, "status": i.status, "source": source_name,
+                 "section": i.section} for i in items.values() if not ok(i.status)]
+    keep_e = {k: e for k, e in entries.items() if ok(e.status)}
+    keep_i = {k: i for k, i in items.items() if ok(i.status) and (i.entry_id is None or i.entry_id in keep_e)}
+    excluded += [{"id": i.id, "line": i.line, "text": i.text, "status": "entry not usable", "source": source_name,
                   "section": i.section} for i in items.values()
-                 if i.status == "confirmed" and i.entry_id and i.entry_id not in keep_e]
+                 if ok(i.status) and i.entry_id and i.entry_id not in keep_e]
     keep_c = [(c, [i for i in ids if i in keep_i]) for c, ids in cats]
     return keep_e, keep_i, [(c, ids) for c, ids in keep_c if ids], excluded
 
@@ -545,6 +549,9 @@ def build_bank(master: Path | None = None, additions: Path | None = None, templa
     if not master.exists():
         raise InputError(f"{master} is missing. It is the only source of facts about you.")
     text = master.read_text(encoding="utf-8")
+    from . import master_v4
+    if master_v4.is_v4(text):
+        return _build_v4(text, master, additions, template, checklist)
     all_entries, all_items, all_cats, warnings = parse_master(text, master.name)
     entries, items, cats, excluded = confirmed_only(all_entries, all_items, all_cats, master.name)
     problems = []
@@ -553,9 +560,8 @@ def build_bank(master: Path | None = None, additions: Path | None = None, templa
     if not cats:
         problems.append("no confirmed Skills")
     if problems:
-        raise InputError(f"{master.name}: {' and '.join(problems)} — only items tagged [confirmed] are used (rule 1). "
-                         "Tag them (e.g. '## Experience [confirmed]'); `python -m resume_builder tags` lists what needs "
-                         "a tag.")
+        raise InputError(f"{master.name}: {' and '.join(problems)} (items marked [needs confirmation] or [demo] are "
+                         "never used); `python -m resume_builder tags` lists every item's status.")
     for e in entries.values():
         if e.client_of:
             hit = where_entries(e.client_of, {k: x for k, x in entries.items() if x.section == "experience"})
@@ -609,7 +615,68 @@ def build_bank(master: Path | None = None, additions: Path | None = None, templa
 def code_hash() -> str:
     """The parsing code itself: a builder update rebuilds the cached bank even when your inputs didn't change."""
     here = Path(__file__).parent
-    return sha256_file(here / "evidence.py")[:16] + sha256_file(here / "tools.py")[:16]
+    return "".join(sha256_file(here / f)[:12] for f in ("evidence.py", "tools.py", "master_v4.py"))
+
+
+def _build_v4(text: str, master: Path, additions: Path, template: Path | None, checklist: Path) -> Bank:
+    """Master v4: statuses come from the master's own labels (verified / estimated usable; unverified, pending,
+    planned, Legacy and Excluded never). Tool checklist ticks: a tool the master has evidence for keeps the master's
+    tier; a ticked tool with no evidence in the master is self-reported; the master's Excluded list always wins."""
+    from . import master_v4 as M
+    from . import tools as T
+    entries, items, cats, warnings, excluded, v4 = M.parse(text, master.name)
+    hashes = {"master_resume": sha256_file(master)}
+    if additions.exists():
+        adds, w = parse_additions(additions.read_text(encoding="utf-8"), entries, items)
+        warnings += w
+        for it in adds:
+            items[it.id] = it
+        hashes["evidence_additions"] = sha256_file(additions)
+    else:
+        hashes["evidence_additions"] = "none"
+    sk = v4.skills
+    banned = {canonical(x).casefold() for x in sk["excluded"]} | {x.casefold() for x in sk["excluded"]}
+    index = {}
+    if checklist.exists():
+        tl, w = T.parse(checklist.read_text(encoding="utf-8"))
+        warnings += w
+        index = {t.name.casefold(): {"name": t.name, "ticked": index_ticked(tl, t), "family": t.family} for t in tl}
+        def keys(name: str) -> set[str]:
+            out = set()
+            for x in [name, *re.findall(r"\(([^)]*)\)", name)[0].split(",")] if "(" in name else [name]:
+                x = re.sub(r"\s*\(.*\)$", "", x).strip()
+                for y in (x, canonical(x)):
+                    y = y.casefold()
+                    out |= {y, re.sub(r"^(?:aws|amazon|gcp|google cloud)\s+", "", y)}
+            return out
+        known = set().union(*[keys(n) for n, tier in sk["tier"].items() if tier != "planned"])
+        planned = set().union(*[keys(n) for n in sk["planned"]]) | {"gcp", "google cloud"}
+        for t in T.ticked(tl):
+            names = set().union(*[keys(x) for x in [t.name, *t.names]])
+            if names & banned:
+                warnings.append(f"tool_checklist.md: {t.name} is ticked but on the master's Excluded list: never used")
+                continue
+            if names & known:
+                continue                                # the master's tier wins
+            if names & planned or re.match(r"^(?:gcp|google cloud)\b", t.name, re.I):
+                continue                                # planned in the master: never listed until built
+            iid = f"skill-{_slug(t.name, 4)}"
+            if iid in items:
+                continue
+            items[iid] = Item(iid, "skill", t.name, technologies=list(dict.fromkeys([*terms_in(t.name),
+                              *[canonical(x) for x in t.names]])), category="self-reported", source="tools",
+                              status="confirmed", where=t.where or None, level=t.level or None, line=t.line)
+            items[iid].kind = "skill"
+            sk["tier"].setdefault(t.name, "self-reported")
+    hashes["tool_checklist"] = sha256_file(checklist) if checklist.exists() else "none"
+    hashes["code"] = code_hash()
+    for x in v4.excluded_roles + v4.excluded_projects:
+        excluded.append({"id": f"excluded-{_slug(x, 4)}", "line": None, "text": x, "status": "excluded",
+                         "source": master.name, "section": "experience"})
+    # rule 6: compare distinct bank bullets (a snapshot line and its variants restate the same result)
+    bank = Bank(items, entries, cats, hashes, warnings, excluded=excluded, metric_flags=metric_flags(
+        {k: i for k, i in items.items() if i.kind == "bullet" and not i.variant}), tool_index=index, v4=v4.to_json())
+    return bank
 
 
 def input_hashes(master: Path, additions: Path, checklist: Path) -> dict:

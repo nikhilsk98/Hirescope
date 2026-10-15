@@ -86,8 +86,11 @@ def plan(analysis: dict, bank: Bank, settings) -> dict:
                   ("required", "preferred")), key=lambda k: (k["section"] != "required", -float(k.get("weight") or 0)))
     for k in kws:
         term, surface = k["canonical"], k["term"]
-        if k.get("category") in ("degree_field", "certifications"):
-            continue            # degree / certification requirements: eligibility, not something you "used"
+        known_tool = any(k["canonical"] in ms for ms in _CATEGORY_TERMS.values()) or \
+            k["term"].casefold() in bank.tool_index or k["canonical"].casefold() in bank.tool_index
+        if k.get("category") not in TOOLISH and not known_tool:
+            continue            # only tools, languages, platforms and databases: not degrees, practices ("code
+            #                     review"), domains or unrecognized fragments ("OE", "OR")
         out["missing"].append(term)
         prev = ans.get(term.casefold())
         tool = _tool(bank, term, surface)
@@ -129,7 +132,7 @@ def plan(analysis: dict, bank: Bank, settings) -> dict:
                                                  "where (role or project) and level (production / project / "
                                                  "coursework / tutorial)."})
             continue
-        if k.get("category", "other") in TOOLISH or k["section"] == "required" or float(k.get("weight") or 0) >= 4:
+        if True:
             out["questions"].append({"kind": "keyword", "keyword": surface,
                                      "question": f"Have you used {surface}? If yes, where (role or project), what did "
                                                  "you do with it, and at what level (production / project / "

@@ -149,14 +149,18 @@ def validate_pdf(pdf: Path, expected: list[tuple[str, str]], expected_links: lis
                     fonts[fn] = fonts.get(fn, 0) + 1
                 if ch["x0"] < 0 or ch["x1"] > W or ch["top"] < 0 or ch["bottom"] > H:
                     edge.append(f"p{pno} '{ch['text']}'")
-                elif ch["x0"] < m - 0.5 or ch["x1"] > W - m + 0.5 or ch["top"] < m - 0.5 or ch["bottom"] > H - m + 0.5:
+                # glyph boxes include the font's ascender space above the ink: allow it at the top edge (the ink-based
+                # visual_margins check below is exact)
+                elif (ch["x0"] < m - 0.5 or ch["x1"] > W - m + 0.5 or ch["top"] < m - 0.5 - 0.25 * float(ch["size"])
+                      or ch["bottom"] > H - m + 0.5):
                     bad_margin.append(f"p{pno} '{ch['text']}' at x={ch['x0']:.0f}..{ch['x1']:.0f}")
             lines = _lines(page)
             all_lines.append((pno, W, H, lines))
             texts.append(page.extract_text(x_tolerance=1.2) or "")
             for h in page.hyperlinks or []:
-                words = page.within_bbox((max(0, h["x0"] - 1), max(0, h["top"] - 1), min(W, h["x1"] + 1),
-                                          min(H, h["bottom"] + 1))).extract_text() or ""
+                # crop (overlap), not within_bbox: a link box can be shorter than its glyph boxes
+                words = page.crop((max(0, h["x0"] - 1), max(0, h["top"] - 1), min(W, h["x1"] + 1),
+                                   min(H, h["bottom"] + 1))).extract_text() or ""
                 links.append({"uri": h.get("uri"), "text": norm(words), "page": pno})
         r.add("min_font_size", not sizes or min(sizes) >= min_pt - 0.05,
               f"smallest text {min(sizes) if sizes else '-'}pt (minimum {min_pt}pt)")

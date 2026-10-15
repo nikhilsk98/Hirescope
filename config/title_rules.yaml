@@ -43,6 +43,10 @@ core_titles:
   - cloud engineer
   - distributed systems engineer
   - web developer
+  - data engineer                 # target track (master_resume.md: Data Engineer)
+  - cloud developer               # target track: Cloud / AWS Developer
+  - aws developer
+  - cloud aws developer           # "Cloud/AWS Developer" normalizes to this
   - member of technical staff     # common SWE title at AI labs; "staff" here is not a level
 
 related_titles:
@@ -50,7 +54,6 @@ related_titles:
   - infrastructure engineer
   - site reliability engineer
   - devops engineer
-  - data engineer
   - machine learning engineer
   - mobile engineer
   - ios engineer

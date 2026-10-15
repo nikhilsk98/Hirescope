@@ -265,6 +265,11 @@ def analyze(job: dict, package_text: str, bank: Bank, settings: Settings, profil
                 note=job.get("eligibility_note"), terms=job.get("terms") or [])
     track = job.get("track_override") or job.get("track") or "full_time"
     prof = pick_profile(job["title"], required + preferred, jd, settings)
+    allowed = ((bank.v4 or {}).get("targets") or {}).get("profiles")
+    if allowed and prof["picked"] not in allowed:       # master v4: only the target tracks (Target roles)
+        best = max(allowed, key=lambda p: (prof["scores"].get(p, 0), p == settings.default_profile))
+        prof.update(picked=best, reason=f"best of your target tracks ({prof['scores'].get(best, 0)}; "
+                                        f"{prof['picked']} isn't one)")
     if profile:
         if profile not in settings.profiles:
             raise InputError(f"unknown profile '{profile}' (choose from {', '.join(settings.profiles)})")

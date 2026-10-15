@@ -37,7 +37,7 @@ def nt(cfg, title):
     ("Backend Engineer - Platform", "full_time", "core"),
     ("Full-Stack Developer", "full_time", "core"),
     ("Member of Technical Staff", "full_time", "core"),
-    ("Data Engineer, Product", "full_time", "related"),
+    ("Data Engineer, Product", "full_time", "core"),
     ("Data Center Electrical Engineer", "full_time", "none"),
     ("Account Executive", "full_time", "none"),
     ("Software Engineering Co-op (Spring 2027)", "coop_intern", "coop"),
@@ -280,3 +280,12 @@ def test_early_career_feed_companies_score_as_feed_tier(cfg, resume):
     other = tier_part(job(company="OtherCo (DEMO)", source="greenhouse"))
     assert feed["score"] == cfg.prefs.scoring.tier_fit[cfg.prefs.company_tiers.feed_tier] and "SimplifyJobs" in feed["detail"]
     assert other["score"] == cfg.prefs.scoring.tier_fit[3] and "tier 3" in other["detail"]
+
+
+def test_target_tracks_data_engineer_and_cloud_aws_developer_are_core_titles(cfg):
+    """master_resume.md target roles: Data Engineer and Cloud / AWS Developer are primary tracks."""
+    from jobsearch.extract.normalize import normalize_title
+    from jobsearch.match.rules import match_title
+    for t in ("Data Engineer", "Senior Data Engineer", "Cloud/AWS Developer", "AWS Developer", "Cloud Developer II"):
+        m = match_title(normalize_title(t, cfg.title_rules), "full_time", cfg.prefs, cfg.title_rules)
+        assert m.kind == "core", (t, m)

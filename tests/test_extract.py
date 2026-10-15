@@ -178,3 +178,18 @@ def test_clearance_from_titles_and_headers(title, jd, value):
     """You are not a US citizen, so a clearance requirement hides a job; titles and structured headers count."""
     from jobsearch.extract.flags import extract_flags
     assert extract_flags(jd, title)["clearance"]["value"] == value
+
+
+def test_master_v4_resume_for_matching(tmp_path):
+    """A Resume Builder v4 master: matching sees usable bullets and inventory skills only — no Builder notes, Legacy
+    bullets, planned or Excluded skills (DEMO fixture)."""
+    from pathlib import Path
+    from jobsearch.config import load_synonyms
+    from jobsearch.extract.resume import parse_resume
+    src = Path(__file__).parent / "resume_builder" / "fixtures" / "demo_master_v4.md"
+    r = parse_resume(src, load_synonyms())
+    lines = [b for s in r.sections for b in r.bullets(s)]
+    assert not any("Builder" in b or "10x faster" in b or "Old Chain" in b for b in lines)
+    assert "Kafka" in r.skills and "Go" in r.listed_skills            # core and self-reported
+    assert not {"LightGBM", "RabbitMQ"} & set(r.skills)                 # planned / Excluded
+    assert "Quantum Basket Weaving" not in r.bullets("coursework") and "Algorithms" in r.bullets("coursework")

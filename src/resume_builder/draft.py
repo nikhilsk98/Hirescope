@@ -113,6 +113,9 @@ def tool_category(family: str, cats: list[str]) -> str:
 
 
 def baseline(analysis: dict, bank: Bank, settings: Settings) -> Content:
+    if bank.v4:                                   # master v4: start from its Default one-page snapshot (rule 3)
+        from . import v4build
+        return v4build.baseline(analysis, bank, settings)
     track = analysis["track"] if analysis["track"] in ("coop_intern", "full_time", "unclear") else "full_time"
     rel = {i.id: relevance(i, analysis, settings) for i in bank.items.values()}
     notes = Notes(stage="baseline")

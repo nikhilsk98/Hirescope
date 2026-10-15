@@ -97,8 +97,9 @@ def patch_font(preamble: str, settings: Settings) -> tuple[str, str | None]:
 
 
 def contact_from_header(header: str) -> dict:
+    header = re.sub(r"(?<!\\)%[^\n]*", "", header)          # TeX comments (e.g. a commented-out portfolio link)
     links = re.findall(r"\\href\{([^}]*)\}\{([^}]*)\}", header)
-    name = re.search(r"\\textbf\{([^}]*)\}", header)
+    name = re.search(r"\\textbf\{([^}]*)\}", header) or re.search(r"\\bfseries\s+([^}\\]+?)\s*\}", header)
     plain = re.sub(r"\\href\{[^}]*\}\{([^}]*)\}", r"\1", header)
     plain = re.sub(r"\\[a-zA-Z]+\*?|[{}\\]|\\,", " ", plain.replace("\\,", " "))
     return {"name": name.group(1).strip() if name else None, "text": re.sub(r"\s+", " ", plain).strip(),

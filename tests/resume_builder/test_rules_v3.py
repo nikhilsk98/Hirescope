@@ -96,7 +96,7 @@ def test_status_tags_inherit_and_only_confirmed_is_used(rb_env):
     assert "exp-tiny" not in b.entries and not any(i.entry_id == "exp-tiny" for i in b.items.values())   # demo entry
     assert "Kotlin" not in texts and "Socket.io" in texts                           # per-item tag in a skills list
     assert "MongoDB" not in [i.text for i in b.items.values() if i.section == "skill"]   # line tag after the category
-    assert not any(i.section == "coursework" for i in b.items.values())             # untagged = not confirmed
+    assert any(i.section == "coursework" for i in b.items.values())                 # untagged = usable (v4)
     assert "exp-demo-b3" in b.items                     # ids stay stable around the excluded exp-demo-b2
     st = {x["id"]: x["status"] for x in b.excluded}
     assert st["exp-demo-b2"] == "needs confirmation" and st["exp-tiny-h"] == "demo" and st["skill-kotlin"] == "demo"
@@ -108,8 +108,7 @@ def test_status_tags_inherit_and_only_confirmed_is_used(rb_env):
     c.experience[0].bullets[0].evidence_ids = ["exp-demo-b2"]
     assert any("not confirmed (needs confirmation" in p for p in pipeline.structure_problems(c, b))
     m.write_text(m.read_text().replace(" [confirmed]", ""))
-    with pytest.raises(InputError, match=r"only items tagged \[confirmed\]"):
-        build_bank()
+    assert "exp-demo" in build_bank().entries          # the [confirmed] tag requirement is gone (v4)
 
 
 # --- rule 3: metric flags -------------------------------------------------------------------------------------------
@@ -138,12 +137,12 @@ def test_section_order_by_track_and_level(rb_env):
     mid = _job(rb_env, company="Mid Co", title="Software Engineer II", track="full_time", job_id="demo-mid", level="mid")
     a = _analysis(mid)
     c = pipeline.assign_ids(draft.baseline(a, build_bank(), s))
-    assert c.section_order == ["skills", "experience", "projects", "education"]           # rule 16
+    assert c.section_order == ["education", "skills", "experience", "projects"]           # rules 24–25 (v4.1)
     a2 = _analysis(rb_env.job)
     c2 = pipeline.assign_ids(draft.baseline(a2, build_bank(), s))
-    assert c2.section_order == ["education", "skills", "experience", "projects"]          # rule 15
-    c2.section_order = ["education", "skills", "projects", "experience"]                  # rule 17 swap: allowed
-    assert not [p for p in pipeline.structure_problems(c2, build_bank(), s, a2) if "section order" in p]
+    assert c2.section_order == ["education", "skills", "experience", "projects"]          # every level
+    c2.section_order = ["education", "skills", "projects", "experience"]                  # v4.1: no swap either
+    assert any("section order" in p for p in pipeline.structure_problems(c2, build_bank(), s, a2))
     c2.section_order = ["skills", "education", "experience", "projects"]
     assert any("section order" in p for p in pipeline.structure_problems(c2, build_bank(), s, a2))
 

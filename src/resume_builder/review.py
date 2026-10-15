@@ -105,6 +105,9 @@ def lint(c: Content, bank: Bank, settings: Settings, analysis: dict | None = Non
             out.append({"where": ", ".join(used), "rule": "inconsistent metric",
                         "detail": f"{f['metric']} appears in {len(used)} bullets on this resume; confirm with Nikhil "
                                   "they are different results (rule 3) — never change the number"})
+    if bank.v4:
+        from . import rules_v4
+        out += rules_v4.lint(c, bank, settings, analysis)
     from .config import rules_budget
     lo = int(rules_budget(settings)["total"]["min"])
     n_exp = sum(len(e.bullets) for e in c.experience)

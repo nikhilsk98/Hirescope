@@ -82,7 +82,8 @@ def test_lint_finds_rule_violations(rb_env):
         Bullet(text="Built Java services, solving the slow deployment problem by using Docker and Jenkins",
                evidence_ids=["exp-demo-b3"]),
         Bullet(text="Built our PostgreSQL indexes that I tuned to cut latency by 35% with rewritten joins and more "
-                    "careful planning of every slow query in the payments service each week.",
+                    "careful planning of every slow query in the payments service each week, reviewed with the team "
+                    "in the weekly design review.",
                evidence_ids=["exp-demo-b2"]),
     ]
     c.experience[1].bullets = [Bullet(text="Develops a react dashboard with Redux for internal metrics",

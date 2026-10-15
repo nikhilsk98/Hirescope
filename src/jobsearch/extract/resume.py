@@ -52,6 +52,9 @@ def parse_resume(path: Path, synonyms: dict[str, list[str]]) -> Resume:
             f"{path} not found. Copy inputs/resume/master_resume.example.md to {path.name} and replace it with your resume."
         )
     text = path.read_text(encoding="utf-8")
+    v4 = _parse_v4(path, text, synonyms)
+    if v4 is not None:
+        return v4
     text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
     sections: dict[str, list[Entry]] = {s: [] for s in SECTIONS}
     current: str | None = None
@@ -89,4 +92,42 @@ def parse_resume(path: Path, synonyms: dict[str, list[str]]) -> Resume:
                 for sk in extract_skills(line, synonyms):
                     evidence.setdefault(sk, line)
     skills = list(dict.fromkeys([*listed, *evidence]))
+    return Resume(str(path), file_hash(path), sections, skills, listed, evidence)
+
+
+def _parse_v4(path: Path, text: str, synonyms: dict[str, list[str]]) -> Resume | None:
+    """A master_resume.md in the Resume Builder's v4 format (Default snapshot, bullet banks, Skills inventory):
+    matching uses only what a resume may use — usable bullets and facts per role / project, "Yes" courses, and the
+    core / extended / self-reported skills — never Builder notes, Legacy bullets, planned or Excluded items."""
+    try:
+        from resume_builder import master_v4
+    except ImportError:                    # the Resume Builder isn't installed: read it the plain way
+        return None
+    if not master_v4.is_v4(text):
+        return None
+    entries, items, _cats, _w, _ex, v4 = master_v4.parse(text, path.name)
+    sections: dict[str, list[Entry]] = {s: [] for s in SECTIONS}
+    for eid, e in entries.items():
+        sec = {"experience": "experience", "project": "projects", "education": "education"}.get(e.section)
+        if not sec:
+            continue
+        lines = [i.text for i in items.values() if i.entry_id == eid and i.kind in ("bullet", "snapshot", "own_words")]
+        if e.section == "education":
+            lines = [i.text for i in items.values() if i.entry_id == eid]
+        sections[sec].append(Entry(e.heading, lines))
+    sections["coursework"] = [Entry("", [i.text for i in items.values() if i.kind == "course"])]
+    tiers = v4.skills.get("tier", {})
+    listed = list(dict.fromkeys(canonicalize(n, synonyms) for n, t in tiers.items()
+                                if t in ("core", "extended", "self-reported")))
+    sections["skills"] = [Entry("", [n for n, t in tiers.items() if t in ("core", "extended", "self-reported")])]
+    evidence: dict[str, str] = {}
+    for sec in ("experience", "projects", "coursework", "education"):
+        for e in sections[sec]:
+            for line in e.bullets:
+                for sk in extract_skills(line, synonyms):
+                    evidence.setdefault(sk, line)
+    never = {canonicalize(n, synonyms) for n, t in tiers.items() if t == "planned"} | {
+        canonicalize(n, synonyms) for n in v4.skills.get("excluded", [])}
+    evidence = {k: v for k, v in evidence.items() if k not in never}   # a design bullet naming planned tech
+    skills = [x for x in dict.fromkeys([*listed, *evidence]) if x not in never]
     return Resume(str(path), file_hash(path), sections, skills, listed, evidence)

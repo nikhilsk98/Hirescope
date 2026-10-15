@@ -1,0 +1,123 @@
+%% ============================================================
+%%  DEMO Candidate — Resume (test fixture)
+%%  Template: resume_template.tex  (compile with pdflatex, Tectonic, or Overleaf)
+%% ============================================================
+\RequirePackage{fix-cm}
+\documentclass[letterpaper,10pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}          % Latin Modern, same look as v1
+\usepackage{anyfontsize}
+\usepackage[top=0.5in,bottom=0.5in,left=0.5in,right=0.5in]{geometry}
+\usepackage[none]{hyphenat}   % no word splitting -> clean ATS keyword parsing
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\hypersetup{pdftitle={Demo Candidate - Resume}, pdfauthor={Demo Candidate}}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\raggedright
+
+%% ---------- Body size: 10.5 pt ----------
+\AtBeginDocument{\fontsize{10.5}{12.0}\selectfont}
+
+%% ---------- Section headings: title + horizontal rule ----------
+\titleformat{\section}{\fontsize{12.5}{14}\selectfont\bfseries}{}{0pt}{}[\vspace{-1pt}\titlerule]
+\titlespacing*{\section}{0pt}{6pt}{3pt}
+
+%% ---------- Bullet lists ----------
+\setlist[itemize]{leftmargin=1.2em, label=$\bullet$, topsep=1pt, itemsep=0pt, parsep=0pt}
+
+%% ---------- Entry macros ----------
+% \entry{Organization}{Location}{Role / Degree}{Dates}
+\newcommand{\entry}[4]{%
+  \textbf{#1}, #2 \hfill \textbf{#4}\\
+  \textit{#3}\vspace{1pt}}
+
+% \project{Name}{Link}{Tech | context line}
+\newcommand{\project}[3]{%
+  \textbf{#1} \hfill #2\\
+  \textit{#3}\vspace{1pt}}
+
+% \skillrow{Label}{Items}: wrapped lines align with the first item after the label
+\newlength{\skilllabelwidth}
+\newcommand{\skillrow}[2]{%
+  \settowidth{\skilllabelwidth}{\textbf{#1:}\ }%
+  \par\noindent\hangindent=\skilllabelwidth\hangafter=1
+  \textbf{#1:}\ #2\par}
+
+% space between entries
+\newcommand{\entrygap}{\vspace{3pt}}
+
+%% ============================================================
+\begin{document}
+
+%% ----------------------- HEADER -----------------------------
+\begin{center}
+  {\fontsize{20}{24}\selectfont\bfseries Demo Candidate}\\[3pt]
+  Boston, MA \,\textbar\, +1 (555) 010-0000 \,\textbar\,
+  \href{mailto:demo@example.com}{demo@example.com} \,\textbar\,
+  \href{https://linkedin.com/in/democ}{linkedin.com/in/democ} \,\textbar\,
+  \href{https://github.com/demo-candidate}{github.com/demo-candidate}
+  % Portfolio (add later): \,\textbar\, \href{https://YOUR-URL}{your-url}
+\end{center}
+
+%% ----------------------- EDUCATION --------------------------
+\section{Education}
+\entry{Demo University}{Boston, MA}{Master of Science in Computer Science \,\textbar\, GPA: 3.8/4.0}{Expected May 2027}\\
+\textbf{Relevant Coursework:} Distributed Systems, Cloud Computing
+
+\entrygap
+\entry{Sample College}{Austin, TX}{Bachelor of Engineering in Computer Engineering}{Jul 2020}
+
+%% ----------------------- SKILLS -----------------------------
+\section{Technical Skills}
+\skillrow{Languages}{Java, Python, JavaScript, SQL, C++}
+\skillrow{Backend \& Testing}{Spring Boot, Node.js, REST APIs, JUnit}
+\skillrow{Frontend}{React, Redux, Vue.js}
+\skillrow{Databases \& Messaging}{PostgreSQL, MySQL, Oracle, MongoDB, Kafka}
+\skillrow{Cloud \& DevOps}{AWS (EC2, S3), Docker, GitHub Actions, Jenkins}
+\skillrow{Certifications}{AWS Certified Developer -- Associate (DVA-C02)}
+
+%% ----------------------- EXPERIENCE -------------------------
+\section{Experience}
+\entry{Freelance}{Remote}{Software Developer}{Feb 2022 -- Jan 2025}
+\begin{itemize}
+  \item Built an ordering platform for a DEMO bakery supplier using React, Spring Boot, and PostgreSQL, cutting order-entry time by 30\%.
+  \item Implemented a React and Redux reporting dashboard for the supplier, tracking sales by product and period.
+  \item Developed a booking app for a DEMO yoga studio using React, Node.js, and MongoDB, with role-based access and email confirmations.
+  \item Automated testing and AWS EC2 deployments with GitHub Actions, cutting deployment time from 20 to 6 minutes (70\%).
+\end{itemize}
+
+\entrygap
+\entry{DemoCorp}{Austin, TX}{Software Engineer \,\textbar\, Client: Demo Bank}{Feb 2021 -- Dec 2021}
+\begin{itemize}
+  \item Contributed to Demo Bank's platform modernization, developing REST endpoints across 3 Java/Spring Boot microservices.
+  \item Migrated 4 messaging workflows to Kafka, building Java producers and consumers with idempotency checks for safe retries.
+  \item Tuned consumer concurrency, cutting p95 latency from 500 to 400 ms and raising throughput from 100 to 150 messages/sec.
+\end{itemize}
+
+\entrygap
+\entry{Tiny Labs}{Austin, TX}{Software Engineering Intern}{Jul 2020 -- Dec 2020}
+\begin{itemize}
+  \item Developed 5 Java/Spring Boot REST endpoints for DEMO inventory workflows with input validation and error handling.
+  \item Added 20 JUnit unit tests for backend validation and containerized the app with Docker Compose.
+\end{itemize}
+
+%% ----------------------- PROJECTS ---------------------------
+\section{Projects}
+\project{Alpha -- Route Planner}{\href{https://github.com/demo-candidate/alpha}{GitHub}}{C++17, Python \,\textbar\, CS5800 Algorithms, Demo University \,\textbar\, Team of 3}
+\begin{itemize}
+  \item Designed and implemented Alpha, a DEMO A* variant with bounded local probes, empirically preserving optimal cost.
+  \item Validated optimality against BFS on 1,000 randomized grids and benchmarked against A* on DEMO maps.
+\end{itemize}
+
+\entrygap
+\project{Beta -- Mood Recommender}{\href{https://github.com/demo-candidate/beta}{GitHub}}{Python, FastAPI, Redis \,\textbar\, Demo University \,\textbar\, In Progress}
+\begin{itemize}
+  \item Designing a DEMO two-stage recommender: candidate retrieval over pgvector and a LightGBM ranker.
+  \item Architecting real-time personalization in which swipe events update a Redis session embedding for re-ranking.
+\end{itemize}
+
+\end{document}

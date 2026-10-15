@@ -41,6 +41,7 @@ class Bullet(_M):
 class ExperienceEntry(_M):
     entry_id: str = Field(pattern=r"^exp-")
     priority: int = Field(default=3, ge=1, le=5)
+    title: str | None = Field(default=None, max_length=80)   # v4: one of the titles the master records for the role
     bullets: list[Bullet] = Field(min_length=1, max_length=6)
 
 
@@ -63,7 +64,7 @@ class EducationEntry(_M):
 
 
 class SkillItem(_M):
-    name: str = Field(min_length=1, max_length=40)
+    name: str = Field(min_length=1, max_length=80)        # a certification name can be long
     evidence_ids: list[str] = Field(min_length=1, max_length=6)
 
     _n = field_validator("name")(lambda cls, v: _clean(v))
@@ -112,6 +113,8 @@ class Content(_M):
     projects: list[ProjectEntry] = Field(default_factory=list, max_length=4)
     requirements: list[RequirementMap] = Field(default_factory=list, max_length=60)
     notes: Notes = Field(default_factory=Notes)
+    contact_location: Literal["default", "relocation"] = "default"   # v4 rule 31: relocation line for remote /
+    #                                                                   out-of-state jobs
 
     @field_validator("section_order")
     @classmethod

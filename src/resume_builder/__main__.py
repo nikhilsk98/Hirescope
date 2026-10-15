@@ -1,6 +1,8 @@
 """python -m resume_builder <command> — the deterministic half of /resume-builder (see SKILL.md).
 
   check                      dependencies and inputs
+  default                    the master's Default one-page resume, unchanged (no job description; master v4), checked
+                             against your template compiled as written → generated_resumes/_default/v<N>
   prepare <job> [--profile X] [--regenerate] [--force] [--discard-edits]
                              evidence bank, JD analysis, baseline + brief for the drafter (work/); reuses the
                              current version when nothing changed (unless --regenerate)
@@ -71,6 +73,19 @@ def cmd_check(args) -> int:
     for w in bank.warnings:
         print(f"note: {w}")
     return 0
+
+
+def cmd_default(args) -> int:
+    out = pipeline.build_default()
+    rep = out["report"]
+    print(f"{out['status'].upper()}: v{out['version']} → {out['version_dir']}\n  PDF: {out['pdf']}")
+    print(f"  matches the template compiled as written: {'yes' if out['matches_template'] else 'NO'}")
+    for x in rep.errors():
+        print(f"  ✗ {x.name}: {x.detail}")
+    for x in rep.warnings():
+        if not x.ok:
+            print(f"  ! {x.name}: {x.detail}")
+    return 0 if out["status"] == "ready" else 1
 
 
 def cmd_tags(args) -> int:
@@ -392,6 +407,7 @@ def main(argv=None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check")
+    sub.add_parser("default")
     p = sub.add_parser("prepare")
     p.add_argument("job")
     p.add_argument("--profile")
@@ -456,7 +472,7 @@ def main(argv=None) -> int:
         if args.cmd == "schema":
             _print(json_schema())
             return 0
-        return {"check": cmd_check, "prepare": cmd_prepare, "build": cmd_build, "show": cmd_show,
+        return {"check": cmd_check, "default": cmd_default, "prepare": cmd_prepare, "build": cmd_build, "show": cmd_show,
                 "review": cmd_review, "verify": cmd_verify, "interview": cmd_interview,
                 "add-evidence": cmd_add_evidence, "add-tool": cmd_add_tool, "decline": cmd_decline, "tags": cmd_tags,
                 "gaps": cmd_gaps, "diff": cmd_diff, "rollback": cmd_rollback, "lock": cmd_lock,

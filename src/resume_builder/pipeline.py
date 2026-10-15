@@ -171,18 +171,15 @@ def structure_problems(c: Content, bank: Bank, settings: Settings | None = None,
                     out.append(f"skills: '{s.name}' cites {_unknown(ev, bank)}")
     if c.summary:
         out += [f"summary cites {_unknown(ev, bank)}" for ev in c.summary.evidence_ids if ev not in I]
+    if bank.v4:                                   # master v4 + rules v4.1 (rules_v4.py)
+        from . import rules_v4
+        return out + rules_v4.problems(c, bank, settings, analysis)
     want = expected_order(c, settings, analysis)
     if want:
-        swapped = list(want)
-        if "experience" in swapped and "projects" in swapped:
-            i, j = swapped.index("experience"), swapped.index("projects")
-            swapped[i], swapped[j] = swapped[j], swapped[i]
         got = [x for x in c.section_order if x != "summary"]
-        if got not in (want, swapped):
-            aud = settings.audience(analysis.get("track"), analysis.get("seniority"),
-                                    (analysis.get("eligibility") or {}).get("yoe_required"))
-            out.append(f"section order {got} is not the {aud} order {want} (rules 15–16; only Projects and Experience "
-                       "may swap, rule 17)")
+        if got != want:
+            out.append(f"section order {got} is not {want} (rules 24–25: the same order for every level, never "
+                       "reordered)")
     if settings and analysis:
         budget = rc.rules_budget(settings)
         aud = settings.audience(analysis.get("track"), analysis.get("seniority"),
@@ -240,7 +237,7 @@ class Repair:
 
 
 def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, gaps: dict,
-           locked: set[str] | None = None) -> Repair | None:
+           locked: set[str] | None = None, floors: dict[str, int] | None = None) -> Repair | None:
     """One repair step for an over-long PDF, in rule 53's order: (attempt 1) remove duplicate and weak content, then
     optional coursework and extras (summary); (attempt 2) reduce bullets, then projects, then an irrelevant old role;
     (attempt 3) small spacing adjustments within layout.min_entry_gap_pt. Shortening wording is the drafter's step
@@ -260,6 +257,7 @@ def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, g
         cands = []
         for ex in c.experience:
             floor = max(bmin, 2) if ex.entry_id == recent else bmin
+            floor = max(floor, (floors or {}).get(ex.entry_id, 0))     # the master's pick range (v4) is a floor
             if len(ex.bullets) > floor:
                 cands += [(b.priority, ex.priority, ex, b) for b in ex.bullets if b.id not in locked]
         for pr in c.projects:
@@ -323,7 +321,15 @@ def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, g
             saved += 1.5 + sum(_est_lines(b.text) for b in ex.bullets)
             actions.append(f"removed least relevant role {ex.entry_id}")
     new_gaps = dict(gaps)
-    if attempt >= 3 or (attempt == 2 and not actions):                # 5. small spacing adjustments
+    if "leading" in gaps and (attempt >= 3 or (attempt == 2 and not actions)):
+        # rule 67 (v4): \entrygap 3 → 2 pt, then body leading 12.0 → 11.8 pt; never below 10 pt / 0.5 in
+        if float(gaps["entry"]) > 2:
+            new_gaps["entry"] = 2.0
+            actions.append(f"\\entrygap {gaps['entry']}pt → 2pt (rule 67)")
+        elif float(gaps["leading"]) > 11.8:
+            new_gaps["leading"] = 11.8
+            actions.append("body leading 12.0pt → 11.8pt (rule 67)")
+    elif attempt >= 3 or (attempt == 2 and not actions):                # 5. small spacing adjustments
         floor = float(settings.layout.get("min_entry_gap_pt", 2))
         if gaps.get("entry", 6) > floor:
             new_gaps = {"entry": floor, "education": min(gaps.get("education", 4), floor)}
@@ -490,7 +496,8 @@ def brief(analysis: dict, bank: Bank, settings: Settings, locks: dict | None = N
          "", _order_line(analysis, settings),
          f"- Level: {analysis['seniority']}; profile: {analysis['profile']['picked']} ({analysis['profile']['reason']})",
          f"- Page count: {settings.page_count}; limits: {json.dumps(settings.limits)}",
-         _budget_line(analysis, settings), ""]
+         _budget_line(analysis, settings) if not bank.v4 else "- Bullets per role: the master's notes (Freelance 4–5, "
+         "Accenture 3–4, Rescho 2 — see below); 8–11 in total (rule 32).", ""]
     if bank.excluded:
         L += [f"- Not confirmed (rule 1), never used: {len(bank.excluded)} item(s) in master_resume.md "
               "(`python -m resume_builder tags` lists them)", ""]
@@ -528,6 +535,9 @@ def brief(analysis: dict, bank: Bank, settings: Settings, locks: dict | None = N
     if carried.get("conflicts"):
         L += ["## ⚠ Hand-edit conflicts (tell Nikhil; the build is not 'ready' until resolved)",
               *[f"- {x}" for x in carried["conflicts"]], ""]
+    if bank.v4:
+        from . import v4build
+        L += v4build.brief_lines(analysis, bank, settings)
     e = analysis["eligibility"]
     L += ["## Eligibility (report only; never put visa status on the resume)",
           f"- Sponsorship: {e['sponsorship']}; citizenship: {e['citizenship']}; clearance: {e['clearance']}; "
@@ -596,8 +606,13 @@ def compile_and_validate(c: Content, bank: Bank, settings: Settings, build_dir: 
         shutil.rmtree(build_dir)
     build_dir.mkdir(parents=True)
     parts = render.split_template(rc.TEMPLATE.read_text(encoding="utf-8"), settings)
+    if bank.v4:
+        from . import v4build
+        parts.preamble_header = v4build.patch_header(parts.preamble_header, c, bank, bool(gaps.get("drop_plus")))
+        (build_dir / "content.tex").write_text(v4build.render_content(c, bank, settings, gaps), encoding="utf-8")
+    else:
+        (build_dir / "content.tex").write_text(render.render_content(c, bank, settings, gaps), encoding="utf-8")
     (build_dir / "main.tex").write_text(render.main_tex(parts), encoding="utf-8")
-    (build_dir / "content.tex").write_text(render.render_content(c, bank, settings, gaps), encoding="utf-8")
     res = comp.compile_tex(build_dir, timeout_s=int(settings.compile.get("timeout_s", 120)))
     (build_dir / "compile.log").write_text(res.log_text, encoding="utf-8")
     contact = render.contact_from_header(parts.header_text)
@@ -605,10 +620,20 @@ def compile_and_validate(c: Content, bank: Bank, settings: Settings, build_dir: 
         rep = validate.Report()
         rep.add("compile_errors", False, "; ".join(res.errors)[:500] or "compile failed")
         return res, rep, parts
-    rep = validate.validate_pdf(res.pdf, render.plain_lines(c, bank), _expected_links(contact, c, bank), contact,
+    if bank.v4:
+        from . import v4build
+        contact = render.contact_from_header(v4build.patch_header(parts.header_text, c, bank, bool(gaps.get("drop_plus"))))
+        lines, links = v4build.plain_lines(c, bank), v4build.expected_links(c, bank, contact.get("links") or [])
+    else:
+        lines, links = render.plain_lines(c, bank), _expected_links(contact, c, bank)
+    rep = validate.validate_pdf(res.pdf, lines, links, contact,
                                 settings, {"errors": res.errors, "overfull": res.overfull,
                                            "missing_glyphs": res.missing_glyphs, "font_used": res.font_used},
                                 build_dir / "pages")
+    if bank.v4:
+        v4build.layout_checks((build_dir / "main.tex").read_text(encoding="utf-8") + "\n" +
+                              (build_dir / "content.tex").read_text(encoding="utf-8"), res.pdf, rep,
+                              sum(1 for k, _t in lines if k == "bullet"))
     return res, rep, parts
 
 
@@ -659,6 +684,10 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
                            "The current version is unchanged. For more changes start a new generation: "
                            "prepare --regenerate")
     gaps = {"entry": settings.layout.get("entry_gap_pt", 6), "education": settings.layout.get("education_gap_pt", 4)}
+    if bank.v4:
+        from . import v4build
+        tv = v4build.template_values(rc.TEMPLATE.read_text(encoding="utf-8"))
+        gaps = {"entry": tv["entry"], "template_entry": tv["entry"], "leading": tv["leading"]}
     attempts, log = [], [n.replace("locked", "hand-edited", 1) for n in pin_notes] + lock_notes
     used = int(state.get("attempts", 0))
     build_dir = jd / WORK / "build"
@@ -680,7 +709,14 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
                          "errors": [f"{x.name}: {x.detail}" for x in rep.errors()]})
         if rep.ok or not res.ok:
             break
-        fix = repair(c, rep, n, settings, gaps, held)
+        wrap = next((x for x in rep.checks if x.name == "contact_one_line" and not x.ok), None)
+        if wrap and bank.v4 and not gaps.get("drop_plus"):
+            gaps = {**gaps, "drop_plus": True}       # rule 31: shorten the phone when the contact line wraps
+            log.append("contact line wrapped: dropped '+1' from the phone (rule 31)")
+            if rep.pages <= settings.page_count:
+                continue
+        floors = {k: (r.get("pick") or [0])[0] for k, r in (bank.v4 or {}).get("roles", {}).items()}
+        fix = repair(c, rep, n, settings, gaps, held, floors)
         if not fix:
             log.append("no automatic repair left for: " + "; ".join(x.name for x in rep.errors()))
             break
@@ -739,6 +775,10 @@ def finalize(result: dict, extra_checks: list[dict] | None = None, extra_reports
     if state.get("conflicts"):
         reasons.append("manual_edit_conflicts: " + "; ".join(state["conflicts"])[:400] +
                        " (fix them in the edited version's content.json and run --regenerate, or --discard-edits)")
+    # the content after automatic repairs must still pass every structure / rules check
+    post = structure_problems(c, bank, settings, result.get("analysis"))
+    if post:
+        reasons.append("rules_after_repair: " + "; ".join(post)[:600])
     q = quality(result)
     for chk in q["checks"]:
         if not chk["ok"]:
@@ -844,3 +884,71 @@ def review_draft(ref: str, db_path: Path | None = None) -> dict:
     state["reviewed_at"] = utcnow()
     (work / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
     return {"packet": str(work / "review_packet.md"), "findings": findings, "truth": truth}
+
+
+# --- the default resume (no job description; master v4 rule 3) -----------------------------------------------------
+def _norm_lines(pdf: Path) -> list[str]:
+    import subprocess
+    import unicodedata
+    t = subprocess.run(["pdftotext", "-layout", "-enc", "UTF-8", str(pdf), "-"], capture_output=True, text=True,
+                       timeout=60).stdout
+    return [" ".join(ln.split()) for ln in unicodedata.normalize("NFKC", t).splitlines() if ln.strip()]
+
+
+def template_reference(build_dir: Path) -> Path | None:
+    """Your template compiled exactly as written (its body is the approved default resume)."""
+    ref = build_dir / "reference"
+    if ref.exists():
+        shutil.rmtree(ref)
+    ref.mkdir(parents=True)
+    shutil.copyfile(rc.TEMPLATE, ref / "template.tex")
+    res = comp.compile_tex(ref, "template.tex", timeout_s=180)
+    if res.pdf:
+        return Path(res.pdf)
+    pdf = ref / "template.pdf"
+    return pdf if pdf.exists() else None
+
+
+def build_default(max_attempts: int | None = None) -> dict:
+    """The master's Default one-page resume, reproduced unchanged (rule 3): rendered from the master v4 snapshot,
+    compiled, validated like any tailored resume, and compared line by line with your template compiled as written
+    (check `matches_template`). Saved as generated_resumes/_default/v<N>."""
+    from . import reports, v4build, versions
+    settings, bank = load_settings(), load_bank()
+    if not bank.v4:
+        raise InputError("the default resume needs a master_resume.md in the v4 format (a 'Default one-page resume' "
+                         "section)")
+    hashes = check_inputs()
+    c = assign_ids(v4build.baseline(None, bank, settings))
+    probs = structure_problems(c, bank, settings, None)
+    if probs:
+        raise ContentError("the master's default resume breaks the rules:\n  - " + "\n  - ".join(probs))
+    root = rc.resumes_dir() / "_default"
+    root.mkdir(parents=True, exist_ok=True)
+    with versions.JobLock(root):
+        build_dir = root / WORK / "build"
+        tv = v4build.template_values(rc.TEMPLATE.read_text(encoding="utf-8"))
+        gaps = {"entry": tv["entry"], "template_entry": tv["entry"], "leading": tv["leading"]}
+        res, rep, parts = compile_and_validate(c, bank, settings, build_dir, gaps)
+        ref = template_reference(root / WORK)
+        same = bool(ref and res.ok and res.pdf and _norm_lines(ref) == _norm_lines(res.pdf))
+        rep.add("matches_template", same, "extracted text identical to the template compiled as written" if same
+                else "the default resume's text differs from the template compiled as written")
+        status = "ready" if rep.ok and res.ok else "failed"
+        name = f"{settings.first_name}_{settings.last_name}_Resume.pdf"
+        manifest = {"job_pk": 0, "job_id": "default", "company": None, "title": "Default one-page resume",
+                    "source": "master_resume.md (Default one-page resume)", "generated_at": utcnow(), "status": status,
+                    "failure_reasons": [f"{x.name}: {x.detail}" for x in rep.errors()], "input_hashes": hashes,
+                    "validation": rep.to_json(), "tools": tool_versions(), "font_used": res.font_used,
+                    "attempts": [{"attempt": 1, "ok": rep.ok, "pages": rep.pages,
+                                  "errors": [f"{x.name}: {x.detail}" for x in rep.errors()]}], "repairs": [],
+                    "gaps_pt": gaps}
+        reps = {"validation.md": reports.validation_md(rep, manifest["attempts"], [], res.font_used,
+                                                       settings.fonts.get("preferred"))}
+        if rep.extracted_text:
+            reps["extracted_text.txt"] = rep.extracted_text
+        vdir = versions.save_version(root, build_dir, name, dump(c), reps, manifest, res.font_files or [], {})
+        if status == "ready":
+            versions.set_current(root, int(vdir.name[1:]), "default resume rebuilt from the master")
+    return {"status": status, "version_dir": str(vdir), "pdf": str(vdir / name) if res.pdf else None,
+            "report": rep, "matches_template": same, "version": int(vdir.name[1:])}

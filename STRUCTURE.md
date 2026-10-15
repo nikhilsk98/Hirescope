@@ -17,9 +17,10 @@ hirescope/
 │
 ├── inputs/          YOUR files (gitignored except *.example.*)
 │   ├── preferences.yaml (+ .example)       what you're looking for; the paths below are set here
-│   ├── resume/      master_resume.md (+ .example; items tagged [confirmed] / [needs confirmation] / [demo]),
-│   │                evidence_additions.md (confirmed interview answers), tool_checklist.md (ticked tools = confirmed,
-│   │                with where + level), resume_template.tex, resume_rules.md (v3; its numbers drive the builder)
+│   ├── resume/      master_resume.md (v4 format: Default one-page snapshot, bullet banks, metrics with statuses,
+│   │                Skills inventory tiers, Builder notes), evidence_additions.md (confirmed interview answers),
+│   │                tool_checklist.md (ticks count only as far as the master has evidence), resume_template.tex,
+│   │                resume_rules.md (v4.1; its numbers and layout spec drive the builder), archive/ (old versions)
 │   ├── companies/   my_companies.csv (+ .example), coop_leads.txt
 │   ├── linkedin/    Connections.csv (LinkedIn data export, optional)
 │   ├── statuses/    dashboard exports (scheduled runs can always read this folder)
@@ -42,6 +43,7 @@ hirescope/
     │   │   ├── latest → vN      the current version (symlink)
     │   │   ├── current.json  locks.json  history.jsonl
     │   │   └── _work/           the generation in progress (brief, drafts, build folder)
+    │   ├── _default/            the Default one-page resume (no job description): v1, v2, … like any job
     │   ├── learn_it.md          JD keywords missing from your evidence in several prepared jobs (rule 61)
     │   └── _cache/              evidence bank, batch queue, missing_keywords.json, keyword_answers.json (your "no"s)
     ├── logs/        jobsearch.log (rotated), launchd logs, last_run_summary.txt
@@ -50,6 +52,9 @@ hirescope/
     └── state/       run.lock (while a run is active)
 ```
 
+- Resume Builder code for the v4 master: `master_v4.py` (parser), `v4build.py` (snapshot baseline, template-macro
+  rendering, layout checks), `rules_v4.py` (rules v4.1 checks). HireScope's matcher reads the same v4 master through
+  `jobsearch/extract/resume.py` (usable bullets and inventory skills only).
 - Resume Builder inputs can come from a copy: `JOBSEARCH_RESUME_INPUTS_DIR=/copy-of-inputs-resume` (with
   `JOBSEARCH_DATA_DIR` / `JOBSEARCH_DASHBOARD_DIR` for a full test run that touches nothing real).
 - External jobs (source `external`): `src/jobsearch/external.py` (reading, duplicates, import), `add_job.py` (CLI);

@@ -152,9 +152,14 @@ def load_settings(path: Path | None = None) -> Settings:
 def name_from_master(first: str = "", last: str = "") -> tuple[str, str]:
     """First and last name from the '# First Last' heading of master_resume.md (for the PDF file name)."""
     if MASTER_RESUME.exists():
-        for line in MASTER_RESUME.read_text(encoding="utf-8").splitlines():
+        text = MASTER_RESUME.read_text(encoding="utf-8")
+        if m := re.search(r"^\s*-\s+\*\*Name:\*\*\s*(.+?)\s*$", text, re.M):      # v4: the Contact section
+            parts = m.group(1).split()
+            if len(parts) >= 2:
+                return first or parts[0], last or parts[-1]
+        for line in text.splitlines():
             if m := re.match(r"^#\s+(\S.*)$", line):
-                parts = m.group(1).split()
+                parts = re.split(r"\s+[—–-]\s+", m.group(1))[-1].split()     # "# Master Resume — First Last"
                 if len(parts) >= 2:
                     return first or parts[0], last or parts[-1]
                 break
@@ -195,7 +200,8 @@ def rules_budget(settings: Settings, rules_text: str | None = None) -> dict:
             if not lm:
                 continue
             label, nums = lm.group(1).casefold(), [int(x) for x in re.findall(r"\d+", lm.group(2))]
-            prof = ("fullstack" if re.search(r"react|full[- ]?stack|frontend", label) else
+            prof = ("default" if re.search(r"default|general", label) else
+                    "fullstack" if re.search(r"react|full[- ]?stack|frontend", label) else
                     "cloud" if re.search(r"cloud|infra|devops", label) else
                     "ml" if re.search(r"\bml\b|machine|data", label) else
                     "backend" if re.search(r"backend|back-end|java", label) else None)
