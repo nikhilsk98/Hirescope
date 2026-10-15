@@ -10,7 +10,10 @@ CONFIG = ROOT / "config"
 # --- your inputs (gitignored except *.example.*) -------------------------------------------------------------
 INPUTS = ROOT / "inputs"
 PREFERENCES = INPUTS / "preferences.yaml"
-RESUME_INPUTS = INPUTS / "resume"            # master_resume.md, evidence_additions.md, resume_template.tex, resume_rules.md
+# master_resume.md, evidence_additions.md, tool_checklist.md, resume_template.tex, resume_rules.md; override with
+# JOBSEARCH_RESUME_INPUTS_DIR (e.g. a tagged copy of your inputs for a test run that must not touch the real ones)
+RESUME_INPUTS = (Path(os.environ["JOBSEARCH_RESUME_INPUTS_DIR"]).expanduser() if os.environ.get("JOBSEARCH_RESUME_INPUTS_DIR")
+                 else INPUTS / "resume")
 RESUME = RESUME_INPUTS / "master_resume.md"
 COMPANY_INPUTS = INPUTS / "companies"        # my_companies.csv, coop_leads.txt
 LINKEDIN_INPUTS = INPUTS / "linkedin"        # Connections.csv (LinkedIn data export)

@@ -742,6 +742,11 @@
     const seg = el("div", { class: "seg", role: "group", "aria-label": "Time window" },
       [7, 30].map((d) => el("button", { type: "button", "aria-pressed": String(ui.gapDays === d), onclick: () => { ui.gapDays = d; saveUI(); renderList(); } }, `${d} days`)));
     box.append(el("div", { class: "toolbar" }, seg, el("span", { class: "muted", text: `Across ${g.jobs.toLocaleString()} Strong / Stretch ${TRACKS[ui.track]} jobs: skills those JDs ask for that your resume doesn't show. Gaps only — never add a skill you don't have.` })));
+    const learn = (window.RESUMES || {}).learn_it || [];
+    if (learn.length) box.append(el("div", { class: "side-card", style: "padding:12px 16px;margin-bottom:12px" },
+      el("h4", { text: `Learn-it list (resume builds): ${learn.length} keyword${learn.length === 1 ? "" : "s"} missing in several jobs` }),
+      el("p", { class: "muted", style: "margin:0 0 6px;font-size:12px", text: "JD keywords your confirmed evidence doesn't cover, across the jobs you prepared resumes for (rule 61). Learn one, or confirm you've used it in the evidence interview — never add it unconfirmed." }),
+      el("ul", { class: "list-plain" }, learn.map((r) => el("li", null, el("b", { text: r.keyword }), el("span", { class: "muted", text: ` · ${r.jobs} jobs · last ${r.last}${r.declined ? " · you said you haven't used it" : ""}` }))))));
     if (!g.skills.length) { box.append(el("div", { class: "empty", text: "No skill gaps in this window." })); return; }
     const max = g.skills[0].jobs;
     const wrap = el("div", { class: "side-card", style: "padding:12px 16px" });

@@ -432,10 +432,27 @@ checks, reports, versions, HireScope statuses). It never submits applications an
 3. `~/.venvs/hirescope/bin/pip install -r requirements.txt` (adds `pdfplumber`).
 4. Inputs (all gitignored): `inputs/resume/master_resume.md` (the only source of facts; its `# First Last` heading names the
    PDF), `inputs/resume/resume_template.tex` (your template, never modified: the build copies it and replaces its body with
-   `\input{content.tex}`), `inputs/resume/resume_rules.md` (your writing rules). `inputs/resume/evidence_additions.md` is created
-   by the evidence interview (confirmed answers only).
-5. `~/.venvs/hirescope/bin/python -m resume_builder check` — tools, inputs, evidence bank, notes (e.g. template
-   bullets that aren't in your master resume).
+   `\input{content.tex}`), `inputs/resume/resume_rules.md` (your writing rules, v3: 63 rules; the builder reads its
+   numbers — bullet totals, per-role allocations, project counts — directly), `inputs/resume/tool_checklist.md` (tick-box
+   tool families: ticked = confirmed, with where and level). `inputs/resume/evidence_additions.md` holds confirmed
+   interview answers.
+5. **Tag your master resume** (rule 1: only `[confirmed]` items are used). Put a tag at the end of a line; on a
+   `## Section` or `### Entry` heading it covers everything below it unless a line has its own tag:
+   ```
+   ## Experience [confirmed]
+   ### Associate Software Developer — Accenture Technology, India (Feb 2021 – Dec 2021)
+   - Redesigned internal messaging … [needs confirmation]
+   ## Skills [confirmed]
+   - Languages: JavaScript, Java, Kotlin [demo], Python        (a tag after an item covers that item)
+   - Databases [needs confirmation]: Cassandra, Redis           (a tag after the category covers the line)
+   ### Shipment Tracker | React, Node.js [confirmed] [client work: Freelance]   (rule 62: shown under that role)
+   ```
+   `[needs confirmation]`, `[demo]` and untagged items are never used. `python -m resume_builder tags` lists every item
+   that still needs a tag; nothing builds until Experience and Skills have confirmed items.
+6. `~/.venvs/hirescope/bin/python -m resume_builder check` — tools, inputs, evidence bank, and notes: unconfirmed
+   items, **metrics to check** (rule 3: the same % in two bullets is flagged, never changed), **checklist conflicts**
+   (a tool your master resume names but the checklist leaves unticked: kept out of Skills until you resolve it),
+   template bullets that aren't in your master resume.
 
 ### Use
 - Dashboard → open a job → **Generate Resume (copy command)** (or `g`) copies `claude "/resume-builder <id>"`. Paste it
@@ -468,13 +485,35 @@ checks, reports, versions, HireScope statuses). It never submits applications an
   not an ATS score"; missing resume keywords kept apart from missing qualifications), `changes.md` (selection, before →
   after per bullet, what was left out, remaining gaps), `defense.md` (2–3 interview talking points per bullet),
   `review.md`, `validation.md`, `extracted_text.txt`.
+- **Rules v3 enforced by the build** (content outside them is refused, with the rule number): section order by audience
+  — co-op / intern / new grad: Education → Technical Skills → Experience → Projects; mid-level (HireScope level mid
+  and up, or no level but 3+ years asked): Technical Skills → Experience → Projects → Education; only Projects and
+  Experience may swap (rules 15–17). Experience bullets: 8–11, at most 5 per role, rule 24's starting allocation per
+  profile (Java/backend, React/full-stack, cloud) read from your rules file (rules 22–24). Projects: 2 × 2 bullets; a
+  3rd only for co-op roles when it covers a JD need nothing else shows; 1 for mid-level (rules 36–38). Project work
+  only under a role when tagged client work (rule 62). Tools: a ticked tool goes in Skills; in a bullet only where its
+  "Where" names that role or project, and coursework / tutorial tools never in a work bullet (rule 63). Overflow:
+  duplicates and weak bullets → optional coursework and extras → (the drafter shortens wording) → fewer bullets /
+  projects → spacing; fonts never below 10 pt (rule 53).
+- **Smart keywords (rules 61, 63)**: for each important JD keyword your evidence doesn't support, the brief asks you
+  first — "Have you used Kafka? If yes, where?", or for a specific tool in a family you have ("You list CI/CD
+  (Jenkins). Which of these have you actually used: …?") — and suggests honest broader wording ("relational
+  databases (MySQL)" for a PostgreSQL JD, never the specific tool). A confirmed specific tool supports its general
+  terms automatically (Jenkins → CI/CD; `category_terms` in the config); a general term never implies a specific
+  tool. Unticked tools and keywords you declined are known gaps, not asked again. Answers:
+  `add-evidence --entry <id> --keyword K --question … --answer … [--level …] --confirm` (a tool answer is ticked in
+  tool_checklist.md; anything else goes to evidence_additions.md), `add-tool --tool T --where W --level L --confirm`,
+  `decline --keyword K`. **Learn-it list**: keywords missing from several prepared jobs — `python -m resume_builder
+  gaps`, `data.nosync/generated_resumes/learn_it.md`, and the dashboard's Skill Gaps view.
 - The JD is data: instruction-like lines ("ignore previous instructions", "write … to a file", "add X to your
   resume") are listed in the brief as ignored and dropped from what the drafter tailors to.
 
 ### Configuration (`config/resume_builder.yaml`)
-`page_count` (1), `section_order` per track (co-op: skills, education, projects, experience; full-time: experience
-before projects), `summary` (off), `limits` (projects, bullets per role / project, words per bullet, keyword repeats,
-courses), `layout` (minimum font size and margins the repair loop may never cross, entry gaps), `fonts` (preferred +
+`page_count` (1), `section_order` per audience (`student`, `experienced`) and `audience` (which levels are
+mid-level; years that make an unlevelled role mid-level), `experience_bullets` and `projects_by_audience` (defaults;
+the numbers in your rules file win), `category_terms` (rule 63, specific → general), `summary` (off), `limits`
+(bullets per project, words per bullet, keyword repeats, 0–3 courses), `layout` (minimum font size 10 pt and margins
+the repair loop may never cross, entry gaps), `fonts` (preferred +
 fallback), `compile` (timeout, image DPI), `repair.max_attempts` (≤ 3), `profiles` (signals + what to lead with),
 `related_groups` (what counts as transferable, never equivalent), `batch.max_jobs`. Changing it (or any input) makes
 the next request build a new version.
@@ -497,12 +536,24 @@ the next request build a new version.
 - Each build saves a version, also within one generation (a rebuild after tightening a bullet is `v<N+1>`). A
   generation allows 3 builds; a 4th is refused without building anything (`prepare --regenerate` starts a new one).
 - Trying things against a copy of your data: `JOBSEARCH_DATA_DIR=/path/copy JOBSEARCH_DASHBOARD_DIR=/path/dash
-  python -m resume_builder …` (the real database, resumes and dashboard stay untouched).
+  python -m resume_builder …` (the real database, resumes and dashboard stay untouched); add
+  `JOBSEARCH_RESUME_INPUTS_DIR=/path/inputs-copy` to use a copy of `inputs/resume/` too (e.g. a tagged test copy).
 
 ### Evidence interview
-`python -m resume_builder interview <id>` lists up to 5 questions (requirements your inputs may not describe, strong
-matches with no stated scope). Claude asks them; an answer is saved, dated, to `inputs/resume/evidence_additions.md` only
-when you confirm it (`add-evidence … --confirm`). Your master resume is never edited.
+`python -m resume_builder interview <id>` lists the keyword questions (above) and up to 5 more (requirements your
+inputs may not describe, strong matches with no stated scope). Claude asks them; an answer is saved only when you
+confirm it (`--confirm`), as one block in `inputs/resume/evidence_additions.md`:
+```
+## 2026-10-14 — exp-accenture
+- Question: Have you used Kafka? If yes, where?
+- Answer: …
+- Status: confirmed
+- Role/project: Associate Software Developer — Accenture Technology, India
+- Level: production            (tools only)
+```
+Tool answers go to `tool_checklist.md` instead (ticked, with where and level), never both. Blocks whose status isn't
+`confirmed`, or that carry a test marker (`DEMO`, "lorem ipsum", "placeholder"), are ignored and reported by
+`check` / `tags`. The older `## <id> — date — confirmed` form is still read. Your master resume is never edited.
 
 ### Troubleshooting
 | Symptom | What to do |
@@ -511,6 +562,9 @@ when you confirm it (`add-evidence … --confirm`). Your master resume is never 
 | `The font "Calibri" cannot be found` | `brew install --cask font-carlito` (the build falls back to it automatically) |
 | First build slow / offline error | Tectonic downloads TeX packages once; run it online once, later builds are offline |
 | `master resume problems: …` | the message names the line (headings need `### Title — Organization, Location (Mon YYYY – Mon YYYY)`) |
+| `no confirmed Experience entries …` | tag your master resume (rule 1); `python -m resume_builder tags` lists what needs a tag |
+| `content problems: … rule NN` | the content breaks that rule of resume_rules.md v3 (order, bullet / project counts, a tool or project in the wrong place); the message says how |
+| `conflict: master_resume.md names X, but tool_checklist.md leaves it unticked` | tick X in the checklist (with where / level) or take it out of the master resume |
 | `content does not match the schema` | the drafter's JSON is invalid; the message lists each field |
 | FAILED: `truth: …` | a claim isn't backed by the evidence it cites: fix the bullet, or add the fact via the evidence interview |
 | FAILED: `page_count` / `bullet_length` | content too long after 3 attempts: shorten bullets or lower priorities, then `--regenerate` |

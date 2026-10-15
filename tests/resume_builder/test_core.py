@@ -141,13 +141,13 @@ def _baseline(rb_env, ref=None):
 
 def test_baseline_selection_and_track_order(rb_env):
     a, c = _baseline(rb_env)
-    assert c.section_order == ["skills", "education", "projects", "experience"]      # co-op: projects first
+    assert c.section_order == ["education", "skills", "experience", "projects"]      # co-op: rule 15
     assert [e.entry_id for e in c.experience][0] == "exp-demo"                         # reverse chronological
     assert all(b.origin == "verbatim" for _s, _e, b in c.all_bullets())
     first = c.experience[0].bullets[0]
     assert "Java" in first.text                                                        # JD-relevant bullet first
     _a2, c2 = _baseline(rb_env, rb_env.ft_job)
-    assert c2.section_order == ["skills", "education", "experience", "projects"]       # full-time: experience first
+    assert c2.section_order == ["education", "skills", "experience", "projects"]       # new grad (entry): rule 15
     sk = {s.category: [i.name for i in s.items] for s in c.skills}
     assert sk["Languages"][0] == "Java"                                                # JD-matched skills first
 
@@ -295,14 +295,25 @@ def test_overflow_triggers_trimming_in_priority_order(rb_env):
                         ("- Stored messages in MongoDB with TTL indexes for automatic cleanup.\n", "D"),
                         ("- Trained a scikit-learn classifier on a public dataset and reported 0.91 F1.\n", "E")):
         filler = "".join(f"- Filler {tag}{i} described at length: DEMO work on internal tooling, reporting pipelines, "
-                         f"dashboards and on-call runbooks for the operations group across several quarters.\n"
+                         f"dashboards and on-call runbooks for the operations group across several quarters, with weekly "
+                         f"reviews, written postmortems and long hand-offs to the support group.\n"
                          for i in range(1, 6))
         text = text.replace(anchor, anchor + filler)
     m.write_text(text)
+    import yaml
+    cfg = yaml.safe_load(rc.CONFIG_FILE.read_text())       # this test is about the trim order, not rule 22–23 caps
+    cfg["experience_bullets"] = {"total": {"min": 1, "max": 30}, **{k: {"start": 4, "max": 6} for k in
+                                                                     ("primary", "second", "internship", "other")}}
+    rc.CONFIG_FILE.write_text(yaml.safe_dump(cfg))
     a = _analysis(rb_env)
     bank, s = build_bank(), load_settings()
     c = draft.baseline(a, bank, s)
-    from resume_builder.content_schema import Bullet
+    from resume_builder.content_schema import Bullet, ExperienceEntry
+    for e in bank.entries.values():         # rule 23 may leave out an irrelevant old role; this test wants them all
+        if e.section == "experience" and e.id not in {x.entry_id for x in c.experience}:
+            first = next(i for i in bank.by_entry(e.id) if not i.id.endswith("-h"))
+            c.experience.append(ExperienceEntry(entry_id=e.id, priority=4,
+                                                bullets=[Bullet(text=first.text, evidence_ids=[first.id])]))
     for ex in c.experience:
         fill = [i for i in bank.by_entry(ex.entry_id) if i.text.startswith("Filler")]
         ex.bullets = ex.bullets[:1] + [Bullet(text=i.text, evidence_ids=[i.id], priority=5) for i in fill]
@@ -323,8 +334,9 @@ def test_overflow_triggers_trimming_in_priority_order(rb_env):
 
 
 def test_repair_order_without_compiling(rb_env):
-    """Over the page: attempt 1 drops repetition then priority 5/4/3 bullets; attempt 2 drops the summary, extra
-    courses, extra projects and an irrelevant old role; attempt 3 only shrinks entry spacing (never fonts/margins)."""
+    """Rule 53: attempt 1 drops repetition, weak (priority 4–5) bullets, then optional coursework and the summary;
+    attempt 2 reduces bullets, then projects, then an irrelevant old role; attempt 3 only shrinks entry spacing (never
+    fonts/margins)."""
     _a, c = _baseline(rb_env)
     s = load_settings()
     from resume_builder.content_schema import Bullet, Summary
@@ -338,10 +350,15 @@ def test_repair_order_without_compiling(rb_env):
     f1 = pipeline.repair(c, rep, 1, s, {"entry": 6, "education": 4})
     assert f1.actions[0].startswith("removed repeated bullet")
     assert any("priority 5" in a for a in f1.actions)
-    assert f1.content.summary is not None and f1.gaps["entry"] == 6
+    assert f1.gaps["entry"] == 6 and not any("lower-priority" in a or "project" in a for a in f1.actions)
+    c.education[0].course_ids = [i.id for i in build_bank().items.values() if i.section == "coursework"][:2]
+    big = pipeline.repair(c, validate.Report(pages=2, overflow_lines=40), 1, s, {"entry": 6, "education": 4})
+    i_course, i_summary = big.actions.index("removed optional coursework"), big.actions.index("removed the summary")
+    assert max(i for i, a in enumerate(big.actions) if "weak bullet" in a) < i_course < i_summary   # rule 53 order
+    assert big.content.summary is None and not any(e.course_ids for e in big.content.education)
     rep2 = validate.Report(pages=2, overflow_lines=40)
-    f2 = pipeline.repair(f1.content, rep2, 2, s, f1.gaps)
-    assert "removed the summary" in f2.actions and f2.content.summary is None
+    f2 = pipeline.repair(big.content, rep2, 2, s, big.gaps)
+    assert any("lower-priority bullet" in a for a in f2.actions)
     f3 = pipeline.repair(f2.content, validate.Report(pages=2, overflow_lines=1), 3, s, f2.gaps)
     assert f3.actions == ["entry spacing 6pt → 2.0pt (layout.min_entry_gap_pt)"] and f3.gaps["entry"] == 2.0
     assert pipeline.repair(f3.content, validate.Report(pages=2, overflow_lines=1), 3, s, f3.gaps) is None

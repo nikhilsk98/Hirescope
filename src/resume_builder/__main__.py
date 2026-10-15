@@ -8,8 +8,15 @@
   verify <job> [--content F] truth check of a content file against the evidence it cites
   build <job> [--content F]  reviewed content → truth check, render, compile, check the PDF, repair (max 3), save v<N>
   interview <job>            evidence-interview questions for this job (answers are saved only with add-evidence)
-  add-evidence --entry ID --question Q --answer A --confirm
-                             save one answer you confirmed to inputs/resume/evidence_additions.md
+  add-evidence --entry ID --question Q --answer A [--keyword K --level L] --confirm
+                             save one answer you confirmed to inputs/resume/evidence_additions.md (a tool answer
+                             goes to inputs/resume/tool_checklist.md instead)
+  add-tool --tool T --where W --level L [--proficiency P] --confirm
+                             tick a tool you used in tool_checklist.md (where: role/project; level: production |
+                             project | coursework | tutorial)
+  decline --keyword K        you haven't used K: don't ask again (it stays a known gap)
+  tags                       status of every master-resume item (rule 1): what still needs a [confirmed] tag
+  gaps                       learn-it list: JD keywords missing from your evidence in several jobs
   show <job> [--bullets]     versions, the current one, locks (and bullet ids to lock)
   diff <job> [A B]           what changed between two versions (default: previous → latest)
   rollback <job> N           make v<N> current again (it must have passed every check)
@@ -53,9 +60,68 @@ def cmd_check(args) -> int:
         print("Missing dependencies:\n  - " + "\n  - ".join(missing))
         return 2
     print(f"OK: tools present ({pipeline.tool_versions()}); inputs: {', '.join(hashes)}; "
-          f"{len(bank.items)} evidence items in {len(bank.entries)} entries; profiles: {', '.join(settings.profiles)}")
+          f"{len(bank.items)} confirmed evidence items in {len(bank.entries)} entries "
+          f"({sum(1 for i in bank.items.values() if i.section == 'tool')} ticked tools); "
+          f"profiles: {', '.join(settings.profiles)}")
+    if bank.excluded:
+        print(f"note: {len(bank.excluded)} master-resume item(s) are not confirmed and are never used (rule 1): "
+              "`python -m resume_builder tags`")
+    for f in bank.metric_flags:
+        print(f"check metric (rule 3): {f['detail']}")
     for w in bank.warnings:
         print(f"note: {w}")
+    return 0
+
+
+def cmd_tags(args) -> int:
+    from .evidence import status_report
+    rep = status_report()
+    print("Status tags (rule 1): only [confirmed] items are used. Put a tag at the end of a line; on a '## Section'\n"
+          "or '### Entry' heading it covers everything below it unless a line has its own tag:\n"
+          "  ## Experience [confirmed]\n"
+          "  ### Associate Software Developer — Accenture Technology, India (Feb 2021 – Dec 2021) [confirmed]\n"
+          "  - Redesigned internal messaging … [needs confirmation]\n"
+          "  - Languages: JavaScript, Java, Kotlin [demo], Python   (a tag after an item covers that item)\n"
+          "  - Databases [needs confirmation]: Cassandra, Redis     (a tag after the category covers the line)\n"
+          "  ### Shipment Tracker | React, Node.js [confirmed] [client work: Freelance]   (rule 62)\n")
+    print("Counts: " + ", ".join(f"{k} {v}" for k, v in sorted(rep["counts"].items())))
+    todo = [r for r in rep["rows"] if r["status"] != "confirmed"]
+    if not todo:
+        print("Every item is confirmed.")
+    for r in todo:
+        print(f"  line {r['line']:>3} [{r['status']}] {r['section']}: {r['text'][:110]}")
+    for w in rep["additions_warnings"]:
+        print(f"evidence_additions.md: {w}")
+    return 0
+
+
+def cmd_add_tool(args) -> int:
+    from . import keywords, tools
+    if not args.confirm:
+        print("Error: not saved — add --confirm once you're sure you used it", file=sys.stderr)
+        return 2
+    state = tools.confirm(rc.TOOL_CHECKLIST, args.tool, args.where, args.level, args.proficiency or "")
+    keywords.record_answer(args.tool, "saved")
+    print(f"{state}: {args.tool} in {rc.TOOL_CHECKLIST} (Where: {args.where}, Level: {args.level})")
+    return 0
+
+
+def cmd_decline(args) -> int:
+    from . import keywords
+    keywords.record_answer(args.keyword, "no")
+    print(f"Noted: you haven't used {args.keyword}. It won't be asked again and is never claimed (a known gap).")
+    return 0
+
+
+def cmd_gaps(args) -> int:
+    from . import keywords
+    from .evidence import load_bank
+    rows = keywords.learn_it(load_bank(), args.min_jobs)
+    p = keywords.write_learn_it(load_bank())
+    if not rows:
+        print(f"No keyword is missing from {args.min_jobs}+ prepared jobs yet. ({p})")
+    for r in rows:
+        print(f"{r['jobs']:>3} jobs  {r['keyword']}" + ("  (you said you haven't used it)" if r["declined"] else ""))
     return 0
 
 
@@ -89,6 +155,11 @@ def cmd_prepare(args) -> int:
     print(f"  requirements: {len(a['requirements'])} {cats}; keywords: {len(a['keywords'])}; "
           f"injection warnings: {len(a['injection_warnings'])}")
     print(f"  brief:    {out['work']}/brief.md\n  baseline: {out['baseline']}\n  write:    {out['work']}/content.json")
+    kp = a.get("keyword_plan") or {}
+    for q in kp.get("questions", []):
+        print(f"  ❓ ask Nikhil ({q['kind']}): {q['question']}")
+    for g in kp.get("known_gaps", []):
+        print(f"  gap: {g}")
     for w in out["bank_warnings"]:
         print(f"  note: {w}")
     car = out.get("carried") or {}
@@ -188,7 +259,8 @@ def cmd_verify(args) -> int:
     src = Path(args.content) if args.content else jd / pipeline.WORK / "content.json"
     c = pipeline.assign_ids(parse(src.read_text(encoding="utf-8")))
     bank = load_bank()
-    probs = pipeline.structure_problems(c, bank)
+    st, analysis = pipeline.load_work(jd) if (jd / pipeline.WORK / "state.json").exists() else ({}, None)
+    probs = pipeline.structure_problems(c, bank, rc.load_settings(), analysis)
     rep = verify.verify(c, bank, verify.load_llm_review(jd / pipeline.WORK / "truth_review.json"))
     (jd / pipeline.WORK).mkdir(parents=True, exist_ok=True)
     (jd / pipeline.WORK / "truth.md").write_text(verify.truth_md(rep, bank), encoding="utf-8")
@@ -213,7 +285,13 @@ def cmd_interview(args) -> int:
     src = next((work / n for n in ("content.json", "draft.json", "baseline.json") if (work / n).exists()))
     qs = interview.questions(analysis, parse(src.read_text()), load_bank())
     (work / "interview.json").write_text(json.dumps(qs, indent=1, ensure_ascii=False), encoding="utf-8")
-    if not qs:
+    kp = json.loads((work / "questions.json").read_text()) if (work / "questions.json").exists() else {}
+    for q in kp.get("questions", []):
+        print(f"keyword {q['keyword']} [{q['kind']}]: {q['question']}")
+    if kp.get("questions"):
+        print("  save a yes: add-evidence --entry <role id> --keyword K --question Q --answer A [--level L] --confirm; "
+              "a no: decline --keyword K")
+    if not qs and not kp.get("questions"):
         print("No questions: your evidence already states scope and outcomes for this job's strongest matches.")
     for q in qs:
         print(f"{q['id']} ({q['entry_id'] or 'which role?'}): {q['question']}\n    why: {q['why']}")
@@ -223,7 +301,8 @@ def cmd_interview(args) -> int:
 def cmd_add_evidence(args) -> int:
     from . import interview
     from .evidence import load_bank
-    p = interview.save_answer(args.entry, args.question, args.answer, args.confirm, load_bank())
+    p = interview.save_answer(args.entry, args.question, args.answer, args.confirm, load_bank(), keyword=args.keyword,
+                              level=args.level)
     print(f"Saved to {p} (dated, confirmed). The evidence bank rebuilds on the next run.")
     return 0
 
@@ -333,7 +412,20 @@ def main(argv=None) -> int:
     p.add_argument("--entry", required=True)
     p.add_argument("--question", required=True)
     p.add_argument("--answer", required=True)
+    p.add_argument("--keyword", help="the JD keyword the question was about (tools go to tool_checklist.md)")
+    p.add_argument("--level", help="production | project | coursework | tutorial (tools)")
     p.add_argument("--confirm", action="store_true", help="you confirm the answer is true and may be used")
+    p = sub.add_parser("add-tool")
+    p.add_argument("--tool", required=True)
+    p.add_argument("--where", required=True, help="role or project where you used it")
+    p.add_argument("--level", required=True, help="production | project | coursework | tutorial")
+    p.add_argument("--proficiency")
+    p.add_argument("--confirm", action="store_true")
+    p = sub.add_parser("decline")
+    p.add_argument("--keyword", required=True)
+    sub.add_parser("tags")
+    p = sub.add_parser("gaps")
+    p.add_argument("--min-jobs", type=int, default=2)
     p = sub.add_parser("show")
     p.add_argument("job")
     p.add_argument("--bullets", action="store_true")
@@ -366,7 +458,8 @@ def main(argv=None) -> int:
             return 0
         return {"check": cmd_check, "prepare": cmd_prepare, "build": cmd_build, "show": cmd_show,
                 "review": cmd_review, "verify": cmd_verify, "interview": cmd_interview,
-                "add-evidence": cmd_add_evidence, "diff": cmd_diff, "rollback": cmd_rollback, "lock": cmd_lock,
+                "add-evidence": cmd_add_evidence, "add-tool": cmd_add_tool, "decline": cmd_decline, "tags": cmd_tags,
+                "gaps": cmd_gaps, "diff": cmd_diff, "rollback": cmd_rollback, "lock": cmd_lock,
                 "unlock": cmd_unlock, "mark-reviewed": cmd_mark_reviewed, "refresh": cmd_refresh,
                 "batch": cmd_batch}[args.cmd](args)
     except (InputError, ContentError, CompileError, versions.LockedError, ValueError) as e:

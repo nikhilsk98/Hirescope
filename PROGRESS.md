@@ -615,3 +615,34 @@ statuses message and the blocked-~/Downloads warnings now point to it. Tested: u
 re-run leaves the dashboard alone, lock); a sandbox run (empty scratch database, copy of your preferences) with files
 made by the dashboard itself in headless Chrome; a no-op run on the real setup (nothing waiting; dashboard not
 rewritten). Tests: 528 passed.
+
+## Resume rules v3 + tool checklist (2026-10-14)
+- **Rule 1 status tags**: `[confirmed]` / `[needs confirmation]` / `[demo]` at the end of a line (a heading tag covers
+  what's below; in skills lists a tag after an item covers that item, after the category the line). Only confirmed
+  items enter the evidence bank; ids stay stable around excluded ones; content citing an unconfirmed item is refused
+  with the reason; `python -m resume_builder tags` lists what needs a tag. Your master resume has **61 untagged
+  items**, so real builds stop with that message until you tag it (the builder never edits it).
+- **Rules 15–17**: section order from track + HireScope level (student vs experienced); only Projects / Experience may
+  swap. **22–24 / 36–38**: bullet totals, per-role caps and rule 24's per-employer allocations read from your rules file
+  (names stay out of the public config); 2 projects × 2 bullets, a 3rd only for co-op when it fills a JD gap, 1 for
+  mid-level — enforced by the build. **53**: overflow trimming in the rule's order; fonts never below 10 pt.
+- **61 / 63**: keyword questions in the brief (have you used X / which of these tools), broader true wording, unticked or
+  declined → known gaps, specific → general only (`category_terms`); answers saved only with `--confirm` (tools →
+  tool_checklist.md, others → evidence_additions.md in the new block format); learn-it list (`gaps`, `learn_it.md`,
+  dashboard Skill Gaps). Ticked tools: Skills freely, bullets only where "Where" names the role.
+- **62**: project work only under a role when the project is tagged `[client work: …]`. **3**: the same % in two bullets
+  is flagged in check / brief / review, never changed. Tools the master names but the checklist leaves unticked
+  (Oracle, OSGi today) are flagged and kept out of Skills.
+- evidence_additions.md: created with the format header, no entries (none existed, so no test / DEMO entries).
+
+**Real test** (sandbox: a tagged copy of your inputs with one bullet `[needs confirmation]` and a planted `[demo]` line,
+the two real jobs and JDs in a scratch database; your real inputs and data untouched): Axos Bank Software Development
+Intern (co-op, job 20970) and Anduril Production Software Engineer (full-time mid-level, 3+ years, job 139201). Both
+**READY v1**, one page, every claim supported. PDFs: Axos Education → Technical Skills → Experience → Projects, Anduril
+Technical Skills → Experience → Projects → Education; 10 experience bullets each (rule 24 backend allocation Accenture
+4 / Freelance 3 / Rescho 2, Agathsya 1), 1 project × 2 bullets (the only project); no Solace (needs confirmation), no
+planted demo line, no Oracle / OSGi, no C / C++ (Anduril's open keyword questions, not answered for you). The rule-3
+check flagged 25% in three bullets and, on Anduril, two of them together (kept unchanged).
+Found and fixed while testing: degree fields asked as "have you used"; a trailing skills-list tag covered the whole
+line; the bank cache ignored code changes (now part of its key); OSGi conflicts missed (not in the keyword
+vocabulary); the additions header's format example parsed as an entry. Tests: 540 passed (12 new).

@@ -38,7 +38,7 @@ def test_manifest_dedupe_regenerate_and_versions_kept(rb_env):
     for k in ("job_pk", "generated_at", "input_hashes", "template_version", "rules_version", "profile", "track",
               "validation", "dedupe_key", "file_hashes", "tools", "font_used"):
         assert m.get(k) not in (None, ""), k
-    assert set(m["input_hashes"]) == {"master_resume", "template", "rules", "evidence_additions", "config"}
+    assert set(m["input_hashes"]) == {"master_resume", "template", "rules", "evidence_additions", "tool_checklist", "config"}
     again = full_build(rb_env)
     assert again["reused"]["version"] == 1                                   # duplicate request reuses
     assert not (jd_of(rb_env) / "v2").exists()

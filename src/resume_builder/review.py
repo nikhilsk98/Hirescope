@@ -88,6 +88,29 @@ def lint(c: Content, bank: Bank, settings: Settings, analysis: dict | None = Non
             if fuzz.token_set_ratio(b.text, b2.text) >= 85:
                 out.append({"where": b.id, "rule": "near-duplicate", "detail": f"close to {b2.id}"})
                 break
+    for name in bank.conflicts:                       # rule 63: unticked in the checklist, named in the master
+        for _s, _e, b in bullets:
+            if re.search(rf"(?<![\w.]){re.escape(name)}(?![\w])", b.text, re.I):
+                out.append({"where": b.id, "rule": "tool conflict",
+                            "detail": f"names {name}, which tool_checklist.md leaves unticked: ask Nikhil, or leave "
+                                      "it out of this bullet"})
+        for cat in c.skills:
+            if any(x.name.casefold() == name.casefold() for x in cat.items):
+                out.append({"where": f"skills: {cat.category}", "rule": "tool conflict",
+                            "detail": f"{name} is unticked in tool_checklist.md: leave it out until confirmed"})
+    cited = {ev for _s, _e, b in bullets for ev in b.evidence_ids}
+    for f in bank.metric_flags:                       # rule 3: flag, never fix
+        used = [i for i in f["items"] if i in cited]
+        if len(used) > 1:
+            out.append({"where": ", ".join(used), "rule": "inconsistent metric",
+                        "detail": f"{f['metric']} appears in {len(used)} bullets on this resume; confirm with Nikhil "
+                                  "they are different results (rule 3) — never change the number"})
+    from .config import rules_budget
+    lo = int(rules_budget(settings)["total"]["min"])
+    n_exp = sum(len(e.bullets) for e in c.experience)
+    if n_exp < lo:
+        out.append({"where": "experience", "rule": "bullet budget",
+                    "detail": f"{n_exp} experience bullets (rule 22: {lo}+ when the evidence allows)"})
     text = " ".join(b.text for _s, _e, b in bullets) + " " + (c.summary.text if c.summary else "")
     if analysis:
         jd_terms = {k["canonical"] for k in analysis.get("keywords", [])}

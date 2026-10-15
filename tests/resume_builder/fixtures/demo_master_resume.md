@@ -2,10 +2,10 @@
 
 <!-- DEMO data for Resume Builder tests. Not a real person. -->
 
-## Summary
+## Summary [confirmed]
 - DEMO software engineer with 3+ years building web services.
 
-## Experience
+## Experience [confirmed]
 
 ### Software Engineer — Demo Systems Inc, Boston MA (Jan 2022 – Present)
 - Built REST APIs in Java and Spring Boot for a payments service handling 2,000+ daily requests.
@@ -19,7 +19,7 @@
 ### Web Developer Intern — Tiny Startup, Austin TX (Jan 2020 – May 2020)
 - Implemented landing pages in HTML, CSS and JavaScript.
 
-## Projects
+## Projects [confirmed]
 
 ### Demo Chat App | Node.js, Socket.io, MongoDB
 - Built a real-time chat app with Node.js and Socket.io supporting group rooms.
@@ -28,17 +28,17 @@
 ### Demo ML Notebook | Python, scikit-learn
 - Trained a scikit-learn classifier on a public dataset and reported 0.91 F1.
 
-## Coursework
+## Coursework [confirmed]
 - Distributed Systems, Algorithms, Databases
 
-## Education
+## Education [confirmed]
 
 ### M.S. in Computer Science — Demo University, Boston MA (Expected May 2027)
 - GPA 3.8/4
 
 ### B.S. in Computer Engineering — Sample College, Austin TX (Aug 2016 – May 2020)
 
-## Skills
+## Skills [confirmed]
 - Languages: Java, Python, JavaScript, SQL
 - Web/Frameworks: Spring Boot, React, Redux, Node.js, HTML5, CSS3, REST APIs
 - Databases: PostgreSQL, MongoDB

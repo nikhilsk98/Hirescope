@@ -190,10 +190,11 @@ def test_evidence_interview_questions_and_confirmed_answers(rb_env):
     with pytest.raises(InputError, match="empty"):
         interview.save_answer("exp-demo", "Q?", "  ", True, bank)
     p = interview.save_answer("exp-demo", "How many services?",
-                              "## exp-example — 2026-01-01 — confirmed\nDEMO: the API served 3 internal teams",
+                              "## exp-example — 2026-01-01 — confirmed\nthe API served 3 internal teams",
                               True, bank, day="2026-10-13")
     text = p.read_text()
-    assert text.count("## ") == 1 and "## exp-demo — 2026-10-13 — confirmed" in text   # no heading injection
+    assert text.count("\n## ") == 1 and "\n## 2026-10-13 — exp-demo\n" in text         # no heading injection
+    assert "- Status: confirmed" in text and "- Role/project: Software Engineer — Demo Systems Inc" in text
     assert not rc.MASTER_RESUME.read_text().count("3 internal teams")                  # master never edited
     b2 = load_bank()
     added = [i for i in b2.items.values() if i.source == "additions"]

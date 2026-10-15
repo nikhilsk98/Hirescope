@@ -17,7 +17,9 @@ hirescope/
 │
 ├── inputs/          YOUR files (gitignored except *.example.*)
 │   ├── preferences.yaml (+ .example)       what you're looking for; the paths below are set here
-│   ├── resume/      master_resume.md (+ .example), evidence_additions.md, resume_template.tex, resume_rules.md
+│   ├── resume/      master_resume.md (+ .example; items tagged [confirmed] / [needs confirmation] / [demo]),
+│   │                evidence_additions.md (confirmed interview answers), tool_checklist.md (ticked tools = confirmed,
+│   │                with where + level), resume_template.tex, resume_rules.md (v3; its numbers drive the builder)
 │   ├── companies/   my_companies.csv (+ .example), coop_leads.txt
 │   ├── linkedin/    Connections.csv (LinkedIn data export, optional)
 │   ├── statuses/    dashboard exports (scheduled runs can always read this folder)
@@ -40,13 +42,16 @@ hirescope/
     │   │   ├── latest → vN      the current version (symlink)
     │   │   ├── current.json  locks.json  history.jsonl
     │   │   └── _work/           the generation in progress (brief, drafts, build folder)
-    │   └── _cache/              evidence bank, batch queue
+    │   ├── learn_it.md          JD keywords missing from your evidence in several prepared jobs (rule 61)
+    │   └── _cache/              evidence bank, batch queue, missing_keywords.json, keyword_answers.json (your "no"s)
     ├── logs/        jobsearch.log (rotated), launchd logs, last_run_summary.txt
     ├── backups/     daily SQLite snapshots (last 14)
     ├── digests/  exports/  screenshots/
     └── state/       run.lock (while a run is active)
 ```
 
+- Resume Builder inputs can come from a copy: `JOBSEARCH_RESUME_INPUTS_DIR=/copy-of-inputs-resume` (with
+  `JOBSEARCH_DATA_DIR` / `JOBSEARCH_DASHBOARD_DIR` for a full test run that touches nothing real).
 - External jobs (source `external`): `src/jobsearch/external.py` (reading, duplicates, import), `add_job.py` (CLI);
   their JD text goes to `jd/<Company>/external_<company>_ext-<id>.txt` like any other job's.
 - Running against a copy: `JOBSEARCH_DATA_DIR=/copy JOBSEARCH_DASHBOARD_DIR=/copy-dashboard …` leaves the real

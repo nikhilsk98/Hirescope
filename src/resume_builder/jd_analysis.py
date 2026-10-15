@@ -131,12 +131,24 @@ def _parse_keyword_line(line: str) -> dict | None:
     return {"term": parts[0], "section": parts[1], "status": parts[2], "weight": w}
 
 
+_CATEGORY_TERMS: dict[str, tuple[str, ...]] = {}
+
+
+def set_category_terms(settings: Settings | None) -> None:
+    """Rule 63 specific → general mapping from config/resume_builder.yaml category_terms (canonical names)."""
+    _CATEGORY_TERMS.clear()
+    for k, vs in ((settings.category_terms if settings else {}) or {}).items():
+        _CATEGORY_TERMS[canonical(k)] = tuple(dict.fromkeys(canonical(v) for v in vs))
+
+
 def _supported(term: str, bank_terms: set[str]) -> tuple[bool, list[str]]:
-    """(supported, concrete terms that support it). Umbrella terms (Relational Databases, CI/CD) are supported by
-    a concrete one in the HireScope vocabulary's `implies` list; nothing else counts as equivalent."""
+    """(supported, concrete terms that support it). A general term (Relational Databases, CI/CD, message queues) is
+    supported by a confirmed specific one — the HireScope vocabulary's `implies` plus category_terms (rule 63,
+    specific → general only). A general term never supports a specific tool."""
     if term in bank_terms:
         return True, [term]
-    concrete = [c for c in vocab().implies.get(term, ()) if c in bank_terms]
+    concrete = [c for c in dict.fromkeys([*vocab().implies.get(term, ()), *_CATEGORY_TERMS.get(term, ())])
+                if c in bank_terms]
     return bool(concrete), concrete
 
 
@@ -204,6 +216,7 @@ def pick_profile(title: str, required: list[str], text: str, settings: Settings)
 
 
 def analyze(job: dict, package_text: str, bank: Bank, settings: Settings, profile: str | None = None) -> dict:
+    set_category_terms(settings)
     fm, sec = parse_package(package_text)
     jd = sec.get("Full JD", "")
     if jd.startswith("_JD text unavailable"):

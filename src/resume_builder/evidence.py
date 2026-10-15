@@ -9,10 +9,23 @@ master_resume.md layout (the same one HireScope's matcher reads):
   ## Skills       - Category: skill, skill, ...
   ## Summary      - line ... (skill evidence only)
 
+Status tags (rule 1): only items marked confirmed are used. A tag goes at the end of a line —
+  [confirmed]   [needs confirmation]   [demo]
+— on a '## Section' or '### Entry' heading it applies to everything below it unless a line has its own tag; inside a
+skills / coursework list it may follow one item ("Kotlin [needs confirmation]"). Untagged items are not confirmed.
+A project done for a client or employer is tagged on its heading, e.g. `[client work: Freelance]` (rule 62): only then
+may its bullets appear under that role.
+
 evidence_additions.md (written by the evidence interview, only after you confirm an answer):
-  ## <entry id> — YYYY-MM-DD — confirmed
-  - Q: question asked
-  - A: the fact you confirmed
+  ## YYYY-MM-DD — <entry id>
+  - Question: question asked
+  - Answer: the fact you confirmed
+  - Status: confirmed
+  - Role/project: the role or project it belongs to
+  - Level: production | project | coursework | tutorial      (tools only; tools usually go to tool_checklist.md)
+The older form "## <entry id> — YYYY-MM-DD — confirmed" with "- Q:" / "- A:" lines is read too.
+
+inputs/resume/tool_checklist.md (rule 63): ticked tools are confirmed evidence (see tools.py).
 """
 from __future__ import annotations
 
@@ -33,7 +46,24 @@ _MON = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
 DATES_RE = re.compile(rf"\(((?:Expected\s+)?{_MON}\s+\d{{4}}(?:\s*[–-]\s*(?:{_MON}\s+\d{{4}}|Present))?)\)\s*$")
 METRIC_RE = re.compile(r"(?<![\w.\-/])(\d+(?:[.,]\d+)?)(\s?%|\+|x\b|k\b|K\b|-member|-person)?")
 ADD_HEAD_RE = re.compile(r"^##\s+([a-z0-9-]+)\s+[—-]\s+(\d{4}-\d{2}-\d{2})\s+[—-]\s+(confirmed)\s*$", re.I)
-BANK_VERSION = 2
+ADD_HEAD2_RE = re.compile(r"^##\s+(\d{4}-\d{2}-\d{2})\s+[—-]\s+([a-z0-9-]+)\s*$", re.I)
+STATUSES = ("confirmed", "needs confirmation", "demo")
+TAG_RE = re.compile(r"\s*\[(confirmed|needs[ -]confirmation|demo|(?:client|employer) work:\s*[^\]]+)\]\s*$", re.I)
+BANK_VERSION = 3
+
+
+def split_tags(line: str) -> tuple[str, str | None, str | None]:
+    """'text [confirmed] [client work: Freelance]' -> ('text', 'confirmed', 'Freelance'). Tags only at the end."""
+    status = client = None
+    while m := TAG_RE.search(line):
+        tag = m.group(1).strip()
+        low = tag.casefold().replace("-", " ")
+        if low in STATUSES:
+            status = status or low
+        else:
+            client = client or tag.split(":", 1)[1].strip()
+        line = line[:m.start()]
+    return line.rstrip(), status, client
 
 
 @dataclass
@@ -49,6 +79,8 @@ class Entry:
     end: str | None = None          # YYYY-MM | "present"
     tech: list[str] = field(default_factory=list)   # project title-line tech
     link: str | None = None
+    status: str | None = None       # confirmed | needs confirmation | demo | None (untagged)
+    client_of: str | None = None    # projects tagged [client work: X]: the experience entry id X matched
 
 
 @dataclass
@@ -65,8 +97,13 @@ class Item:
     outcomes: list[str] = field(default_factory=list)
     metrics: list[str] = field(default_factory=list)        # only numbers actually written in the source
     category: str | None = None     # skills: Languages, Web/Frameworks, ...
-    source: str = "master"          # master | additions
+    source: str = "master"          # master | additions | tools
     added: str | None = None        # additions: date confirmed
+    status: str | None = "confirmed"
+    where: str | None = None        # tools: where used (tool_checklist.md "Where")
+    where_entries: list[str] = field(default_factory=list)   # tools: entry ids that "Where" names
+    level: str | None = None        # tools / additions: production | project | coursework | tutorial
+    line: int | None = None         # line in its source file
 
 
 @dataclass
@@ -77,6 +114,10 @@ class Bank:
     hashes: dict[str, str]
     warnings: list[str] = field(default_factory=list)
     version: int = BANK_VERSION
+    excluded: list[dict] = field(default_factory=list)       # not confirmed: {id, line, text, status, source}
+    metric_flags: list[dict] = field(default_factory=list)   # rule 3: {metric, items: [ids], detail}
+    tool_index: dict[str, dict] = field(default_factory=dict)  # every checklist tool: name -> {ticked, family}
+    conflicts: list[str] = field(default_factory=list)       # tools the master names but the checklist leaves unticked
 
     def by_entry(self, entry_id: str) -> list[Item]:
         return [i for i in self.items.values() if i.entry_id == entry_id]
@@ -92,7 +133,8 @@ class Bank:
         return out
 
     def to_json(self) -> dict:
-        return {"version": self.version, "hashes": self.hashes, "warnings": self.warnings,
+        return {"version": self.version, "hashes": self.hashes, "warnings": self.warnings, "excluded": self.excluded,
+                "metric_flags": self.metric_flags, "tool_index": self.tool_index, "conflicts": self.conflicts,
                 "entries": {k: asdict(v) for k, v in self.entries.items()},
                 "items": {k: asdict(v) for k, v in self.items.items()},
                 "skill_categories": [[c, ids] for c, ids in self.skill_categories]}
@@ -102,7 +144,9 @@ class Bank:
         return cls(items={k: Item(**v) for k, v in d["items"].items()},
                    entries={k: Entry(**v) for k, v in d["entries"].items()},
                    skill_categories=[(c, ids) for c, ids in d["skill_categories"]],
-                   hashes=d["hashes"], warnings=d.get("warnings", []), version=d.get("version", 0))
+                   hashes=d["hashes"], warnings=d.get("warnings", []), version=d.get("version", 0),
+                   excluded=d.get("excluded", []), metric_flags=d.get("metric_flags", []),
+                   tool_index=d.get("tool_index", {}), conflicts=d.get("conflicts", []))
 
 
 # --- term helpers (shared with jd_analysis / verify) ------------------------------------------------------------
@@ -198,9 +242,12 @@ def _unique(base: str, used: set[str]) -> str:
     return out
 
 
-def parse_master(text: str, source_name: str = "master_resume.md") -> tuple[dict[str, Entry], dict[str, Item],
-                                                                               list[tuple[str, list[str]]], list[str]]:
-    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+def parse_master(text: str, source_name: str = "master_resume.md", strict: bool = True) -> tuple[
+        dict[str, Entry], dict[str, Item], list[tuple[str, list[str]]], list[str]]:
+    """Every entry and item with its status (rule 1); ids are assigned to all of them, so excluding an unconfirmed
+    bullet never renumbers the others. Callers keep only confirmed ones (`confirmed_only`). strict=False skips the
+    structural errors (for the status report)."""
+    text = re.sub(r"<!--.*?-->", lambda m: "\n" * m.group(0).count("\n"), text, flags=re.S)
     entries: dict[str, Entry] = {}
     items: dict[str, Item] = {}
     cats: list[tuple[str, list[str]]] = []
@@ -208,26 +255,30 @@ def parse_master(text: str, source_name: str = "master_resume.md") -> tuple[dict
     errors: list[str] = []
     used: set[str] = set()
     section = None
+    sec_status: str | None = None
     entry: Entry | None = None
     counters: dict[str, int] = {}
     SEC = {"experience": "experience", "projects": "project", "project": "project", "coursework": "coursework",
            "education": "education", "skills": "skill", "technical skills": "skill", "summary": "summary"}
 
-    def add_item(sec: str, txt: str, entry_: Entry | None, **kw) -> Item:
+    def add_item(sec: str, txt: str, entry_: Entry | None, status: str | None, line: int, **kw) -> Item:
         base = f"{entry_.id}-b" if entry_ else f"{sec}-"
         counters[base] = counters.get(base, 0) + 1
         iid = _unique(f"{base}{counters[base]}", used)
         a, o, m = _facts(txt)
         it = Item(iid, sec, txt, entry_.id if entry_ else None, entry_.organization if entry_ else None,
-                  entry_.role if entry_ else None, entry_.dates if entry_ else None, terms_in(txt), a, o, m, **kw)
+                  entry_.role if entry_ else None, entry_.dates if entry_ else None, terms_in(txt), a, o, m,
+                  status=status, line=line, **kw)
         items[iid] = it
         return it
 
     for n, raw in enumerate(text.splitlines(), 1):
-        line = raw.rstrip()
+        line, tag, client = split_tags(raw.rstrip())
+        if section in ("skill", "coursework") and not raw.lstrip().startswith("#"):
+            line, tag, client = raw.rstrip(), None, None      # list lines: a trailing tag belongs to its last item
         if m := re.match(r"^##\s+(.+)$", line):
             section = SEC.get(m.group(1).strip().lower())
-            entry = None
+            sec_status, entry = tag, None
             if section is None:
                 warnings.append(f"{source_name}:{n}: section '{m.group(1).strip()}' is not used by the Resume Builder")
             continue
@@ -235,6 +286,7 @@ def parse_master(text: str, source_name: str = "master_resume.md") -> tuple[dict
             continue
         if m := re.match(r"^###\s+(.+)$", line):
             head = m.group(1).strip()
+            status = tag or sec_status
             if section == "experience" or section == "education":
                 dm = DATES_RE.search(head)
                 if not dm:
@@ -256,7 +308,7 @@ def parse_master(text: str, source_name: str = "master_resume.md") -> tuple[dict
                 pre = "exp" if section == "experience" else "edu"
                 eid = _unique(f"{pre}-{_slug(org or role) if section == 'experience' else _slug(org or role)}", used)
                 entry = Entry(eid, section, body, role.strip(), org.strip() if org else None,
-                              loc.strip() if loc else None, dates, start, end)
+                              loc.strip() if loc else None, dates, start, end, status=status)
             elif section == "project":
                 name, _, tech = head.partition("|")
                 link = None
@@ -264,14 +316,15 @@ def parse_master(text: str, source_name: str = "master_resume.md") -> tuple[dict
                     link, name = lm.group(1), name.replace(lm.group(0), "")
                 eid = _unique(f"proj-{_slug(name, 4)}", used)
                 entry = Entry(eid, "project", head, name.strip(), None, None, None, None, None,
-                              [t.strip() for t in tech.split(",") if t.strip()], link)
+                              [t.strip() for t in tech.split(",") if t.strip()], link, status=status,
+                              client_of=client)
             else:
                 entry = None
                 continue
             entries[entry.id] = entry
             terms = terms_in(head) + _degree_terms(entry.role if section == "education" else "")
             items[f"{entry.id}-h"] = Item(f"{entry.id}-h", section, head, entry.id, entry.organization, entry.role,
-                                          entry.dates, list(dict.fromkeys(terms)))
+                                          entry.dates, list(dict.fromkeys(terms)), status=status, line=n)
             used.add(f"{entry.id}-h")
             continue
         content = re.sub(r"^\s*[-*+]\s+", "", line).strip()
@@ -279,25 +332,36 @@ def parse_master(text: str, source_name: str = "master_resume.md") -> tuple[dict
             if entry is None:
                 errors.append(f"{source_name}:{n}: bullet '{content[:50]}' is not under a '###' heading")
                 continue
-            add_item(section, content, entry)
+            # an entry that isn't confirmed keeps all its lines out, whatever their own tags
+            st = (tag or entry.status) if entry.status == "confirmed" else (entry.status if not tag or tag == "confirmed"
+                                                                           else tag)
+            add_item(section, content, entry, st, n)
         elif section == "coursework":
+            if m := re.match(r"^\[([^\]]+)\]\s*:?\s*(.*)$", content):      # "- [confirmed] DBMS, Algorithms"
+                tag, content = split_tags(f"x [{m.group(1)}]")[1], m.group(2)
             for c in [c.strip() for c in re.split(r",|;", content) if c.strip()]:
+                c, ctag, _ = split_tags(c)
                 iid = _unique(f"course-{_slug(c, 3)}", used)
-                items[iid] = Item(iid, "coursework", c, technologies=terms_in(c))
+                items[iid] = Item(iid, "coursework", c, technologies=terms_in(c), status=ctag or tag or sec_status,
+                                  line=n)
         elif section == "skill":
             cat, _, rest = content.partition(":")
+            cat, ctag, _ = split_tags(cat)                     # "- Languages [confirmed]: Java, Python"
+            tag = ctag or tag
             if not rest:
                 errors.append(f"{source_name}:{n}: skills line must be 'Category: a, b, c' (got '{content[:50]}')")
                 continue
             ids = []
-            for s in [s.strip() for s in rest.split(",") if s.strip()]:
-                iid = _unique(f"skill-{_slug(s, 3)}", used)
-                terms = terms_in(s) or [s]
-                items[iid] = Item(iid, "skill", s, technologies=[canonical(t) for t in terms], category=cat.strip())
+            for sk in [x.strip() for x in rest.split(",") if x.strip()]:
+                sk, stag, _ = split_tags(sk)
+                iid = _unique(f"skill-{_slug(sk, 3)}", used)
+                terms = terms_in(sk) or [sk]
+                items[iid] = Item(iid, "skill", sk, technologies=[canonical(t) for t in terms], category=cat.strip(),
+                                  status=stag or tag or sec_status, line=n)
                 ids.append(iid)
             cats.append((cat.strip(), ids))
         elif section == "summary":
-            add_item("summary", content, None)
+            add_item("summary", content, None, tag or sec_status, n)
     # duplicates with different dates are contradictory
     seen: dict[tuple, Entry] = {}
     for e in entries.values():
@@ -310,40 +374,150 @@ def parse_master(text: str, source_name: str = "master_resume.md") -> tuple[dict
         errors.append(f"{source_name}: no '## Experience' entries found")
     if not cats:
         errors.append(f"{source_name}: no '## Skills' lines found")
-    if errors:
+    if errors and strict:
         raise InputError("master resume problems:\n  - " + "\n  - ".join(errors))
     return entries, items, cats, warnings
 
 
+def confirmed_only(entries: dict[str, Entry], items: dict[str, Item], cats: list[tuple[str, list[str]]],
+                   source_name: str = "master_resume.md") -> tuple[dict, dict, list, list[dict]]:
+    """Keep confirmed entries and items (rule 1); the rest is listed in `excluded`."""
+    excluded = [{"id": i.id, "line": i.line, "text": i.text, "status": i.status or "untagged", "source": source_name,
+                 "section": i.section} for i in items.values() if i.status != "confirmed"]
+    keep_e = {k: e for k, e in entries.items() if e.status == "confirmed"}
+    keep_i = {k: i for k, i in items.items() if i.status == "confirmed" and (i.entry_id is None or i.entry_id in keep_e)}
+    excluded += [{"id": i.id, "line": i.line, "text": i.text, "status": "entry not confirmed", "source": source_name,
+                  "section": i.section} for i in items.values()
+                 if i.status == "confirmed" and i.entry_id and i.entry_id not in keep_e]
+    keep_c = [(c, [i for i in ids if i in keep_i]) for c, ids in cats]
+    return keep_e, keep_i, [(c, ids) for c, ids in keep_c if ids], excluded
+
+
+# test / DEMO markers (rule 1: never use demo content): the uppercase DEMO label this project's test data carries, and
+# obvious placeholders; an ordinary "built a demo for the client" is not one
+DEMO_RE = re.compile(r"(?<![A-Za-z])DEMO(?![A-Za-z])|\b(?:lorem ipsum|test entry|placeholder|dummy data)\b")
+
+
 def parse_additions(text: str, entries: dict[str, Entry], items: dict[str, Item]) -> tuple[list[Item], list[str]]:
-    """Confirmed answers only. An answer for an unknown entry is an error (it can't be attributed)."""
+    """Confirmed answers only (both formats, see the module doc). An answer for an unknown entry is an error (it can't
+    be attributed); answers whose status isn't confirmed, or that look like test / DEMO text, are left out."""
     out: list[Item] = []
     warnings: list[str] = []
-    head = None
     counters: dict[str, int] = {}
+    blocks: list[dict] = []
+    cur: dict | None = None
     for n, raw in enumerate(text.splitlines(), 1):
         line = raw.strip()
+        if raw.startswith("    "):
+            continue                          # indented: the format example in the file's header
         if line.startswith("## "):
-            m = ADD_HEAD_RE.match(line)
-            head = (m.group(1), m.group(2)) if m else None
-            if not m:
-                warnings.append(f"evidence_additions.md:{n}: '{line[:60]}' is not '## <entry id> — YYYY-MM-DD — "
-                                "confirmed'; its answers are ignored")
-            elif m.group(1) not in entries and m.group(1) not in ("skills", "coursework"):
-                raise InputError(f"evidence_additions.md:{n}: unknown entry id '{m.group(1)}' (known: "
+            m, m2 = ADD_HEAD_RE.match(line), ADD_HEAD2_RE.match(line)
+            if m:
+                cur = {"entry": m.group(1), "day": m.group(2), "status": "confirmed", "line": n, "old": True}
+            elif m2:
+                cur = {"entry": m2.group(2), "day": m2.group(1), "status": None, "line": n}
+            else:
+                cur = None
+                warnings.append(f"evidence_additions.md:{n}: '{line[:60]}' is not '## YYYY-MM-DD — <entry id>'; "
+                                "its answers are ignored")
+                continue
+            if cur["entry"] not in entries and cur["entry"] not in ("skills", "coursework"):
+                raise InputError(f"evidence_additions.md:{n}: unknown entry id '{cur['entry']}' (known: "
                                  f"{', '.join(sorted(entries))})")
+            blocks.append(cur)
             continue
-        if head and (m := re.match(r"^[-*]\s+A:\s*(.+)$", line)):
-            eid, day = head
-            e = entries.get(eid)
-            counters[eid] = counters.get(eid, 0) + 1
-            iid = f"add-{eid}-{counters[eid]}"
-            a, o, mt = _facts(m.group(1))
-            sec = e.section if e else ("skill" if eid == "skills" else "coursework")
-            out.append(Item(iid, sec, m.group(1).strip(), e.id if e else None, e.organization if e else None,
-                            e.role if e else None, e.dates if e else None, terms_in(m.group(1)), a, o, mt,
-                            source="additions", added=day))
+        if not cur or not (m := re.match(r"^[-*]\s+([A-Za-z/ ]+?):\s*(.*)$", line)):
+            continue
+        k, v = m.group(1).strip().casefold(), m.group(2).strip()
+        key = {"q": "question", "question": "question", "a": "answer", "answer": "answer", "status": "status",
+               "role/project": "where", "role": "where", "project": "where", "level": "level"}.get(k)
+        if key == "answer" and cur.get("old"):
+            blocks.append(dict(cur, answer=v, line=n))   # old form: several A: lines per block
+            cur["consumed"] = True
+        elif key:
+            cur[key] = v.casefold() if key in ("status", "level") else v
+    for blk in blocks:
+        if blk.get("old") and "answer" not in blk:
+            continue                      # an old-format heading; its answers are separate blocks above
+        ans = (blk.get("answer") or "").strip()
+        if not ans:
+            continue
+        if blk.get("status") != "confirmed":
+            warnings.append(f"evidence_additions.md:{blk['line']}: status '{blk.get('status') or 'missing'}', not "
+                            "confirmed: not used")
+            continue
+        if DEMO_RE.search(ans) or DEMO_RE.search(blk.get("question") or ""):
+            warnings.append(f"evidence_additions.md:{blk['line']}: looks like a test / DEMO entry: not used")
+            continue
+        eid, day = blk["entry"], blk["day"]
+        e = entries.get(eid)
+        counters[eid] = counters.get(eid, 0) + 1
+        iid = f"add-{eid}-{counters[eid]}"
+        a, o, mt = _facts(ans)
+        sec = e.section if e else ("skill" if eid == "skills" else "coursework")
+        out.append(Item(iid, sec, ans, e.id if e else None, e.organization if e else None,
+                        e.role if e else None, e.dates if e else None, terms_in(ans), a, o, mt,
+                        source="additions", added=day, level=blk.get("level"), where=blk.get("where"), line=blk["line"]))
     return out, warnings
+
+
+def where_entries(where: str | None, entries: dict[str, Entry]) -> list[str]:
+    """Entry ids named by a "Where" / "client work" value ("Accenture, CS6650", "Freelance")."""
+    from .tools import GENERIC_WHERE
+    if not where or where.strip().casefold() in GENERIC_WHERE:
+        return []
+    out = []
+    for tok in [t.strip().casefold() for t in re.split(r"[,;/]| and ", where) if t.strip()]:
+        for e in entries.values():
+            hay = " ".join(x for x in (e.heading, e.role, e.organization) if x).casefold()
+            if len(tok) >= 3 and re.search(rf"(?<![a-z0-9]){re.escape(tok)}(?![a-z0-9])", hay) and e.id not in out:
+                out.append(e.id)
+    return out
+
+
+def metric_flags(items: dict[str, Item]) -> list[dict]:
+    """Rule 3: the same percentage / multiplier claimed by two different bullets looks inconsistent. Flagged for you
+    to check, never changed."""
+    by: dict[str, list[Item]] = {}
+    for i in items.values():
+        if i.section not in ("experience", "project", "summary"):
+            continue
+        for m in set(i.metrics):
+            if m.endswith(("%", "x")):
+                by.setdefault(m, []).append(i)
+    out = []
+    for m, its in sorted(by.items()):
+        if len(its) > 1:
+            out.append({"metric": m, "items": [i.id for i in its],
+                        "detail": f"{m} is claimed by {len(its)} bullets: " + " | ".join(
+                            f"{i.id}: {i.text[:70]}" for i in its) + " — check it isn't the same result counted twice "
+                        "or two different measures (rule 3); it is never changed automatically"})
+    return out
+
+
+def tool_items(path: Path, entries: dict[str, Entry]) -> tuple[list[Item], dict[str, dict], list[str]]:
+    from . import tools as T
+    if not path.exists():
+        return [], {}, []
+    tl, warnings = T.parse(path.read_text(encoding="utf-8"))
+    index = {t.name.casefold(): {"name": t.name, "ticked": t.ticked or index_ticked(tl, t), "family": t.family}
+             for t in tl}
+    out, seen = [], set()
+    for t in T.ticked(tl):
+        terms = list(dict.fromkeys([*terms_in(t.name), *[canonical(x) for x in t.names]]))
+        key = tuple(sorted(terms)) or (t.name.casefold(),)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(Item(_unique(f"tool-{_slug(t.name, 3)}", {i.id for i in out}), "tool", t.name,
+                        technologies=terms, category=t.family, source="tools", status="confirmed",
+                        where=t.where or None, where_entries=where_entries(t.where, entries),
+                        level=t.level or None, line=t.line))
+    return out, index, warnings
+
+
+def index_ticked(tl, t) -> bool:
+    return any(x.ticked and x.name.casefold() == t.name.casefold() for x in tl)
 
 
 def check_template_drift(template_text: str, items: dict[str, Item]) -> list[str]:
@@ -363,13 +537,34 @@ def check_template_drift(template_text: str, items: dict[str, Item]) -> list[str
     return out
 
 
-def build_bank(master: Path | None = None, additions: Path | None = None, template: Path | None = None) -> Bank:
+def build_bank(master: Path | None = None, additions: Path | None = None, template: Path | None = None,
+               checklist: Path | None = None) -> Bank:
     master = master or rc.MASTER_RESUME
     additions = additions if additions is not None else rc.ADDITIONS
+    checklist = checklist if checklist is not None else rc.TOOL_CHECKLIST
     if not master.exists():
         raise InputError(f"{master} is missing. It is the only source of facts about you.")
     text = master.read_text(encoding="utf-8")
-    entries, items, cats, warnings = parse_master(text, master.name)
+    all_entries, all_items, all_cats, warnings = parse_master(text, master.name)
+    entries, items, cats, excluded = confirmed_only(all_entries, all_items, all_cats, master.name)
+    problems = []
+    if not any(e.section == "experience" for e in entries.values()):
+        problems.append("no confirmed Experience entries")
+    if not cats:
+        problems.append("no confirmed Skills")
+    if problems:
+        raise InputError(f"{master.name}: {' and '.join(problems)} — only items tagged [confirmed] are used (rule 1). "
+                         "Tag them (e.g. '## Experience [confirmed]'); `python -m resume_builder tags` lists what needs "
+                         "a tag.")
+    for e in entries.values():
+        if e.client_of:
+            hit = where_entries(e.client_of, {k: x for k, x in entries.items() if x.section == "experience"})
+            if hit:
+                e.client_of = hit[0]
+            else:
+                warnings.append(f"{master.name}: project '{e.role}' is tagged client work for '{e.client_of}', which "
+                                "matches no confirmed role; it stays under Projects")
+                e.client_of = None
     hashes = {"master_resume": sha256_file(master)}
     if additions.exists():
         adds, w = parse_additions(additions.read_text(encoding="utf-8"), entries, items)
@@ -379,24 +574,59 @@ def build_bank(master: Path | None = None, additions: Path | None = None, templa
         hashes["evidence_additions"] = sha256_file(additions)
     else:
         hashes["evidence_additions"] = "none"
+    tools_, index, w = tool_items(checklist, entries)
+    warnings += w
+    master_terms = {t for i in items.values() if i.source == "master" for t in i.technologies}
+    master_text = " ".join(i.text for i in items.values() if i.source == "master")
+
+    def named(tool_name: str) -> bool:
+        return canonical(tool_name) in master_terms or bool(re.search(
+            rf"(?<![\w.]){re.escape(tool_name)}(?![\w])", master_text, re.I))
+    conflicts = []
+    for name, t in index.items():
+        if not t["ticked"] and named(t["name"]) and not any(
+                x["ticked"] and canonical(x["name"]) == canonical(t["name"]) for x in index.values()):
+            if t["name"] in conflicts:
+                continue
+            conflicts.append(t["name"])
+            warnings.append(f"conflict: {master.name} names {t['name']}, but tool_checklist.md leaves it unticked — "
+                            "tick it (with where / level) or remove it from the master resume; the builder won't "
+                            "list it in Technical Skills meanwhile, and flags bullets that name it")
+    for it in tools_:
+        items[it.id] = it
+    hashes["tool_checklist"] = sha256_file(checklist) if checklist.exists() else "none"
+    hashes["code"] = code_hash()
     template = template or rc.TEMPLATE
     if template.exists():
         drift = check_template_drift(template.read_text(encoding="utf-8"), items)
         if drift:
             warnings.append(f"{len(drift)} bullet(s) in resume_template.tex are not in master_resume.md and are "
                             "never used: " + " | ".join(d[:70] for d in drift))
-    return Bank(items, entries, cats, hashes, warnings)
+    return Bank(items, entries, cats, hashes, warnings, excluded=excluded, metric_flags=metric_flags(items),
+                tool_index=index, conflicts=conflicts)
+
+
+def code_hash() -> str:
+    """The parsing code itself: a builder update rebuilds the cached bank even when your inputs didn't change."""
+    here = Path(__file__).parent
+    return sha256_file(here / "evidence.py")[:16] + sha256_file(here / "tools.py")[:16]
+
+
+def input_hashes(master: Path, additions: Path, checklist: Path) -> dict:
+    return {"master_resume": sha256_file(master) if master.exists() else None, "code": code_hash(),
+            "evidence_additions": sha256_file(additions) if additions.exists() else "none",
+            "tool_checklist": sha256_file(checklist) if checklist.exists() else "none"}
 
 
 def load_bank(cache_dir: Path | None = None, master: Path | None = None, additions: Path | None = None,
-              template: Path | None = None) -> Bank:
-    """The cached bank, rebuilt when master_resume.md or evidence_additions.md changes (by hash)."""
+              template: Path | None = None, checklist: Path | None = None) -> Bank:
+    """The cached bank, rebuilt when master_resume.md, evidence_additions.md or tool_checklist.md changes (by hash)."""
     master = master or rc.MASTER_RESUME
     additions = additions if additions is not None else rc.ADDITIONS
+    checklist = checklist if checklist is not None else rc.TOOL_CHECKLIST
     cache_dir = cache_dir or rc.resumes_dir() / "_cache"
     cache = cache_dir / "evidence_bank.json"
-    want = {"master_resume": sha256_file(master) if master.exists() else None,
-            "evidence_additions": sha256_file(additions) if additions.exists() else "none"}
+    want = input_hashes(master, additions, checklist)
     if cache.exists():
         try:
             d = json.loads(cache.read_text(encoding="utf-8"))
@@ -404,12 +634,37 @@ def load_bank(cache_dir: Path | None = None, master: Path | None = None, additio
                 return Bank.from_json(d)
         except (ValueError, KeyError, TypeError):
             pass
-    bank = build_bank(master, additions, template)
+    bank = build_bank(master, additions, template, checklist)
     cache_dir.mkdir(parents=True, exist_ok=True)
     tmp = cache.with_suffix(".tmp")
     tmp.write_text(json.dumps(bank.to_json(), indent=1, ensure_ascii=False), encoding="utf-8")
     tmp.replace(cache)
     return bank
+
+
+def status_report(master: Path | None = None, additions: Path | None = None) -> dict:
+    """Rule 1 status of every item: what is confirmed, what needs a tag (untagged), needs confirmation, or demo."""
+    master = master or rc.MASTER_RESUME
+    additions = additions if additions is not None else rc.ADDITIONS
+    entries, items, _cats, _w = parse_master(master.read_text(encoding="utf-8"), master.name, strict=False)
+    rows = []
+    for i in items.values():
+        e = entries.get(i.entry_id) if i.entry_id else None
+        st = i.status or "untagged"
+        if e and e.status != "confirmed" and i.id.endswith("-h") is False and st == "confirmed":
+            st = f"confirmed (but its entry is {e.status or 'untagged'})"
+        rows.append({"id": i.id, "line": i.line, "section": i.section, "status": st,
+                     "text": i.text if not i.id.endswith("-h") else f"### {i.text}"})
+    counts: dict[str, int] = {}
+    for r in rows:
+        counts[r["status"].split(" (")[0]] = counts.get(r["status"].split(" (")[0], 0) + 1
+    add_warn = []
+    if additions.exists():
+        try:
+            _a, add_warn = parse_additions(additions.read_text(encoding="utf-8"), entries, items)
+        except InputError as ex:
+            add_warn = [str(ex)]
+    return {"rows": sorted(rows, key=lambda r: r["line"] or 0), "counts": counts, "additions_warnings": add_warn}
 
 
 def month_label(ym: str | None) -> str:

@@ -72,6 +72,7 @@ def rb_env(tmp_path, monkeypatch):
     monkeypatch.setattr(rc, "TEMPLATE", inputs / "resume_template.tex")
     monkeypatch.setattr(rc, "RULES", inputs / "resume_rules.md")
     monkeypatch.setattr(rc, "ADDITIONS", inputs / "evidence_additions.md")
+    monkeypatch.setattr(rc, "TOOL_CHECKLIST", inputs / "tool_checklist.md")   # absent unless a test writes one
     monkeypatch.setattr(rc, "CONFIG_FILE", cfgdir / "resume_builder.yaml")
     monkeypatch.setattr(rc, "ROOT", tmp_path)
     monkeypatch.setattr(hs_paths, "DATA", data)

@@ -1,6 +1,16 @@
 """Evidence interview: short questions when a strong JD match lacks detail (scope, scale, outcome) or a requirement
 may be covered by experience your inputs don't describe. Only answers you explicitly confirm are saved, dated, to
-inputs/resume/evidence_additions.md (gitignored). master_resume.md is never edited.
+inputs/resume/evidence_additions.md (gitignored), one block per answer:
+
+    ## YYYY-MM-DD — <entry id>
+    - Question: …
+    - Answer: …
+    - Status: confirmed
+    - Role/project: <the role or project>
+    - Level: production | project | coursework | tutorial        (only when it is about a tool)
+
+A confirmed answer about a tool is written to inputs/resume/tool_checklist.md instead (ticked, with where and level),
+never duplicated here. master_resume.md is never edited.
 """
 from __future__ import annotations
 
@@ -14,8 +24,16 @@ from .evidence import Bank
 
 MAX_QUESTIONS = 5
 HEADER = ("# Evidence additions\n\n"
-          "Confirmed details added through the Resume Builder's evidence interview. Only sections marked\n"
-          "`confirmed` are used. Edit or delete freely; the evidence bank is rebuilt when this file changes.\n")
+          "Confirmed details added through the Resume Builder's evidence interview (rule 61). Only blocks with\n"
+          "`Status: confirmed` are used. Tool answers go to tool_checklist.md instead. Edit or delete freely; the\n"
+          "evidence bank is rebuilt when this file changes.\n\n"
+          "Format, one block per answer:\n\n"
+          "    ## YYYY-MM-DD — <entry id, e.g. exp-accenture>\n"
+          "    - Question: …\n"
+          "    - Answer: …\n"
+          "    - Status: confirmed\n"
+          "    - Role/project: …\n"
+          "    - Level: production | project | coursework | tutorial   (tools only)\n")
 
 
 def questions(analysis: dict, content, bank: Bank) -> list[dict]:
@@ -54,21 +72,49 @@ def _clean(s: str, n: int) -> str:
     return s.lstrip("#").strip()[:n]
 
 
+def is_tool(keyword: str, bank: Bank) -> bool:
+    """A tool / platform / database (goes to tool_checklist.md), not an experience fact."""
+    from .evidence import canonical, vocab
+    c = canonical(keyword)
+    if keyword.strip().casefold() in bank.tool_index or any(canonical(t["name"]) == c for t in bank.tool_index.values()):
+        return True
+    return vocab().category.get(c) in ("tools", "cloud_services", "databases")
+
+
 def save_answer(entry_id: str, question: str, answer: str, confirmed: bool, bank: Bank,
-                path: Path | None = None, day: str | None = None) -> Path:
-    """Append one confirmed answer. Refuses without explicit confirmation, for unknown entries, or empty answers."""
+                path: Path | None = None, day: str | None = None, keyword: str | None = None,
+                level: str | None = None, tool_path: Path | None = None) -> Path:
+    """Save one confirmed answer. A tool answer (keyword is a tool) ticks it in tool_checklist.md with where and
+    level; anything else is appended to evidence_additions.md. Refuses without explicit confirmation, for unknown
+    entries, or empty answers."""
+    from . import keywords, tools
     if not confirmed:
         raise InputError("not saved: an answer is only added after you explicitly confirm it (--confirm)")
     if entry_id not in bank.entries and entry_id not in ("skills", "coursework"):
-        raise InputError(f"unknown entry '{entry_id}' (known: {', '.join(sorted(bank.entries))})")
+        raise InputError(f"unknown entry '{entry_id}' (known: {', '.join(sorted(bank.entries))}, skills, coursework)")
     a = _clean(answer, 500)
     if len(a) < 5:
         raise InputError("the answer is empty")
+    lv = (level or "").strip().casefold() or None
+    if lv and lv not in tools.LEVELS:
+        raise InputError(f"level must be one of {', '.join(tools.LEVELS)}")
+    e = bank.entries.get(entry_id)
+    where = (e.organization or e.role) if e else "Multiple roles"
+    if keyword and is_tool(keyword, bank):
+        if not lv:
+            raise InputError(f"{keyword} is a tool: say the level (--level production|project|coursework|tutorial)")
+        tp = tool_path or rc.TOOL_CHECKLIST
+        tools.confirm(tp, _clean(keyword, 60), where, lv)
+        keywords.record_answer(keyword, "saved")
+        return tp
     path = path or rc.ADDITIONS
     day = day or date.today().isoformat()
     text = path.read_text(encoding="utf-8") if path.exists() else HEADER
-    block = f"\n## {entry_id} — {day} — confirmed\n- Q: {_clean(question, 300)}\n- A: {a}\n"
+    block = (f"\n## {day} — {entry_id}\n- Question: {_clean(question, 300)}\n- Answer: {a}\n- Status: confirmed\n"
+             f"- Role/project: {_clean(e.heading if e else entry_id, 200)}\n" + (f"- Level: {lv}\n" if lv else ""))
     tmp = path.with_suffix(".tmp")
     tmp.write_text(text.rstrip("\n") + "\n" + block, encoding="utf-8")
     tmp.replace(path)
+    if keyword:
+        keywords.record_answer(keyword, "saved")
     return path

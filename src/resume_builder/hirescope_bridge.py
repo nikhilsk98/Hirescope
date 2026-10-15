@@ -154,11 +154,22 @@ def dashboard_payload(conn) -> dict:
     return out
 
 
+def _learn_it() -> list[dict]:
+    """Recurring missing JD keywords from resume builds (rule 61), for the dashboard's Skill Gaps view."""
+    from . import keywords
+    try:
+        from .evidence import load_bank
+        bank = load_bank()
+    except Exception:  # noqa: BLE001 — inputs not ready (e.g. nothing tagged yet): list without the evidence filter
+        bank = None
+    return keywords.learn_it(bank)[:30]
+
+
 def write_dashboard_data(conn=None, path: Path | None = None) -> Path:
     own = conn is None
     conn = conn or _conn()
     try:
-        payload = {"generated_at": db.utcnow(), "jobs": dashboard_payload(conn)}
+        payload = {"generated_at": db.utcnow(), "jobs": dashboard_payload(conn), "learn_it": _learn_it()}
     finally:
         if own:
             conn.close()

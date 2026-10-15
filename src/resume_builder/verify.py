@@ -92,8 +92,9 @@ def technology_problems(text: str, evidence_text: str, evidence_terms: set[str])
     for t in terms_in(text):
         if t in ev_terms or t.lower() in v.stop:
             continue
-        if any(c in ev_terms for c in v.implies.get(t, ())):
-            continue          # umbrella term backed by a concrete one (CI/CD ← Jenkins)
+        from .jd_analysis import _CATEGORY_TERMS
+        if any(c in ev_terms for c in (*v.implies.get(t, ()), *_CATEGORY_TERMS.get(t, ()))):
+            continue          # general term backed by a confirmed specific one (CI/CD ← Jenkins; rule 63)
         if v.category.get(t) in ("methodologies", "practices", "domain", "soft_skills") and _soft_ok(t, evidence_text):
             continue
         out.append(t)
