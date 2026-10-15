@@ -439,7 +439,7 @@ checks, reports, versions, HireScope statuses). It never submits applications an
 3. `~/.venvs/hirescope/bin/pip install -r requirements.txt` (adds `pdfplumber`).
 4. Inputs (all gitignored): `inputs/resume/master_resume.md` (the only source of facts; its `# First Last` heading names the
    PDF), `inputs/resume/resume_template.tex` (your template, never modified: the build copies it and replaces its body with
-   `\input{content.tex}`), `inputs/resume/resume_rules.md` (your writing rules, v4.1: 78 rules + a layout specification; the builder reads its
+   `\input{content.tex}`), `inputs/resume/resume_rules.md` (your writing rules, v4.3: 84 rules + a layout specification; the builder reads its
    numbers — bullet totals, per-role allocations, project counts — directly), `inputs/resume/tool_checklist.md` (tick-box
    tool families with where and level; with a v4 master, a ticked tool counts only as far as the master has evidence —
    otherwise it is self-reported — and the master's Excluded list always wins). `inputs/resume/evidence_additions.md` holds confirmed
@@ -490,7 +490,7 @@ checks, reports, versions, HireScope statuses). It never submits applications an
   not an ATS score"; missing resume keywords kept apart from missing qualifications), `changes.md` (selection, before →
   after per bullet, what was left out, remaining gaps), `defense.md` (2–3 interview talking points per bullet),
   `review.md`, `validation.md`, `extracted_text.txt`.
-- **Rules v4.1 enforced by the build** (with a v4 master; content outside them is refused, naming the rule): start from
+- **Rules v4.3 enforced by the build** (with a v4 master; content outside them is refused, naming the rule): start from
   the master's Default one-page snapshot — with no job description it is reproduced unchanged (`python -m
   resume_builder default`, checked line by line against your template compiled as written) — and swap bullets only as
   the master's Builder notes allow; the notes override the general rules for style and selection (bullets per role:
@@ -507,8 +507,16 @@ checks, reports, versions, HireScope statuses). It never submits applications an
   results, no planned tech in Skills (50); no student phrasing (78); the master's overlap pairs (A3/C2, B3/Material UI)
   at most one each. Skills (53): core always; extended when the JD mentions them; self-reported only when the JD asks,
   at most 4, never in a bullet; planned never; the master's Excluded list beats the tool checklist; a ticked checklist
-  tool with no evidence in the master counts as self-reported. Overflow: rule 67's order, spacing last (`\entrygap`
-  3 → 2 pt, then leading 12.0 → 11.8 pt), never below 10 pt or 0.5 in.
+  tool with no evidence in the master counts as self-reported. Overflow: rule 67's order — duplicates and weak bullets,
+  then JD-irrelevant skills (not named by the JD, not in a bullet, only where a row loses a line), then coursework, then
+  bullets and projects — spacing last (`\entrygap` 3 → 2 pt, then leading 12.0 → 11.8 pt), never below 10 pt or 0.5 in.
+  **v4.3 selection quality (79–84)**: relevance counts the JD's responsibilities as well as its technologies (79);
+  the reviewer is told when a JD skill sits only in Skills while an unused bullet on the page shows it (80) and when a
+  JD area (frontend, backend/database, Python/data pipelines, testing, delivery) has no bullet or 3+ bullets show only
+  one area (81); TDD is never claimed or mapped from test-writing evidence, and coverage counts it only where the resume
+  names it (82, refused); every Skills / certification item must cite its own master entry, and `changes.md` lists the
+  skills by tier, self-reported first (83, refused); a bullet that refers back to a client ("the distributor") needs an
+  earlier bullet introducing it, and overflow trimming never removes that introduction (84, refused).
 - **Layout specification as checks** (rules 16–23, 69 and the spec table): T1 + lmodern, 0.5 in margins, 10.5/12 pt
   body, hyphenation off, 12.5 pt headings, math bullets at 1.2 em, hidelinks, 3 pt entry gaps, US Letter, Latin Modern
   fonts only, **no Type 3 fonts**, bullets extract as "•", dates with "–", f-ligatures extract as letters ("fi", not
@@ -596,7 +604,7 @@ it, as "Go (coursework)", and never inside a bullet (rule 75). Blocks whose stat
 | First build slow / offline error | Tectonic downloads TeX packages once; run it online once, later builds are offline |
 | `master resume problems: …` | the message names the line (headings need `### Title — Organization, Location (Mon YYYY – Mon YYYY)`) |
 | `master resume problems` / a parse error | v4 master: the message names the section; check the `### Role` fields, tables and the `## Default one-page resume` headings (`**Org, Location — Title** (dates)`, `**Project** (GitHub) — context`) |
-| `content problems: … rule NN` | the content breaks that rule of resume_rules.md v4.1 (order, bullet / project counts, a tool or project in the wrong place); the message says how |
+| `content problems: … rule NN` | the content breaks that rule of resume_rules.md v4.3 (order, bullet / project counts, a tool or project in the wrong place); the message says how |
 | `conflict: master_resume.md names X, but tool_checklist.md leaves it unticked` | tick X in the checklist (with where / level) or take it out of the master resume |
 | `content does not match the schema` | the drafter's JSON is invalid; the message lists each field |
 | FAILED: `truth: …` | a claim isn't backed by the evidence it cites: fix the bullet, or add the fact via the evidence interview |

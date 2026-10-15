@@ -21,7 +21,7 @@ hirescope/
 │   ├── resume/      master_resume.md (v4 format: Default one-page snapshot, bullet banks, metrics with statuses,
 │   │                Skills inventory tiers, Builder notes), evidence_additions.md (confirmed interview answers),
 │   │                tool_checklist.md (ticks count only as far as the master has evidence), resume_template.tex,
-│   │                resume_rules.md (v4.1; its numbers and layout spec drive the builder), archive/ (old versions)
+│   │                resume_rules.md (v4.3; its numbers and layout spec drive the builder), archive/ (old versions)
 │   ├── companies/   my_companies.csv (+ .example), coop_leads.txt
 │   ├── linkedin/    Connections.csv (LinkedIn data export, optional)
 │   ├── statuses/    dashboard exports (scheduled runs can always read this folder)
@@ -54,7 +54,7 @@ hirescope/
 ```
 
 - Resume Builder code for the v4 master: `master_v4.py` (parser), `v4build.py` (snapshot baseline, template-macro
-  rendering, layout checks), `rules_v4.py` (rules v4.1 checks). HireScope's matcher reads the same v4 master through
+  rendering, layout checks), `rules_v4.py` (rules v4.3 checks). HireScope's matcher reads the same v4 master through
   `jobsearch/extract/resume.py` (usable bullets and inventory skills only).
 - Resume Builder inputs can come from a copy: `JOBSEARCH_RESUME_INPUTS_DIR=/copy-of-inputs-resume` (with
   `JOBSEARCH_DATA_DIR` / `JOBSEARCH_DASHBOARD_DIR` for a full test run that touches nothing real).

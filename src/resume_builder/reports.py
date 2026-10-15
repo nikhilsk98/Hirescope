@@ -63,6 +63,10 @@ def coverage(c, bank, analysis: dict) -> dict:
         present = k["canonical"] in on_resume or any(
             _re.search(rf"(?<![\w]){_re.escape(f.lower())}(?![\w])", low) for f in forms)
         concrete = [x for x in v.implies.get(k["canonical"], ()) if x in on_resume]
+        if _re.search(r"test[- ]driven|\bTDD\b", k["canonical"] + " " + k["term"], _re.I):
+            # rule 82: TDD counts only where the resume names it; test-writing bullets never imply it
+            present = bool(_re.search(r"test[- ]driven|\bTDD\b", text, _re.I))
+            concrete = []
         rows.append({"term": k["term"], "canonical": k["canonical"], "section": k["section"],
                      "weight": k["weight"], "supported": k["supported"], "represented": present or bool(concrete),
                      "via": concrete[:3]})
@@ -112,6 +116,18 @@ def changes_md(c, bank, analysis: dict, repairs: list[str], cov: dict) -> str:
     L += [f"- {s}" for s in c.notes.selection] or ["- (no notes)"]
     L.append(f"- Section order: {', '.join(c.section_order)}")
     L += ["- Projects: " + (", ".join(bank.entries[p.entry_id].role or p.entry_id for p in c.projects) or "none")]
+    from .rules_v4 import tier_of
+    tiers: dict[str, list[str]] = {}
+    if bank.v4:
+        L += ["", "## Skills by tier (rule 83: every item traces to the master; the JD only selects)"]
+    for row in (c.skills if bank.v4 else []):
+        for s in row.items:
+            t = "certification" if row.category.casefold() == "certifications" else (tier_of(bank, s.name) or "?")
+            tiers.setdefault(t, []).append(s.name)
+    for t in ("self-reported", "coursework", "extended", "core", "certification", "?"):
+        if tiers.get(t):
+            L.append(f"- {t}: {', '.join(tiers[t])}" + (" (no evidence in the master; Skills only, at most 4)"
+                                                       if t == "self-reported" else ""))
     L += ["", "## Bullets (before → after)"]
     for _sec, eid, b in c.all_bullets():
         before = " / ".join(bank.items[i].text for i in b.evidence_ids if i in bank.items)

@@ -725,3 +725,19 @@ the job → filters cleared. No console errors. Tests: 561 passed.
   same source also failed on its previous check. Full runs unchanged. Tests: 564 passed.
 - Later the same day: full runs follow the same one-off rule (a single non-JSON failure is a warning; a repeat, or any
   other failure, still exits 1).
+
+## Resume rules v4.3: selection quality (2026-10-15)
+resume_rules.md v4.3 adds rules 79–84 and extends rule 67; the builder enforces them:
+- 79: `v4build.relevance` adds a responsibilities score (shared content words with the JD's responsibility lines, 0.5
+  each, max 1.5) to the technology score; swap candidates in the brief are ranked by it and tagged with their areas.
+- 80, 81: reviewer findings (`rules_v4.show_dont_list`, `area_findings`): a JD skill only in Skills while an unused
+  bullet on the page shows it; a JD area with no bullet, or 3+ bullets showing only one area. The brief lists the areas.
+- 82: a bullet or a "direct" requirement claiming TDD without evidence that states it is refused; coverage counts TDD
+  only where the resume names it; a JD's "test-driven software development" counts as asking for TDD (self-reported).
+- 83: every Skills / certification item must cite its own master entry (refused otherwise); `changes.md` lists skills
+  by tier, self-reported first.
+- 84: a bullet referring back to a client ("the wholesaler") needs an earlier bullet introducing it (refused), and
+  overflow trimming never removes the introducing bullet.
+- 67: overflow drops JD-irrelevant skills (not named or covered by the JD, not in a bullet, certifications never) where
+  a row loses a line, before coursework or a project (`pipeline.trim_skills`).
+LineVision (job 124710) regenerated under v4.3: READY v3, one page. Tests: 569 passed.

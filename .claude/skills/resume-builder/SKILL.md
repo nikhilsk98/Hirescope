@@ -77,8 +77,13 @@ scripts do everything deterministic. Run every command from the repo root with `
      evidence supports it; every number exactly as written; no ownership or scale the evidence doesn't state;
    - each bullet cites the evidence ids it uses (same role/project only); `priority` 1 = keep … 5 = cut first;
    - fill the page: keep about as many bullets as `baseline.json` has (it is sized for one page) and drop only what
-     is irrelevant; the build warns above 30% empty space and, if you overshoot, trims in rule 53's order (duplicates
-     and weak bullets → optional coursework and extras → fewer bullets / projects → spacing; never below 10 pt).
+     is irrelevant; the build warns above 30% empty space and, if you overshoot, trims in rule 67's order (duplicates
+     and weak bullets → JD-irrelevant skills → optional coursework and extras → fewer bullets / projects → spacing;
+     never below 10 pt). Make room by dropping JD-irrelevant skills yourself before cutting coursework or a project.
+   - rules 79–84 (v4.3): rank by the JD's responsibilities as well as its technologies; show a required skill in a
+     bullet rather than only in Skills; distinct evidence across areas (brief → "Selection quality"); never claim or
+     map TDD from test-writing bullets (TDD only as the self-reported skill); every Skills item cites its master
+     entry; introduce a client before a bullet says "the distributor".
      Shortening wording comes before cutting: if a build overflows, tighten bullets and build again;
    - `requirements`: confirm or correct each category (direct / transferable / missing_evidence / gap); note any
      eligibility concern for Nikhil (never put visa status on the resume);

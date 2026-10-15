@@ -229,6 +229,54 @@ def _est_lines(text: str) -> float:
     return max(1.0, len(text) / 125)
 
 
+SKILL_ROW_CHARS = 100          # characters per rendered Technical Skills line (bold label, 10.5 pt LM, 7.5 in; measured)
+
+
+def _row_lines(category: str, names: list[str]) -> int:
+    return -(-len(f"{category}: " + ", ".join(names)) // SKILL_ROW_CHARS)
+
+
+def trim_skills(c: Content, need: float, locked: set[str], bank: Bank | None, analysis: dict | None,
+                actions: list[str], settings: Settings | None = None) -> float:
+    """Rule 67 (v4.3): before coursework or a project goes, drop skills the JD doesn't ask for (not named by it,
+    not covered by a general term it uses, not shown in any bullet), from the end of a wrapped row, and only where
+    that saves a rendered line. Certifications are never trimmed. Returns the lines saved."""
+    if not (bank and bank.v4 and analysis) or "section:skills" in locked:
+        return 0.0
+    from . import rules_v4
+    jd_analysis.set_category_terms(settings)
+    shown = " ".join(b.text for _s, _e, b in c.all_bullets())
+
+    def in_bullets(name: str) -> bool:
+        base = re.sub(r"\s*\(.*\)$", "", name)
+        return bool(re.search(rf"(?<![\w.]){re.escape(base)}(?![\w])", shown, re.I))
+    saved = 0.0
+    for row in c.skills:
+        if saved >= need:
+            break
+        if row.category.casefold() == "certifications":
+            continue
+        before = _row_lines(row.category, [s.name for s in row.items])
+        if before < 2:
+            continue
+        keep, gone = list(row.items), []
+        for s in reversed(row.items):
+            if len(keep) <= 1:
+                break
+            if rules_v4.jd_relevant_skill(analysis, s.name) or in_bullets(s.name):
+                continue
+            keep.remove(s)
+            gone.append(s.name)
+            if _row_lines(row.category, [x.name for x in keep]) < before:
+                break
+        after = _row_lines(row.category, [x.name for x in keep])
+        if gone and after < before:
+            row.items = keep
+            saved += before - after
+            actions.append(f"removed JD-irrelevant skills from {row.category}: {', '.join(reversed(gone))}")
+    return saved
+
+
 @dataclass
 class Repair:
     content: Content
@@ -237,9 +285,12 @@ class Repair:
 
 
 def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, gaps: dict,
-           locked: set[str] | None = None, floors: dict[str, int] | None = None) -> Repair | None:
-    """One repair step for an over-long PDF, in rule 53's order: (attempt 1) remove duplicate and weak content, then
-    optional coursework and extras (summary); (attempt 2) reduce bullets, then projects, then an irrelevant old role;
+           locked: set[str] | None = None, floors: dict[str, int] | None = None, bank: Bank | None = None,
+           analysis: dict | None = None) -> Repair | None:
+    """One repair step for an over-long PDF, in rule 67's order: (attempt 1) remove duplicate and weak content, then
+    JD-irrelevant skills (with a bank and an analysis), then optional coursework and extras (summary); (attempt 2)
+    reduce bullets, then projects, then an irrelevant old role (never a bullet that introduces a client a later
+    bullet refers back to, rule 84);
     (attempt 3) small spacing adjustments within layout.min_entry_gap_pt. Shortening wording is the drafter's step
     (it can't be done safely by a script): when a build overflows, the drafter may tighten bullets and build again.
     Never fonts below 10 pt or margins. None when nothing safe is left to change."""
@@ -253,6 +304,17 @@ def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, g
     pbmin = rc.limit(settings, "bullets_per_project", "min", 2)
     recent = c.experience[0].entry_id if c.experience else None
 
+    def breaks_ref(ent, b) -> bool:                                # rule 84: keep a client's introduction
+        if not (bank and bank.v4):
+            return False
+        from . import rules_v4
+        before = len(rules_v4.backref_problems(c, bank))
+        i = ent.bullets.index(b)
+        ent.bullets.remove(b)
+        after = len(rules_v4.backref_problems(c, bank))
+        ent.bullets.insert(i, b)
+        return after > before
+
     def removable(min_priority: int):
         cands = []
         for ex in c.experience:
@@ -263,7 +325,7 @@ def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, g
         for pr in c.projects:
             if len(pr.bullets) > pbmin:
                 cands += [(b.priority, pr.priority, pr, b) for b in pr.bullets if b.id not in locked]
-        cands = [x for x in cands if x[0] >= min_priority]
+        cands = [x for x in cands if x[0] >= min_priority and not breaks_ref(x[2], x[3])]
         return sorted(cands, key=lambda t: (-t[0], -t[1], _est_lines(t[3].text)))
 
     saved = 0.0
@@ -287,7 +349,9 @@ def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, g
             ent.bullets.remove(b)
             saved += _est_lines(b.text)
             actions.append(f"removed weak bullet (priority {b.priority}): {b.text[:60]}")
-        if saved < need:                                           # 2. optional coursework and extras
+        if saved < need:                                           # 2. JD-irrelevant skills (rule 67, v4.3)
+            saved += trim_skills(c, need - saved, locked, bank, analysis, actions, settings)
+        if saved < need:                                           # 3. optional coursework and extras
             for ed in c.education:
                 if ed.course_ids:
                     ed.course_ids = []
@@ -716,7 +780,7 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
             if rep.pages <= settings.page_count:
                 continue
         floors = {k: (r.get("pick") or [0])[0] for k, r in (bank.v4 or {}).get("roles", {}).items()}
-        fix = repair(c, rep, n, settings, gaps, held, floors)
+        fix = repair(c, rep, n, settings, gaps, held, floors, bank, analysis)
         if not fix:
             log.append("no automatic repair left for: " + "; ".join(x.name for x in rep.errors()))
             break

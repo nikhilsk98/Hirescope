@@ -388,3 +388,128 @@ def test_v4_check_and_tags_wording(v4env, capsys):
     assert main(["tags"]) == 0
     t = capsys.readouterr().out
     assert "v4 format" in t and "No [confirmed] tags are needed" in t and "untagged" not in t
+
+
+# --- resume_rules.md v4.3: selection quality (rules 79–84, 67) ---------------------------------------------------------
+def test_v43_tdd_is_never_implied_by_test_writing(v4env):
+    """Rule 82: a bullet or a 'direct' requirement may claim TDD only from evidence that states it; coverage never
+    counts TDD as present through unit-test bullets; a JD's 'test-driven software development' asks for TDD."""
+    from resume_builder import reports
+    from resume_builder.content_schema import RequirementMap
+    b, s = build_bank(), load_settings()
+    c = pipeline.assign_ids(v4build.baseline(None, b, s))
+    assert not [p for p in rules_v4.problems(c, b, s, None) if "rule 82" in p]
+    c.experience[2].bullets[1].text = ("Added 20 JUnit unit tests through test-driven development and containerized "
+                                       "the app with Docker Compose.")
+    assert any("rule 82" in p and c.experience[2].bullets[1].id in p for p in rules_v4.problems(c, b, s, None))
+    c = pipeline.assign_ids(v4build.baseline(None, b, s))
+    tests_id = c.experience[2].bullets[1].evidence_ids[0]
+    c.requirements = [RequirementMap(text="Disciplined approach to test-driven software development",
+                                     category="direct", evidence_ids=[tests_id])]
+    assert any("requirements" in p and "rule 82" in p for p in rules_v4.problems(c, b, s, None))
+    c.requirements[0].category = "transferable"
+    assert not [p for p in rules_v4.problems(c, b, s, None) if "rule 82" in p]
+    cov = reports.coverage(c, b, {"keywords": [{**_kw("Test-Driven Development"), "supported": True}]})
+    assert "unit tests" in reports.resume_text(c, b) and not cov["keywords"][0]["represented"]
+    a = {"keywords": [], "requirements": [], "required": [], "preferred": [], "mentioned": [],
+         "responsibilities": ["Strong and disciplined approach to test-driven software development"]}
+    assert rules_v4.mentions(a, "Test-Driven Development") and rules_v4.mentions(a, "Test-Driven Development (TDD)")
+    a["responsibilities"] = ["Write unit tests for every service"]
+    assert not rules_v4.mentions(a, "Test-Driven Development")
+
+
+def test_v43_client_is_introduced_before_a_back_reference(v4env):
+    """Rule 84: 'the supplier' needs an earlier bullet that introduces the bakery supplier (or its own 'a … supplier');
+    overflow trimming never removes the bullet that introduces a client a later bullet refers back to."""
+    from resume_builder import validate
+    b, s = build_bank(), load_settings()
+    c = pipeline.assign_ids(v4build.baseline(None, b, s))
+    assert rules_v4.backref_problems(c, b) == []                     # snapshot: A1 (intro) then B ("the supplier")
+    fl = c.experience[0].bullets
+    fl[0], fl[1] = fl[1], fl[0]
+    probs = rules_v4.problems(c, b, s, None)
+    assert any("rule 84" in p and fl[0].id in p for p in probs)
+    fl[0].text = fl[0].text.replace("for the supplier", "for a DEMO bakery supplier")      # introduces it itself
+    assert not [p for p in rules_v4.problems(c, b, s, None) if "rule 84" in p]
+    c = pipeline.assign_ids(v4build.baseline(None, b, s))
+    intro = c.experience[0].bullets[0]
+    intro.priority = 5                                                # the only "weak" bullet is the introduction
+    gaps = {"entry": 3.0, "template_entry": 3.0, "leading": 12.0}
+    f = pipeline.repair(c, validate.Report(pages=2, overflow_lines=3), 1, s, gaps, set(), {}, b, None)
+    kept = f.content.experience[0].bullets if f else c.experience[0].bullets
+    assert intro.id in {x.id for x in kept} and rules_v4.backref_problems(f.content if f else c, b) == []
+    f2 = pipeline.repair(c, validate.Report(pages=2, overflow_lines=3), 1, s, gaps, set(), {})   # no bank: no guard
+    assert intro.id not in {x.id for x in f2.content.experience[0].bullets}
+
+
+def test_v43_overflow_drops_jd_irrelevant_skills_before_coursework_or_projects(v4env, monkeypatch):
+    """Rule 67 (v4.3): JD-irrelevant skills (not named by the JD, not in any bullet) go before coursework or a project,
+    only where that saves a rendered line; certifications and JD skills stay."""
+    from resume_builder import validate
+    b, s = build_bank(), load_settings()
+    a = _job(v4env, "Requirements\n- React and Java\n- Spring Boot", job_id="v4-sk")
+    c = pipeline.assign_ids(v4build.baseline(a, b, s))
+    monkeypatch.setattr(pipeline, "SKILL_ROW_CHARS", 40)             # make the rows wrap
+    gaps = {"entry": 3.0, "template_entry": 3.0, "leading": 12.0}
+    f = pipeline.repair(c, validate.Report(pages=2, overflow_lines=0), 1, s, gaps, set(), {}, b, a)
+    assert any(x.startswith("removed JD-irrelevant skills") for x in f.actions)
+    assert "removed optional coursework" not in f.actions and f.content.education[0].course_ids
+    assert len(f.content.projects) == len(c.projects)
+    before = {x.name for r in c.skills for x in r.items}
+    after = {x.name for r in f.content.skills for x in r.items}
+    shown = " ".join(x.text for _s, _e, x in c.all_bullets())
+    for gone in before - after:
+        assert not rules_v4.jd_relevant_skill(a, gone) and gone not in shown
+    assert {"React", "Java", "Spring Boot"} <= after
+    assert [x.name for x in f.content.skills[-1].items] == [x.name for x in c.skills[-1].items]   # certifications
+    # nothing irrelevant left that saves a line → coursework goes next, as before
+    f2 = pipeline.repair(c, validate.Report(pages=2, overflow_lines=0), 1, s, gaps, {"section:skills"}, {}, b, a)
+    assert "removed optional coursework" in f2.actions and not any("skills" in x for x in f2.actions)
+
+
+def test_v43_skills_trace_to_the_master_and_ranking_reads_responsibilities(v4env):
+    """Rule 83: a Skills / certification item must cite its own master entry. Rule 79: an accomplishment that speaks
+    to the JD's responsibilities ranks above one that doesn't, with the same technologies."""
+    b, s = build_bank(), load_settings()
+    c = pipeline.assign_ids(v4build.baseline(None, b, s))
+    assert rules_v4.skill_trace_problems(c, b) == []
+    c.skills[0].items.append(SkillItem(name="Go", evidence_ids=[c.skills[0].items[0].evidence_ids[0]]))   # wrong id
+    c.skills[-1].items[0].name = "AWS Certified Solutions Architect – Professional"
+    p = rules_v4.skill_trace_problems(c, b)
+    assert any("'Go'" in x for x in p) and any("certification" in x for x in p)
+    a = {"keywords": [], "requirements": [], "responsibilities": ["Build internal tools that validate incoming records"]}
+
+    class It:
+        kind, metrics, technologies = "bullet", [], ["Python"]
+
+        def __init__(self, text):
+            self.text = text
+    hit = It("Automated imports in Python, validating incoming records before reports")
+    miss = It("Prototyped suggestions in Python from product descriptions")
+    assert v4build.relevance(hit, a) > v4build.relevance(miss, a)
+
+
+def test_v43_show_dont_list_and_distinct_areas_are_reviewer_findings(v4env):
+    """Rules 80–81 (reviewer findings): a JD skill only in Skills while an unused bullet on the page shows it — but a
+    specific tool in a bullet already shows its general term (PostgreSQL → SQL); a JD area with no bullet; 3+ bullets
+    showing only one area."""
+    b, s = build_bank(), load_settings()
+    a = _job(v4env, "Requirements\n- Python and SQL\n- React front ends", job_id="v4-sdl",
+             keywords={"coverage": 0, "required_hit": 0, "required_total": 0,
+                       "keywords": [_kw("Python"), _kw("SQL"), _kw("Redux")]})
+    c = pipeline.assign_ids(v4build.baseline(a, b, s))
+    f = rules_v4.show_dont_list(c, b, a)
+    assert not [x for x in f if x["detail"].startswith("SQL ")]                     # PostgreSQL bullets show SQL
+    c.experience[0].bullets.pop(1)                                                  # the Redux dashboard bullet
+    f = rules_v4.show_dont_list(c, b, a)
+    assert any(x["detail"].startswith("Redux ") and "rule 80" in x["detail"] for x in f)
+    assert "frontend" in rules_v4.jd_areas(a) and not [
+        x for x in rules_v4.area_findings(c, a) if "no bullet shows frontend" in x["detail"]]
+    for ex in c.experience:                                                         # no frontend bullet left
+        ex.bullets = [x for x in ex.bullets if "frontend" not in rules_v4.areas_of(x.text)]
+    c.projects = []
+    found = [x["detail"] for x in rules_v4.area_findings(c, a)]
+    assert any("no bullet shows frontend" in d for d in found)
+    for x in c.experience[1].bullets:
+        x.text = "Migrated messaging workflows to Kafka queues for Demo Bank's REST endpoints."
+    assert any("show only backend / database" in d for d in [x["detail"] for x in rules_v4.area_findings(c, a)])

@@ -58,7 +58,9 @@ def relevance(item, analysis: dict | None) -> float:
     for r in analysis.get("requirements", []):
         for t in r.get("terms", []):
             w.setdefault(t, 1.0)
-    return round(sum(w.get(t, 0) for t in set(item.technologies)) + (0.3 if item.metrics else 0), 3)
+    # rule 79: the JD's responsibilities count as well as its technologies (skills themselves rank by technology)
+    resp = rules_v4.responsibility_score(item.text, analysis) if item.kind in ("bullet", "snapshot") else 0.0
+    return round(sum(w.get(t, 0) for t in set(item.technologies)) + (0.3 if item.metrics else 0) + resp, 3)
 
 
 def baseline(analysis: dict | None, bank: Bank, settings) -> Content:
@@ -360,11 +362,22 @@ def brief_lines(analysis: dict, bank: Bank, settings) -> list[str]:
         L.append(f"### {eid} (snapshot: {', '.join(r['bullets'])})")
         for i in cands[:6]:
             tag = (" [extended: only if the JD needs it]" if i.level == "extended" else "") + (
-                f" [metric: {', '.join(metric_kinds(i.text))}]" if metric_kinds(i.text) else "")
+                f" [metric: {', '.join(metric_kinds(i.text))}]" if metric_kinds(i.text) else "") + (
+                f" [areas: {', '.join(rules_v4.areas_of(i.text))}]" if rules_v4.areas_of(i.text) else "")
             L.append(f"- {i.id} (relevance {relevance(i, analysis)}){tag}: {i.text}")
     if X.get("overlaps"):
         L += ["", "## Overlapping bullets (at most one of each group per resume)",
               *[f"- {' / '.join(g)}" for g in X["overlaps"]]]
+    if analysis:
+        L += ["", "## Selection quality (rules 79–84)",
+              "- Rank by the JD's responsibilities as well as its technologies (rule 79; relevance above includes both).",
+              "- Show a required skill in a bullet rather than only in Skills when a bullet demonstrates it (rule 80).",
+              "- Distinct evidence across areas; this JD asks for: " + (", ".join(rules_v4.jd_areas(analysis)) or "—")
+              + ". Don't spend several bullets on the same thing (rule 81).",
+              "- TDD is not automated testing: never claim or map TDD from test-writing bullets (rule 82).",
+              "- Every Skills / certification item cites its master entry; the JD only selects (rule 83).",
+              "- Introduce a client / sector before a bullet refers back to it (\"the distributor\") (rule 84).",
+              "- Overflow: JD-irrelevant skills go before coursework or a project (rule 67)."]
     sk = X["skills"]
     asked = [(n, t) for n, t in sk["tier"].items() if t in ("extended", "self-reported") and rules_v4.mentions(analysis, n)]
     L += ["", "## Skills (rule 53)", "- Default rows from the master; JD-relevant first. Core always; extended / "

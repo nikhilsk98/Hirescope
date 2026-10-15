@@ -1,4 +1,4 @@
-"""resume_rules.md v4.1 checks for a master v4 resume (the bank's `v4` extras). `problems()` are errors (the build
+"""resume_rules.md v4.3 checks for a master v4 resume (the bank's `v4` extras). `problems()` are errors (the build
 refuses the content, naming the rule); `lint()` findings go to the reviewer.
 
 Precedence (rule 2): the master's Builder notes set style and selection — bullets per role, courses, which bullets
@@ -29,6 +29,25 @@ TEAM_OWN = re.compile(r"\b(designed the (?:architecture|system)|architected the|
                       r"ran production releases?|led the (?:migration|team|modernization))\b", re.I)       # rule 11
 DESIGN_VERB = re.compile(r"^(Designing|Architecting|Planning|Prototyping|Specifying|Modeling|Researching)\b")
 RESULT = re.compile(r"\b(reduc\w*|improv\w*|increas\w*|cut|achiev\w*|outperform\w*|boost\w*)\b[^.]*\d", re.I)
+TDD = re.compile(r"\btest[- ]driven\b|\bTDD\b", re.I)                                                  # rule 82
+# rule 81: the areas a resume should show with distinct evidence (bullet text or JD text → areas)
+AREAS = {
+    "frontend": re.compile(r"\b(React|Redux|Vue(?:\.js)?|Nuxt(?:\.js)?|Angular|TypeScript|front[- ]?ends?|UI|"
+                           r"dashboards?|storefront|screens|views|interfaces?|components)\b", re.I),
+    "backend / database": re.compile(r"\b(Spring Boot|Node\.js|Express|REST\w*|APIs?|endpoints?|back[- ]?ends?|"
+                                     r"microservices?|SQL|PostgreSQL|MySQL|MongoDB|relational databases?|databases?)\b",
+                                     re.I),
+    "Python / data pipelines": re.compile(r"\b(Python|pandas|NumPy|data[- ](?:imports?|pipelines?|health|ingestion)|"
+                                          r"ETL|scikit-learn|Lambda|imports?)\b", re.I),
+    "testing": re.compile(r"\b(tests?|testing|JUnit|Mockito|PyTest|test-driven|TDD|differential|QA|regression)\b",
+                          re.I),
+    "delivery": re.compile(r"\b(CI/CD|GitHub Actions|Jenkins|Docker|deploy\w*|Terraform|Kubernetes|releases?|"
+                           r"pipelines? duration)\b", re.I),
+}
+_STOP = set("""a an and the of to for in on with by from as at or into using use used via over under across their
+its this that these those our your you we will be is are was were can able new build built design support team
+software application applications develop developed tools data experience strong""".split())
+SYNONYM_NOUNS = {"distributor": ("wholesaler",), "wholesaler": ("distributor",), "clinic": ("practice",)}
 
 
 def v4(bank: Bank) -> dict:
@@ -81,10 +100,113 @@ def mentions(analysis: dict | None, name: str) -> bool:
     if not analysis:
         return False
     base = re.sub(r"\s*\(.*\)$", "", name)
+    if TDD.search(base):                 # "test-driven software development" in a JD asks for TDD (rule 82)
+        return bool(TDD.search(jd_text(analysis)))
     c = canonical(base)
     if c in jd_terms(analysis):
         return True
     return bool(re.search(rf"(?<![\w.+#]){re.escape(base)}(?![\w+#])", jd_text(analysis), re.I))
+
+
+def _words(text: str) -> set[str]:
+    return {w[:5] for w in re.findall(r"[a-z][a-z0-9+#.-]{3,}", (text or "").lower()) if w not in _STOP}
+
+
+def responsibility_score(text: str, analysis: dict | None) -> float:
+    """Rule 79: how many of the JD's responsibilities this accomplishment speaks to (two or more shared content
+    words), 0.5 each, at most 1.5 — added to the technology score so ranking isn't by tool names alone."""
+    if not analysis:
+        return 0.0
+    w = _words(text)
+    n = sum(1 for r in analysis.get("responsibilities", []) if len(w & _words(r)) >= 2)
+    return min(1.5, 0.5 * n)
+
+
+def areas_of(text: str) -> list[str]:
+    return [a for a, rx in AREAS.items() if rx.search(text or "")]
+
+
+def jd_areas(analysis: dict | None) -> list[str]:
+    return areas_of(jd_text(analysis)) if analysis else []
+
+
+def jd_relevant_skill(analysis: dict | None, name: str) -> bool:
+    """The JD names this skill, or a general term it asks for covers it (relational databases → MySQL, rule 77)."""
+    if not analysis or mentions(analysis, name):
+        return True
+    from .evidence import vocab
+    from .jd_analysis import _CATEGORY_TERMS
+    c = canonical(re.sub(r"\s*\(.*\)$", "", name))
+    v = vocab()
+    return any(c in (*v.implies.get(t, ()), *_CATEGORY_TERMS.get(t, ())) for t in jd_terms(analysis))
+
+
+def _clients(bank: Bank, eid: str) -> dict[str, tuple[str, set[str]]]:
+    """Bullet-bank group → (client key, nouns a bullet may use to refer back to it). A group whose sector says "same"
+    is the previous group's client (the distributor's two apps)."""
+    groups = (v4(bank).get("roles", {}).get(eid) or {}).get("groups", {})
+    raw, prev = {}, None
+    for g, sector in groups.items():
+        if len(g) != 1:
+            continue
+        s = re.sub(r"\(.*?\)", "", sector.split("—")[-1]).strip()
+        key = prev if prev and re.search(r"\bsame\b", s, re.I) else g
+        noun = (re.findall(r"[A-Za-z-]+", s) or [""])[-1].lower()
+        raw[g] = (key, {noun, *SYNONYM_NOUNS.get(noun, ())} - {""})
+        if key == g:
+            prev = g
+    merged: dict[str, set[str]] = {}
+    for key, nouns in raw.values():
+        merged.setdefault(key, set()).update(nouns)
+    return {g: (key, merged[key]) for g, (key, _n) in raw.items()}
+
+
+def backref_problems(c, bank: Bank) -> list[str]:
+    """Rule 84: a bullet that refers back to a client ("for the distributor") needs an earlier bullet in the same role
+    that introduces that client, unless it introduces the client itself ("for a packaging wholesaler")."""
+    out = []
+    for ex in c.experience:
+        cl = _clients(bank, ex.entry_id)
+        if not cl:
+            continue
+        seen: set[str] = set()
+        for b in ex.bullets:
+            g = next((x for x in (_group(bank, ev) for ev in b.evidence_ids) if x in cl), None)
+            if not g:
+                continue
+            key, nouns = cl[g]
+            if key not in seen:
+                for n in sorted(nouns):
+                    m = re.search(rf"\bthe\s+(?:[\w-]+\s+){{0,2}}{re.escape(n)}\b", b.text, re.I)
+                    if m and not re.search(rf"\ban?\s+(?:[\w-]+\s+){{0,4}}{re.escape(n)}\b", b.text, re.I):
+                        out.append(f"{b.id}: refers back to '{m.group(0)}' before any bullet introduces that client; "
+                                   "introduce the client's sector first or reorder (rule 84)")
+                        break
+            seen.add(key)
+    return out
+
+
+def skill_trace_problems(c, bank: Bank) -> list[str]:
+    """Rule 83: every Skills and certification item cites the master entry it comes from (a skill of any tier or a
+    certification) under its own name; the JD only selects among them, it never adds one."""
+    out = []
+    I = bank.items
+    certs = {x["id"]: x["name"] for x in v4(bank).get("certs", [])}
+
+    def key(n: str) -> str:
+        return canonical(re.sub(r"\s*\(.*\)$", "", n.replace("Certified: ", "")).strip()).casefold()
+    for row in c.skills:
+        is_cert = row.category.casefold() == "certifications"
+        for s in row.items:
+            if is_cert:
+                ok = any(ev in certs and key(certs[ev]) == key(s.name) for ev in s.evidence_ids)
+            else:
+                ok = any(ev in I and I[ev].section == "skill" and I[ev].kind != "cert" and (
+                    I[ev].text == s.name or key(I[ev].text) == key(s.name)) for ev in s.evidence_ids)
+            if not ok:
+                out.append(f"skills: '{s.name}' doesn't cite the master {'certification' if is_cert else 'skill'} it "
+                           "comes from; every Skills item traces to the master, the JD never adds one (rule 83)")
+    return out
 
 
 def tier_of(bank: Bank, name: str) -> str | None:
@@ -293,6 +415,18 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
             if cert["rule"] == "cloud_or_azure" and cid in ids and not (
                     is_cloud(analysis, c.profile) or mentions(analysis, "Azure")):
                 out.append(f"certifications: {cert['name']} only for cloud roles or a JD that mentions Azure (rule 29)")
+    # rule 82: TDD is a practice of its own; writing tests never implies it
+    for _s, _e, b in bullets:
+        if TDD.search(b.text) and not any(ev in I and TDD.search(I[ev].text) for ev in b.evidence_ids):
+            out.append(f"{b.id}: claims test-driven development, which no cited evidence states; writing tests is not "
+                       "TDD (rule 82)")
+    for r in c.requirements:
+        if TDD.search(r.text) and r.category == "direct" and not any(
+                ev in I and TDD.search(I[ev].text) for ev in r.evidence_ids):
+            out.append(f"requirements: '{r.text[:70]}' is marked direct from evidence that doesn't state TDD; "
+                       "test-writing is not TDD (rule 82): use transferable or missing_evidence")
+    out += skill_trace_problems(c, bank)                                       # rule 83
+    out += backref_problems(c, bank)                                           # rule 84
     # rule 31: relocation line
     want = "relocation" if wants_relocation(analysis) else "default"
     if c.contact_location != want:
@@ -325,10 +459,58 @@ def lint(c, bank: Bank, settings, analysis: dict | None) -> list[dict]:
         if len(ids) > 2:
             out.append({"where": ", ".join(ids), "rule": "per-client limit",
                         "detail": f"{len(ids)} bullets for one client ({client}); at most 2 by default (rules 38–39)"})
+    if analysis:
+        from .jd_analysis import set_category_terms
+        set_category_terms(settings)                  # rule 77's specific → general map, also in a fresh process
+        out += show_dont_list(c, bank, analysis) + area_findings(c, analysis)
     for ex in [*c.experience, *c.projects]:
         verbs = [b.text.split()[0].lower() for b in ex.bullets if b.text.split()]
         for a, b_ in zip(verbs, verbs[1:]):
             if a == b_:
                 out.append({"where": ex.entry_id, "rule": "consecutive verbs",
                             "detail": f"two consecutive bullets start with '{a}' (rule 45)"})
+    return out
+
+
+def show_dont_list(c, bank: Bank, analysis: dict) -> list[dict]:
+    """Rule 80: a JD skill that is only in Technical Skills while an unused bank bullet on a role / project already on
+    the page demonstrates it."""
+    kws = analysis.get("keywords", [])
+    imp = [k for k in kws if k.get("section") in ("required", "preferred")] or kws
+    shown = {t for _s, _e, b in c.all_bullets() for t in terms_in(b.text)}
+    listed = {canonical(re.sub(r"\s*\(.*\)$", "", s.name)) for row in c.skills for s in row.items}
+    on_page = {x.entry_id for x in [*c.experience, *c.projects]}
+    used = {bank_id(bank, ev) for _s, _e, b in c.all_bullets() for ev in b.evidence_ids}
+    terms = jd_terms(analysis)
+    out = []
+    from .evidence import vocab
+    from .jd_analysis import _CATEGORY_TERMS
+    v = vocab()
+    for k in imp:
+        t = k["canonical"]
+        if t in shown or t not in listed or shown & {*v.implies.get(t, ()), *_CATEGORY_TERMS.get(t, ())}:
+            continue                                  # a specific tool in a bullet shows the general term (rule 77)
+        cands = [i.id for i in bank.items.values() if i.kind == "bullet" and i.entry_id in on_page and i.id not in used
+                 and t in i.technologies and (getattr(i, "level", None) != "extended" or set(i.technologies) & terms)]
+        if cands:
+            out.append({"where": "skills", "rule": "show, don't list",
+                        "detail": f"{k['term']} is a JD skill shown only in Technical Skills; "
+                                  f"{', '.join(cands[:3])} demonstrate{'s' if len(cands) == 1 else ''} it (rule 80)"})
+    return out
+
+
+def area_findings(c, analysis: dict) -> list[dict]:
+    """Rule 81: distinct evidence across the areas the JD asks for; not several bullets showing the same one thing."""
+    from collections import Counter
+    bullets = [b for _s, _e, b in c.all_bullets()]
+    out = []
+    for a in jd_areas(analysis):
+        if not any(AREAS[a].search(b.text) for b in bullets):
+            out.append({"where": "resume", "rule": "distinct areas",
+                        "detail": f"no bullet shows {a}, which the JD asks for (rule 81)"})
+    single = Counter(areas_of(b.text)[0] for b in bullets if len(areas_of(b.text)) == 1)
+    for a, n in single.items():
+        if n >= 3:
+            out.append({"where": "resume", "rule": "distinct areas",
+                        "detail": f"{n} bullets show only {a}; swap one for evidence of another area (rule 81)"})
     return out
