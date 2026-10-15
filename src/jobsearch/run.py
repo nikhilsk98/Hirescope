@@ -72,12 +72,10 @@ def import_dirs(setting: str | list[str]) -> list[Path]:
 
 def exit_code(summary: dict) -> int:
     """1 only for real source failures. "Manual check needed" companies (unsupported job systems, marked on purpose)
-    and partial listings are reported in the summary and on the dashboard, not treated as errors. In a quick check, a
-    one-off non-JSON response (retried with backoff, still failing) is a warning: it fails the check only when the
-    same source also failed on its previous check."""
-    fails = summary.get("failures") or []
-    if summary.get("scope") == "quick":
-        fails = [f for f in fails if not (f.get("transient") and not f.get("repeated"))]
+    and partial listings are reported in the summary and on the dashboard, not treated as errors. A one-off non-JSON
+    response (retried with backoff, still failing) is a warning in every run (quick or full): it fails the run only
+    when the same source also failed on its previous check."""
+    fails = [f for f in summary.get("failures") or [] if not (f.get("transient") and not f.get("repeated"))]
     return 1 if fails else 0
 
 

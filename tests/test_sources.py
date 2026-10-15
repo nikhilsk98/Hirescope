@@ -921,8 +921,10 @@ def test_one_off_non_json_failure_does_not_fail_a_quick_check_but_a_repeat_does(
     s1 = run(conn, cfg2, resume, None, html, embedder, tmp_path, workers=1).as_dict()
     f1 = s1["failures"][0]
     assert f1["transient"] is True and f1["repeated"] is False
-    assert exit_code({**s1, "scope": "quick"}) == 0             # one-off: a warning
-    assert exit_code({**s1, "scope": "full"}) == 1              # full runs unchanged
+    assert exit_code({**s1, "scope": "quick"}) == 0             # one-off: a warning …
+    assert exit_code({**s1, "scope": "full"}) == 0              # … in full runs too
     s2 = run(conn, cfg2, resume, None, html, embedder, tmp_path, workers=1, force_all=True).as_dict()
     assert s2["failures"][0]["repeated"] is True and exit_code({**s2, "scope": "quick"}) == 1   # 2 runs in a row
-    assert exit_code({"scope": "quick", "failures": [{"transient": False, "repeated": False}]}) == 1   # other errors
+    assert exit_code({**s2, "scope": "full"}) == 1
+    for scope in ("quick", "full"):                                                                    # other errors
+        assert exit_code({"scope": scope, "failures": [{"transient": False, "repeated": False}]}) == 1

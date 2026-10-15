@@ -116,7 +116,7 @@ def summary_text(s: dict) -> str:
     for f in (s.get("failures") or [])[:10]:
         one_off = f.get("transient") and not f.get("repeated")
         lines.append(f"  failed: {f['company']} ({f['source']})" + (" — one-off non-JSON response (warning; fails the "
-                                                                     "quick check only if it repeats)" if one_off else ""))
+                                                                     "run only if it repeats)" if one_off else ""))
     if s.get("backup"):
         lines.append(f"  backup: {s['backup']}")
     if s.get("digest"):

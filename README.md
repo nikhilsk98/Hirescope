@@ -86,9 +86,8 @@ Then double-click `dashboard/index.html` (opens via `file://`, no server). The e
 source failed (companies marked "Manual check needed" and partial listings are reported, not errors), `1` when any
 source failed (the run still completes and the dashboard flags the missing coverage), `2` for missing or invalid
 inputs, `3` when another run holds the lock, and `75` when offline. A JSON API that answers with a non-JSON body (an HTML
-error or bot-check page — Workday does this now and then) is retried with backoff; if it still fails, a **quick check**
-logs a warning and exits `0`, unless the same source also failed on its previous check (then `1`). Full runs report
-any failure with `1`.
+error or bot-check page — Workday does this now and then) is retried with backoff; if it still fails, the run (quick or
+full) logs a warning and exits `0`, unless the same source also failed on its previous check (then `1`).
 
 ### Two tracks
 Every job gets a `track`: **Co-op/Intern**, **Full-time**, or **Unclear**, decided by (in order) the title,
