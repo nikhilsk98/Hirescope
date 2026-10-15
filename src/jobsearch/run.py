@@ -72,8 +72,13 @@ def import_dirs(setting: str | list[str]) -> list[Path]:
 
 def exit_code(summary: dict) -> int:
     """1 only for real source failures. "Manual check needed" companies (unsupported job systems, marked on purpose)
-    and partial listings are reported in the summary and on the dashboard, not treated as errors."""
-    return 1 if summary.get("failures") else 0
+    and partial listings are reported in the summary and on the dashboard, not treated as errors. In a quick check, a
+    one-off non-JSON response (retried with backoff, still failing) is a warning: it fails the check only when the
+    same source also failed on its previous check."""
+    fails = summary.get("failures") or []
+    if summary.get("scope") == "quick":
+        fails = [f for f in fails if not (f.get("transient") and not f.get("repeated"))]
+    return 1 if fails else 0
 
 
 def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_file: Path,

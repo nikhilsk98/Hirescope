@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import logging
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -67,6 +68,8 @@ class SourceOutcome:
     url: str | None = None
     error: str | None = None
     notes: list[str] = field(default_factory=list)
+    transient: bool = False         # a non-JSON response after retries (usually a one-off)
+    repeated: bool = False          # the source also failed on its previous check
 
 
 @dataclass
@@ -92,8 +95,8 @@ class RunSummary:
             "sources_manual": len(manual),
             "sources_partial": len(partial),
             "sources_skipped": len(self.skipped),
-            "failures": [{"company": o.company, "source": o.source, "error": o.error, "origin": o.origin}
-                         for o in failed],
+            "failures": [{"company": o.company, "source": o.source, "error": o.error, "origin": o.origin,
+                          "transient": o.transient, "repeated": o.repeated} for o in failed],
             "manual": [{"company": o.company, "url": o.url, "error": o.error} for o in manual],
             "partial": [{"company": o.company, "source": o.source, "why": o.partial} for o in partial],
             "jobs_found": sum(o.jobs for o in ok),
@@ -464,7 +467,13 @@ def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
     extra = {"origin": origin, "tier": tier, "url": out.url, "detected_via": f.detected_via}
     if f.result is None:
         out.error = f.error
-        log.error("source failed: %s/%s: %s", label, name, out.error)
+        prev = conn.execute("SELECT status FROM source_status WHERE company_key=? AND source=?",
+                            (db.company_key(name), label)).fetchone()
+        out.repeated = bool(prev and prev["status"] == "failed")        # also failed on its previous check
+        out.transient = bool(re.search(r"non-JSON response|JSONDecodeError", out.error or ""))
+        (log.warning if out.transient and not out.repeated else log.error)(
+            "source failed: %s/%s: %s%s", label, name, out.error,
+            " (one-off non-JSON response; fails the run only if it repeats)" if out.transient and not out.repeated else "")
         if f.planned.watch is not None:
             db.bump_company_source_failure(conn, name)
         db.set_source_status(conn, name, label, "failed", out.error, None, **extra)

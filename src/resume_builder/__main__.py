@@ -61,6 +61,9 @@ def cmd_check(args) -> int:
     if missing:
         print("Missing dependencies:\n  - " + "\n  - ".join(missing))
         return 2
+    if bank.v4:
+        _check_v4(bank, settings, pipeline.tool_versions(), hashes)
+        return 0
     print(f"OK: tools present ({pipeline.tool_versions()}); inputs: {', '.join(hashes)}; "
           f"{len(bank.items)} confirmed evidence items in {len(bank.entries)} entries "
           f"({sum(1 for i in bank.items.values() if i.section == 'tool')} ticked tools); "
@@ -88,8 +91,72 @@ def cmd_default(args) -> int:
     return 0 if out["status"] == "ready" else 1
 
 
+def excluded_summary(bank) -> list[tuple[str, list[str]]]:
+    """Master v4: what the builder leaves out, by reason (all of it correctly, per the master's own labels)."""
+    groups: dict[str, list[str]] = {}
+    for x in bank.excluded:
+        st = (x.get("status") or "").casefold()
+        why = ("planned course (not until enrolled)" if x.get("section") == "coursework" else
+               "Legacy bullets (reference only)" if st == "legacy" else
+               "excluded by your decision" if st == "excluded" else
+               "bullet stating an unverified metric" if st.startswith("uses an unverified") else
+               f"{st} item" if st else "other")
+        if why == "Legacy bullets (reference only)":
+            e = bank.entries.get(x["id"].rsplit("-legacy", 1)[0])
+            label = (e.organization or e.role) if e else x["id"]
+        else:
+            label = x["text"]
+        groups.setdefault(why, []).append(label[:70])
+    return sorted(groups.items())
+
+
+def _check_v4(bank, settings, tools, hashes) -> None:
+    X = bank.v4
+    sk = X["skills"]
+    tiers: dict[str, list[str]] = {}
+    for n, t in sk["tier"].items():
+        tiers.setdefault(t, []).append(n)
+    n_bullets = sum(1 for i in bank.items.values() if i.kind == "bullet")
+    n_snap = sum(1 for i in bank.items.values() if i.kind == "snapshot")
+    print(f"OK: tools present ({tools}); inputs: {', '.join(hashes)}; master v4: {len(bank.entries)} entries, "
+          f"{n_bullets} bank bullets, a {n_snap}-bullet default snapshot; profiles (your target tracks): "
+          f"{', '.join(X.get('targets', {}).get('profiles') or settings.profiles)}")
+    order = ["core", "extended", "self-reported", "coursework", "concept", "planned", "declined"]
+    parts = []
+    for t in order + [t for t in tiers if t not in order]:
+        if tiers.get(t):
+            names = sorted(tiers[t])
+            shown = f" ({', '.join(names)})" if t in ("coursework", "declined", "planned") and len(names) <= 10 else ""
+            parts.append(f"{t} {len(names)}{shown}")
+    print("skills by tier: " + "; ".join(parts))
+    no = sorted(i.text for i in bank.items.values() if i.kind == "declined")
+    if no:
+        print(f"declined (you said you haven't used them; never listed or asked again): {', '.join(no)}")
+    ck = sk.get("checklist")
+    if ck:
+        print(f"tool_checklist.md: {ck['ticked']} ticked — {ck['in_master']} already in the master's inventory (its tier "
+              f"wins), {len(ck['self_reported'])} self-reported (no evidence in the master)"
+              + (f", {len(ck['planned'])} planned in the master (never listed until built)" if ck["planned"] else "")
+              + (f", {len(ck['excluded'])} on the master's Excluded list (never used)" if ck["excluded"] else ""))
+    for why, items in excluded_summary(bank):
+        print(f"correctly left out — {why}: {len(items)} ({'; '.join(items[:6])}{'…' if len(items) > 6 else ''})")
+    for f in bank.metric_flags:
+        print(f"check metric (rule 6): {f['detail']}")
+    for w in bank.warnings:
+        print(f"note: {w}")
+
+
 def cmd_tags(args) -> int:
-    from .evidence import status_report
+    from .evidence import load_bank, status_report
+    bank = load_bank()
+    if bank.v4:
+        print("Your master is in the v4 format: status comes from its own labels (verified / estimated are used; "
+              "unverified, pending, planned, Legacy and Excluded never are). No [confirmed] tags are needed.")
+        for why, items in excluded_summary(bank):
+            print(f"  left out — {why}: {len(items)}")
+            for x in items:
+                print(f"    - {x}")
+        return 0
     rep = status_report()
     print("Status tags (rule 1): only [confirmed] items are used. Put a tag at the end of a line; on a '## Section'\n"
           "or '### Entry' heading it covers everything below it unless a line has its own tag:\n"

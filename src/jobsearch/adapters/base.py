@@ -50,6 +50,10 @@ class SourceError(Exception):
     """A source could not be fetched. Logged and isolated; never fatal to a run."""
 
 
+class NonJSONResponse(ValueError):
+    """A JSON API answered 200 with a body that isn't JSON, even after retries (usually a one-off)."""
+
+
 @dataclass(frozen=True)
 class Capabilities:
     full_description: bool        # list endpoint returns full JD text
@@ -273,10 +277,26 @@ class HttpClient:
         return self.request("GET", url, **kw)
 
     def get_json(self, url: str, **kw):
-        return self.get(url, **kw).json()
+        return self._json("GET", url, **kw)
 
     def post_json(self, url: str, payload: dict, **kw):
-        return self.request("POST", url, json=payload, **kw).json()
+        return self._json("POST", url, json=payload, **kw)
+
+    def _json(self, method: str, url: str, **kw):
+        """A JSON API call. A 200 whose body isn't JSON (an HTML error or bot-check page an API sometimes returns,
+        e.g. Workday's "Expecting value: line 1 column 1") is retried with backoff like a 5xx."""
+        for attempt in range(self.retries + 1):
+            resp = self.request(method, url, **kw)
+            try:
+                return resp.json()
+            except ValueError as e:
+                if attempt >= self.retries:
+                    raise NonJSONResponse(f"{method} {safe_url(url)}: non-JSON response after {attempt + 1} "
+                                          f"tries ({type(e).__name__}: {str(e)[:80]})") from e
+                backoff = (2 ** attempt) + random.uniform(0, 0.5)
+                log.warning("%s %s returned a non-JSON body; retry %d in %.1fs", method, safe_url(url), attempt + 1,
+                            backoff)
+                time.sleep(backoff)
 
     def get_conditional(self, url: str, validators: dict | None, **kw) -> httpx.Response:
         """GET with If-None-Match / If-Modified-Since. Raises NotModified on 304."""

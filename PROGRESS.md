@@ -713,3 +713,13 @@ filters that hide it) and opens the panel; jobs without details open an info car
 real dashboard): a co-op job from the Full-time tab → Co-op tab, All Jobs, panel, card focused; a listed filtered job →
 Filtered Out; an unlisted filtered, a beyond-top-N and a closed job → info card with status / reason; a search that hid
 the job → filters cleared. No console errors. Tests: 561 passed.
+
+## check wording (v4) + one-off non-JSON responses (2026-10-15)
+- `python -m resume_builder check` with a v4 master: entries, bank bullets and the snapshot; skills by tier (core,
+  extended, self-reported, coursework, planned) and declines; how tool_checklist.md ticks resolved (already in the
+  master's inventory / self-reported / planned / excluded); and what is **correctly left out**, by reason (Legacy
+  bullets, excluded by your decision, planned courses, pending or unverified items) — no more "not confirmed (rule 1)"
+  or "0 ticked tools". `tags` explains that v4 needs no tags and lists the same exclusions.
+- JSON API calls retry a non-JSON 200 body with backoff (the Workday "Expecting value" failures at Xcel Energy and Palo
+  Alto Networks). Still failing: the failure is marked transient; a quick check logs a warning and exits 0 unless the
+  same source also failed on its previous check. Full runs unchanged. Tests: 563 passed.

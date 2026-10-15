@@ -896,3 +896,33 @@ def test_source_filter_includes_watchlist_companies_with_a_known_source(conn, cf
     assert names("workable") == {"UrlCo", "CachedCo"}
     assert names("jibe") == {"SeedJibe"}
     assert names("greenhouse") == set()
+
+
+# --- one-off non-JSON responses (e.g. Workday "Expecting value: line 1 column 1") -----------------------------------
+def test_non_json_body_is_retried_then_reported():
+    from jobsearch.adapters.base import NonJSONResponse
+    calls = []
+
+    def flaky(request):
+        calls.append(1)
+        return httpx.Response(200, text="<html>bot check</html>") if len(calls) == 1 else httpx.Response(200, json={"ok": 1})
+    assert mock_client(flaky).get_json("https://demo.example/api") == {"ok": 1} and len(calls) == 2
+    with pytest.raises(NonJSONResponse, match="non-JSON response after 3 tries"):
+        mock_client(lambda r: httpx.Response(200, text="<html>down</html>")).post_json("https://demo.example/api", {})
+
+
+def test_one_off_non_json_failure_does_not_fail_a_quick_check_but_a_repeat_does(conn, cfg, resume, embedder, tmp_path):
+    from jobsearch.config import Company
+    from jobsearch.pipeline import run
+    from jobsearch.run import exit_code
+    co = Company(name="DemoCo", source="lever", board="democo")
+    cfg2 = cfg.model_copy(update={"companies": [co]})
+    html = mock_client(lambda r: httpx.Response(200, text="<html>maintenance</html>"))
+    s1 = run(conn, cfg2, resume, None, html, embedder, tmp_path, workers=1).as_dict()
+    f1 = s1["failures"][0]
+    assert f1["transient"] is True and f1["repeated"] is False
+    assert exit_code({**s1, "scope": "quick"}) == 0             # one-off: a warning
+    assert exit_code({**s1, "scope": "full"}) == 1              # full runs unchanged
+    s2 = run(conn, cfg2, resume, None, html, embedder, tmp_path, workers=1, force_all=True).as_dict()
+    assert s2["failures"][0]["repeated"] is True and exit_code({**s2, "scope": "quick"}) == 1   # 2 runs in a row
+    assert exit_code({"scope": "quick", "failures": [{"transient": False, "repeated": False}]}) == 1   # other errors

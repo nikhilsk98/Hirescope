@@ -370,3 +370,21 @@ def test_v4_declines_and_coursework_level_skills(v4env):
     from jobsearch.extract.resume import parse_resume
     r = parse_resume(rc.MASTER_RESUME, load_synonyms())
     assert "Haskell" in r.skills and "Helm" not in r.skills
+
+
+def test_v4_check_and_tags_wording(v4env, capsys):
+    """A v4 master: excluded items are reported as correctly left out (by reason), tools via the Skills tiers."""
+    from resume_builder.__main__ import main
+    rc.TOOL_CHECKLIST.write_text("## Tools\n- [x] Terraform | Where: Multiple roles | Level: production\n"
+                                 "- [x] Kafka | Where: Multiple roles | Level: production\n")
+    assert main(["check"]) == 0
+    out = capsys.readouterr().out
+    assert "not confirmed" not in out and "ticked tools" not in out
+    assert "skills by tier: core" in out and "self-reported" in out
+    assert "tool_checklist.md: 2 ticked — 1 already in the master's inventory" in out and "1 self-reported" in out
+    assert "correctly left out — Legacy bullets (reference only): 1 (Freelance)" in out
+    assert "correctly left out — excluded by your decision" in out and "Old Shop App" in out
+    assert "planned course" in out and "pending item" in out and "bullet stating an unverified metric" in out
+    assert main(["tags"]) == 0
+    t = capsys.readouterr().out
+    assert "v4 format" in t and "No [confirmed] tags are needed" in t and "untagged" not in t

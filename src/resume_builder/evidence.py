@@ -670,15 +670,22 @@ def _build_v4(text: str, master: Path, additions: Path, template: Path | None, c
             return out
         known = set().union(*[keys(n) for n, tier in sk["tier"].items() if tier != "planned"])
         planned = set().union(*[keys(n) for n in sk["planned"]]) | {"gcp", "google cloud"}
+        ck = v4.skills.setdefault("checklist", {"ticked": 0, "in_master": 0, "self_reported": [], "excluded": [],
+                                                "planned": []})
         for t in T.ticked(tl):
+            ck["ticked"] += 1
             names = set().union(*[keys(x) for x in [t.name, *t.names]])
             if names & banned:
                 warnings.append(f"tool_checklist.md: {t.name} is ticked but on the master's Excluded list: never used")
+                ck["excluded"].append(t.name)
                 continue
             if names & known:
+                ck["in_master"] += 1
                 continue                                # the master's tier wins
             if names & planned or re.match(r"^(?:gcp|google cloud)\b", t.name, re.I):
+                ck["planned"].append(t.name)
                 continue                                # planned in the master: never listed until built
+            ck["self_reported"].append(t.name)
             iid = f"skill-{_slug(t.name, 4)}"
             if iid in items:
                 continue
