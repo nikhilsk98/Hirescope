@@ -91,7 +91,7 @@ def baseline(analysis: dict | None, bank: Bank, settings) -> Content:
         added, self_n = [], 0
         have = {canonical(bank.items[i].text) for _l, ids in rows for i in ids}
         for name, tier in sk["tier"].items():
-            if tier not in ("extended", "self-reported") or canonical(name) in have:
+            if tier not in ("extended", "self-reported", "coursework") or canonical(name) in have:
                 continue
             if canonical(name) in {canonical(x) for x in sk.get("planned_also", [])}:
                 continue                     # planned for an in-progress project: never in Skills until built
@@ -104,6 +104,11 @@ def baseline(analysis: dict | None, bank: Bank, settings) -> Content:
             iid = next((i.id for i in bank.items.values() if i.kind == "skill" and i.text == name), None)
             if not iid:
                 continue
+            if tier == "coursework":                 # rule 75: listed at its level, in the first (Languages) row
+                rows[0][1].append(("coursework", iid))
+                added.append(f"{name} (coursework)")
+                have.add(canonical(name))
+                continue
             row = ROW_FOR.get((sk.get("category", {}).get(name) or "").casefold(), rows[-1][0])
             target = next((r for r in rows if r[0] == row), rows[-1])
             target[1].append(iid)
@@ -111,8 +116,11 @@ def baseline(analysis: dict | None, bank: Bank, settings) -> Content:
             have.add(canonical(name))
         if added:
             notes.selection.append("Skills added for this JD (rule 53): " + ", ".join(added) + ".")
-    skills = [SkillCategory(category=l, items=[SkillItem(name=bank.items[i].text, evidence_ids=[i]) for i in ids])
-              for l, ids in rows]
+    def item(x):
+        if isinstance(x, tuple):                     # a coursework-level skill: "Go (coursework)"
+            return SkillItem(name=f"{bank.items[x[1]].text} (coursework)", evidence_ids=[x[1]])
+        return SkillItem(name=bank.items[x].text, evidence_ids=[x])
+    skills = [SkillCategory(category=l, items=[item(i) for i in ids]) for l, ids in rows]
     certs = [x for x in X["certs"] if x["rule"] == "always" or (x["rule"] == "cloud_or_azure" and analysis and (
         rules_v4.is_cloud(analysis, analysis["profile"]["picked"]) or rules_v4.mentions(analysis, "Azure")))]
     if certs:

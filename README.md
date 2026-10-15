@@ -573,7 +573,11 @@ confirm it (`--confirm`), as one block in `inputs/resume/evidence_additions.md`:
 - Role/project: Associate Software Developer — Accenture Technology, India
 - Level: production            (tools only)
 ```
-Tool answers go to `tool_checklist.md` instead (ticked, with where and level), never both. Blocks whose status isn't
+Tool answers go to `tool_checklist.md` instead (ticked, with where and level), never both. A block may name its
+`- Keyword:`; with `- Answer: no` it records that you haven't used it (`decline --keyword K` writes one): never listed,
+claimed or asked again, and not counted by HireScope — it also overrides a self-reported entry in the master. A skill
+answer with `--entry skills --level coursework` (e.g. Go, Rust) is listed in Technical Skills only when a JD asks for
+it, as "Go (coursework)", and never inside a bullet (rule 75). Blocks whose status isn't
 `confirmed`, or that carry a test marker (`DEMO`, "lorem ipsum", "placeholder"), are ignored and reported by
 `check` / `tags`. The older `## <id> — date — confirmed` form is still read. Your master resume is never edited.
 

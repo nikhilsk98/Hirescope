@@ -116,9 +116,23 @@ def _parse_v4(path: Path, text: str, synonyms: dict[str, list[str]]) -> Resume |
             lines = [i.text for i in items.values() if i.entry_id == eid]
         sections[sec].append(Entry(e.heading, lines))
     sections["coursework"] = [Entry("", [i.text for i in items.values() if i.kind == "course"])]
-    tiers = v4.skills.get("tier", {})
+    tiers = dict(v4.skills.get("tier", {}))
+    declined: set[str] = set()
+    adds = path.parent / "evidence_additions.md"
+    if adds.exists():                      # confirmed answers: coursework-level skills, and "no" (never counted)
+        from resume_builder.evidence import parse_additions
+        try:
+            for it in parse_additions(adds.read_text(encoding="utf-8"), entries, items)[0]:
+                if it.kind == "declined":
+                    declined.add(canonicalize(it.text, synonyms))
+                elif it.kind == "skill":
+                    tiers[it.text] = "coursework" if it.category in ("coursework", "tutorial") else "self-reported"
+        except Exception:  # noqa: BLE001 — a malformed additions file is reported by the Resume Builder, not here
+            pass
     listed = list(dict.fromkeys(canonicalize(n, synonyms) for n, t in tiers.items()
-                                if t in ("core", "extended", "self-reported")))
+                                if t in ("core", "extended", "self-reported", "coursework")
+                                and canonicalize(n, synonyms) not in declined
+                                and n not in v4.skills.get("planned_also", [])))
     sections["skills"] = [Entry("", [n for n, t in tiers.items() if t in ("core", "extended", "self-reported")])]
     evidence: dict[str, str] = {}
     for sec in ("experience", "projects", "coursework", "education"):
@@ -127,7 +141,7 @@ def _parse_v4(path: Path, text: str, synonyms: dict[str, list[str]]) -> Resume |
                 for sk in extract_skills(line, synonyms):
                     evidence.setdefault(sk, line)
     never = {canonicalize(n, synonyms) for n, t in tiers.items() if t == "planned"} | {
-        canonicalize(n, synonyms) for n in v4.skills.get("excluded", [])}
+        canonicalize(n, synonyms) for n in [*v4.skills.get("excluded", []), *v4.skills.get("planned_also", [])]} | declined
     evidence = {k: v for k, v in evidence.items() if k not in never}   # a design bullet naming planned tech
     skills = [x for x in dict.fromkeys([*listed, *evidence]) if x not in never]
     return Resume(str(path), file_hash(path), sections, skills, listed, evidence)

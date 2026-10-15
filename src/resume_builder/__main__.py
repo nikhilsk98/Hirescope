@@ -122,9 +122,12 @@ def cmd_add_tool(args) -> int:
 
 
 def cmd_decline(args) -> int:
-    from . import keywords
+    from . import interview, keywords
+    from .evidence import load_bank
     keywords.record_answer(args.keyword, "no")
-    print(f"Noted: you haven't used {args.keyword}. It won't be asked again and is never claimed (a known gap).")
+    p = interview.save_answer("skills", f"Have you used {args.keyword}?", "no", True, load_bank(), keyword=args.keyword,
+                              where="—")
+    print(f"Noted in {p}: you haven't used {args.keyword}. It won't be asked again and is never claimed (a known gap).")
     return 0
 
 
@@ -317,7 +320,7 @@ def cmd_add_evidence(args) -> int:
     from . import interview
     from .evidence import load_bank
     p = interview.save_answer(args.entry, args.question, args.answer, args.confirm, load_bank(), keyword=args.keyword,
-                              level=args.level)
+                              level=args.level, where=args.where)
     print(f"Saved to {p} (dated, confirmed). The evidence bank rebuilds on the next run.")
     return 0
 
@@ -429,7 +432,8 @@ def main(argv=None) -> int:
     p.add_argument("--question", required=True)
     p.add_argument("--answer", required=True)
     p.add_argument("--keyword", help="the JD keyword the question was about (tools go to tool_checklist.md)")
-    p.add_argument("--level", help="production | project | coursework | tutorial (tools)")
+    p.add_argument("--level", help="production | project | coursework | tutorial (tools, skills)")
+    p.add_argument("--where", help="where it was used (role, project or course), when --entry is skills")
     p.add_argument("--confirm", action="store_true", help="you confirm the answer is true and may be used")
     p = sub.add_parser("add-tool")
     p.add_argument("--tool", required=True)

@@ -333,3 +333,40 @@ def test_v4_relocation_drops_github_from_the_contact_line(v4env):
     checks = {x.name: x for x in rep.checks}
     assert checks["contact_one_line"].ok and checks["links"].ok, (checks["contact_one_line"].detail, checks["links"].detail)
     assert "+1 (555)" in rep.extracted_text                        # no need to drop "+1" now
+
+
+def test_v4_declines_and_coursework_level_skills(v4env):
+    """evidence_additions.md: a confirmed "no" (decline) is never listed, asked or counted; a coursework-level skill
+    may be listed in Technical Skills — labelled "(coursework)" — only when the JD asks, never inside a bullet."""
+    from resume_builder import interview, keywords
+    b0 = build_bank()
+    interview.save_answer("skills", "Have you used Helm?", "no", True, b0, keyword="Helm", where="—")
+    interview.save_answer("skills", "Have you used Haskell? If yes, where?", "Used Haskell in coursework at Demo "
+                          "University", True, b0, keyword="Haskell", level="coursework", where="Demo University coursework")
+    text = rc.ADDITIONS.read_text()
+    assert "- Keyword: Helm\n" in text and "- Answer: no\n" in text and "- Level: coursework\n" in text
+    b, s = build_bank(), load_settings()
+    assert "Helm" in b.declined() and b.v4["skills"]["tier"]["Helm"] == "declined"
+    assert b.v4["skills"]["tier"]["Haskell"] == "coursework"
+    a = _job(v4env, "Requirements\n- Java, Haskell and Helm\n- Spring Boot", job_id="v4-cw",
+             keywords={"coverage": 0, "required_hit": 0, "required_total": 0, "keywords": [_kw("Helm"), _kw("Haskell")]})
+    c = pipeline.assign_ids(v4build.baseline(a, b, s))
+    names = [x.name for r in c.skills for x in r.items]
+    assert "Haskell (coursework)" in c.skills[0].items[-1].name and "Helm" not in names
+    assert not [p for p in rules_v4.problems(c, b, s, a) if "skills" in p]
+    from resume_builder import verify
+    assert verify.verify(c, b).ok                       # the "(coursework)" label doesn't hide the skill from the truth check
+    plan = keywords.plan(a, b, s)
+    assert any(g.startswith("Helm") for g in plan["known_gaps"]) and "Helm" not in {q["keyword"] for q in plan["questions"]}
+    c.skills[0].items[-1].name = "Haskell"                                                      # unlabelled
+    assert any("(coursework)" in p for p in rules_v4.problems(c, b, s, a))
+    c2 = pipeline.assign_ids(v4build.baseline(None, b, s))
+    c2.experience[1].bullets[0].text = "Contributed to Demo Bank's modernization with Haskell services."
+    assert any("never inside a bullet" in p for p in rules_v4.problems(c2, b, s, None))
+    c3 = pipeline.assign_ids(v4build.baseline(None, b, s))
+    c3.skills[0].items.append(SkillItem(name="Helm", evidence_ids=["skill-c"]))
+    assert any("haven't used" in p for p in rules_v4.problems(c3, b, s, None))
+    from jobsearch.config import load_synonyms
+    from jobsearch.extract.resume import parse_resume
+    r = parse_resume(rc.MASTER_RESUME, load_synonyms())
+    assert "Haskell" in r.skills and "Helm" not in r.skills

@@ -93,6 +93,8 @@ def plan(analysis: dict, bank: Bank, settings) -> dict:
             #                     review"), domains or unrecognized fragments ("OE", "OR")
         out["missing"].append(term)
         prev = ans.get(term.casefold())
+        if term in bank.declined():                  # a confirmed "no" in evidence_additions.md
+            prev = {"answer": "no", "at": "evidence_additions.md"}
         tool = _tool(bank, term, surface)
         broader = [c for c, members in _CATEGORY_TERMS.items() if term in members and c != term
                    and any(m in have for m in members)]

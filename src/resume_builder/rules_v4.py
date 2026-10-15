@@ -250,10 +250,17 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
                 out.append(f"skills: '{s.name}' is on the master's Excluded list")
             elif tier == "planned" or canonical(s.name) in also:
                 planned_hit.append(s.name)
+            elif tier == "declined":
+                out.append(f"skills: '{s.name}' — you said you haven't used it (evidence_additions.md)")
             elif tier == "self-reported":
                 self_n.append(s.name)
                 if not mentions(analysis, s.name):
                     out.append(f"skills: '{s.name}' is self-reported: only when the JD explicitly asks for it (rule 53)")
+            elif tier == "coursework":
+                if not mentions(analysis, re.sub(r"\s*\(coursework\)$", "", s.name)):
+                    out.append(f"skills: '{s.name}' is coursework-level: only when the JD asks for it (rule 75)")
+                if "(coursework)" not in s.name:
+                    out.append(f"skills: '{s.name}' is coursework-level: list it as '{s.name} (coursework)' (rule 75)")
             elif tier == "extended" and analysis and not mentions(analysis, s.name):
                 out.append(f"skills: '{s.name}' is an extended skill the JD doesn't mention (rule 53)")
             elif tier is None and row.category.casefold() != "concepts":
@@ -262,7 +269,8 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
         out.append(f"skills: planned (not built) {', '.join(planned_hit)} — never listed (rules 50, 53)")
     if len(self_n) > int(sk.get("self_max", 4)):
         out.append(f"skills: {len(self_n)} self-reported skills ({', '.join(self_n)}); at most {sk.get('self_max', 4)}")
-    self_only = {canonical(n) for n, t in sk.get("tier", {}).items() if t == "self-reported"}
+    self_only = {canonical(re.sub(r"\s*\(.*\)$", "", n)) for n, t in sk.get("tier", {}).items()
+                 if t in ("self-reported", "coursework", "declined")}
     for sec, eid, b in bullets:
         # an in-progress project's bullets describe its own planned design (rule 50), which may name that
         # project's planned technology (e.g. Redis in VibeSpace); everywhere else a self-reported skill stays out
@@ -270,8 +278,11 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
         p = X.get("projects", {}).get(eid, {})
         if sec == "projects" and p.get("in_progress"):
             own = {canonical(t) for t in (bank.entries[eid].tech if eid in bank.entries else [])}
-        hit = [t for t in terms_in(b.text) if t in self_only and t not in own and t not in {canonical(n) for n, tt in
-                                                                         sk.get("tier", {}).items() if tt != "self-reported"}]
+        evidenced = {canonical(n) for n, tt in sk.get("tier", {}).items() if tt in ("core", "extended")}
+        found = set(terms_in(b.text)) | {canonical(re.sub(r"\s*\(.*\)$", "", n)) for n, tt in sk.get("tier", {}).items()
+                                         if tt in ("self-reported", "coursework", "declined") and re.search(
+                                             rf"(?<![\w.+#]){re.escape(re.sub(r'\s*\(.*\)$', '', n))}(?![\w+#])", b.text)}
+        hit = [t for t in found if t in self_only and t not in own and t not in evidenced]
         if hit:
             out.append(f"{b.id}: names self-reported {', '.join(hit)} — never inside a bullet (rule 53)")
     if rows and rows[-1].category.casefold() == "certifications":

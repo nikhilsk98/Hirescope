@@ -132,8 +132,13 @@ class Bank:
     def evidenced_terms(self) -> set[str]:
         out: set[str] = set()
         for i in self.items.values():
-            out.update(i.technologies)
+            if i.kind != "declined":
+                out.update(i.technologies)
         return out
+
+    def declined(self) -> set[str]:
+        """Canonical terms you confirmed you haven't used (evidence_additions.md "Answer: no")."""
+        return {t for i in self.items.values() if i.kind == "declined" for t in i.technologies}
 
     def to_json(self) -> dict:
         return {"version": self.version, "hashes": self.hashes, "warnings": self.warnings, "excluded": self.excluded,
@@ -434,7 +439,8 @@ def parse_additions(text: str, entries: dict[str, Entry], items: dict[str, Item]
             continue
         k, v = m.group(1).strip().casefold(), m.group(2).strip()
         key = {"q": "question", "question": "question", "a": "answer", "answer": "answer", "status": "status",
-               "role/project": "where", "role": "where", "project": "where", "level": "level"}.get(k)
+               "role/project": "where", "role": "where", "project": "where", "level": "level",
+               "keyword": "keyword"}.get(k)
         if key == "answer" and cur.get("old"):
             blocks.append(dict(cur, answer=v, line=n))   # old form: several A: lines per block
             cur["consumed"] = True
@@ -457,11 +463,24 @@ def parse_additions(text: str, entries: dict[str, Entry], items: dict[str, Item]
         e = entries.get(eid)
         counters[eid] = counters.get(eid, 0) + 1
         iid = f"add-{eid}-{counters[eid]}"
+        kw = (blk.get("keyword") or "").strip()
+        if kw and re.fullmatch(r"(?i)no|none|not used|never(?: used)?|i haven'?t(?: used it)?", ans.strip(" .")):
+            # a confirmed "no": never claimed, never asked again (kept here so it survives cache resets)
+            it = Item(iid, "declined", kw, technologies=[canonical(kw)], source="additions", added=day,
+                      line=blk["line"])
+            it.kind = "declined"
+            out.append(it)
+            continue
         a, o, mt = _facts(ans)
         sec = e.section if e else ("skill" if eid == "skills" else "coursework")
-        out.append(Item(iid, sec, ans, e.id if e else None, e.organization if e else None,
-                        e.role if e else None, e.dates if e else None, terms_in(ans), a, o, mt,
-                        source="additions", added=day, level=blk.get("level"), where=blk.get("where"), line=blk["line"]))
+        it = Item(iid, sec, ans, e.id if e else None, e.organization if e else None,
+                  e.role if e else None, e.dates if e else None, terms_in(ans), a, o, mt,
+                  source="additions", added=day, level=blk.get("level"), where=blk.get("where"), line=blk["line"])
+        if kw and sec == "skill":
+            # a confirmed skill answer ("Go — coursework"): the skill itself, at its level
+            it.text, it.technologies, it.kind = kw, [canonical(kw)], "skill"
+            it.category = blk.get("level") or "self-reported"
+        out.append(it)
     return out, warnings
 
 
@@ -670,6 +689,15 @@ def _build_v4(text: str, master: Path, additions: Path, template: Path | None, c
             sk["tier"].setdefault(t.name, "self-reported")
     hashes["tool_checklist"] = sha256_file(checklist) if checklist.exists() else "none"
     hashes["code"] = code_hash()
+    no = {i.technologies[0] for i in items.values() if i.kind == "declined"}
+    for name, tier in list(sk["tier"].items()):
+        if canonical(re.sub(r"\s*\(.*\)$", "", name)) in no and tier != "planned":
+            sk["tier"][name] = "declined"            # you said no: overrides a self-reported entry in the master
+            for k in [k for k, i in items.items() if i.kind == "skill" and i.text == name]:
+                del items[k]
+    for i in items.values():
+        if i.source == "additions" and i.kind == "skill":
+            sk["tier"][i.text] = "coursework" if i.category in ("coursework", "tutorial") else "self-reported"
     for x in v4.excluded_roles + v4.excluded_projects:
         excluded.append({"id": f"excluded-{_slug(x, 4)}", "line": None, "text": x, "status": "excluded",
                          "source": master.name, "section": "experience"})

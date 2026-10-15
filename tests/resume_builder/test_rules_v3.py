@@ -328,7 +328,7 @@ def test_additions_format_status_demo_and_tool_routing(rb_env):
                               "Wrote nightly Spring Batch jobs for the payments service", True, b, day="2026-10-14",
                               keyword="Spring Batch")
     text = p.read_text()
-    assert p == rc.ADDITIONS and "## 2026-10-14 — exp-demo\n- Question: Have you used Spring Batch?" in text
+    assert p == rc.ADDITIONS and "## 2026-10-14 — exp-demo\n- Keyword: Spring Batch\n- Question: Have you used Spring Batch?" in text
     assert "- Status: confirmed\n- Role/project: Software Engineer — Demo Systems Inc, Boston MA" in text
     # a tool answer ticks the checklist instead of duplicating it here
     tp = interview.save_answer("exp-demo", "Which CI/CD tools?", "GitHub Actions for the payments repo", True, b,

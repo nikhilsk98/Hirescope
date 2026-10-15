@@ -28,7 +28,8 @@ HEADER = ("# Evidence additions\n\n"
           "`Status: confirmed` are used. Tool answers go to tool_checklist.md instead. Edit or delete freely; the\n"
           "evidence bank is rebuilt when this file changes.\n\n"
           "Format, one block per answer:\n\n"
-          "    ## YYYY-MM-DD — <entry id, e.g. exp-accenture>\n"
+          "    ## YYYY-MM-DD — <entry id, e.g. exp-accenture, or skills>\n"
+          "    - Keyword: …          (the JD keyword asked about; \"Answer: no\" records that you haven't used it)\n"
           "    - Question: …\n"
           "    - Answer: …\n"
           "    - Status: confirmed\n"
@@ -83,7 +84,7 @@ def is_tool(keyword: str, bank: Bank) -> bool:
 
 def save_answer(entry_id: str, question: str, answer: str, confirmed: bool, bank: Bank,
                 path: Path | None = None, day: str | None = None, keyword: str | None = None,
-                level: str | None = None, tool_path: Path | None = None) -> Path:
+                level: str | None = None, tool_path: Path | None = None, where: str | None = None) -> Path:
     """Save one confirmed answer. A tool answer (keyword is a tool) ticks it in tool_checklist.md with where and
     level; anything else is appended to evidence_additions.md. Refuses without explicit confirmation, for unknown
     entries, or empty answers."""
@@ -93,25 +94,26 @@ def save_answer(entry_id: str, question: str, answer: str, confirmed: bool, bank
     if entry_id not in bank.entries and entry_id not in ("skills", "coursework"):
         raise InputError(f"unknown entry '{entry_id}' (known: {', '.join(sorted(bank.entries))}, skills, coursework)")
     a = _clean(answer, 500)
-    if len(a) < 5:
+    if len(a) < 5 and not (keyword and a.casefold() in ("no", "none")):
         raise InputError("the answer is empty")
     lv = (level or "").strip().casefold() or None
     if lv and lv not in tools.LEVELS:
         raise InputError(f"level must be one of {', '.join(tools.LEVELS)}")
     e = bank.entries.get(entry_id)
-    where = (e.organization or e.role) if e else "Multiple roles"
-    if keyword and is_tool(keyword, bank):
+    place = where or ((e.organization or e.role) if e else "Multiple roles")
+    if keyword and is_tool(keyword, bank) and entry_id != "skills":
         if not lv:
             raise InputError(f"{keyword} is a tool: say the level (--level production|project|coursework|tutorial)")
         tp = tool_path or rc.TOOL_CHECKLIST
-        tools.confirm(tp, _clean(keyword, 60), where, lv)
+        tools.confirm(tp, _clean(keyword, 60), place, lv)
         keywords.record_answer(keyword, "saved")
         return tp
     path = path or rc.ADDITIONS
     day = day or date.today().isoformat()
     text = path.read_text(encoding="utf-8") if path.exists() else HEADER
-    block = (f"\n## {day} — {entry_id}\n- Question: {_clean(question, 300)}\n- Answer: {a}\n- Status: confirmed\n"
-             f"- Role/project: {_clean(e.heading if e else entry_id, 200)}\n" + (f"- Level: {lv}\n" if lv else ""))
+    block = (f"\n## {day} — {entry_id}\n" + (f"- Keyword: {_clean(keyword, 60)}\n" if keyword else "")
+             + f"- Question: {_clean(question, 300)}\n- Answer: {a}\n- Status: confirmed\n"
+             f"- Role/project: {_clean(where or (e.heading if e else entry_id), 200)}\n" + (f"- Level: {lv}\n" if lv else ""))
     tmp = path.with_suffix(".tmp")
     tmp.write_text(text.rstrip("\n") + "\n" + block, encoding="utf-8")
     tmp.replace(path)

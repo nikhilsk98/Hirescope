@@ -694,3 +694,11 @@ master also lists as self-reported — never in Technical Skills, while VibeSpac
 HPE Cloud Developer Intern rebuilt: **READY v6**, first attempt, no repairs, contact on one line (relocation, "+1"
 kept, GitHub link only on the project lines), coursework kept. C#, Go, Rust (Amazon): still unanswered.
 Tests: 558 passed.
+
+**Answers recorded (2026-10-15)**: C# — no; PyTorch — no (also unticked in tool_checklist.md; stays planned for
+VibeSpace, never in Skills); Go and Rust — coursework at Northeastern (Skills only when a JD asks, as "Go (coursework)",
+never in bullets); Prometheus / Grafana stay planned. All kept in `evidence_additions.md` (new `- Keyword:` field;
+"Answer: no" = a recorded decline, which beats a self-reported entry in the master and is read by HireScope's matcher
+too). Fixed while rebuilding: the truth check compared "Go (coursework)" with the label attached ("Go" isn't in the
+keyword vocabulary). Amazon SDE Early Career rebuilt: **READY v4**, first attempt — Go / Rust (coursework) in
+Languages, no C#. Old answers archived in `inputs/resume/archive/before-decisions/`. Tests: 559 passed.

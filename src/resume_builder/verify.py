@@ -167,8 +167,9 @@ def verify(content: Content, bank: Bank, llm_review: dict | None = None) -> Trut
     listed = {i.text.casefold() for i in bank.items.values() if i.section == "skill"}
     for cat in content.skills:
         for s in cat.items:
-            terms = terms_in(s.name) or [canonical(s.name)]
-            ok = s.name.casefold() in listed or all(t in evidenced for t in terms)
+            name = re.sub(r"\s*\((?:coursework|tutorial)\)$", "", s.name)     # "Go (coursework)": the level label
+            terms = terms_in(name) or [canonical(name)]
+            ok = name.casefold() in listed or all(t in evidenced for t in terms)
             rep.checked.append({"where": f"skills: {s.name}", "text": s.name, "evidence": s.evidence_ids, "ok": ok})
             if not ok:
                 rep.findings.append(Finding(f"skills: {s.name}", "technology", s.name,
