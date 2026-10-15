@@ -158,8 +158,14 @@ def test_v4_skill_tiers_extended_self_reported_planned(v4env):
     probs = rules_v4.problems(c, b, s, a)
     assert any("planned" in p and "LightGBM" in p for p in probs)
     c.skills[0].items.pop()
+    c.skills[1].items.append(SkillItem(name="Go", evidence_ids=["skill-go"]))
     c.skills[1].items.append(SkillItem(name="Redis", evidence_ids=["skill-redis"]))
-    assert any("'Redis' is self-reported" in p for p in rules_v4.problems(c, b, s, a))        # JD didn't ask
+    p53 = rules_v4.problems(c, b, s, a)
+    assert any("planned" in p and "Redis" in p for p in p53)        # planned for Beta: never in Skills (rule 50, v4.2)
+    a3 = _job(v4env, "Requirements\n- Java and Redis caching", job_id="v4-redis")
+    c3 = pipeline.assign_ids(v4build.baseline(a3, b, s))
+    assert "Redis" not in [x.name for r in c3.skills for x in r.items]       # even when the JD asks for it
+    assert not [p for p in rules_v4.problems(c3, b, s, a3) if "Redis" in p]  # … and the Beta design bullet may name it
     c2 = pipeline.assign_ids(v4build.baseline(None, b, s))
     c2.experience[1].bullets[0].text = "Contributed to Demo Bank's modernization, deploying Go services on Linux."
     assert any("never inside a bullet" in p for p in rules_v4.problems(c2, b, s, None))
@@ -308,3 +314,22 @@ def test_v4_post_repair_rules_are_rechecked(v4env):
     assert fin["status"] == "failed" and any("rules_after_repair" in r for r in fin["reasons"])
     m = json.loads((jd / f"v{fin['version']}" / "manifest.json").read_text())
     assert m["status"] == "failed"
+
+
+@needs_tex()
+def test_v4_relocation_drops_github_from_the_contact_line(v4env):
+    """Rule 31 (v4.2): remote / out-of-state jobs → "Boston, MA (Open to Relocation)" and no GitHub link in the
+    contact line (the projects link GitHub); the contact line stays on one line."""
+    from resume_builder import render
+    b, s = build_bank(), load_settings()
+    a = _job(v4env, "Requirements\n- Java and Spring Boot", job_id="v4-reloc", location="Austin, TX")
+    c = pipeline.assign_ids(v4build.baseline(a, b, s))
+    assert c.contact_location == "relocation"
+    parts = render.split_template(rc.TEMPLATE.read_text(), s)
+    h = v4build.patch_header(parts.header_text, c, b)
+    assert "(Open to Relocation)" in h and "github.com/demo-candidate}" not in h and "linkedin.com/in/democ" in h
+    res, rep, _ = pipeline.compile_and_validate(c, b, s, v4env.root / "reloc-build",
+                                                {"entry": 3.0, "template_entry": 3.0, "leading": 12.0})
+    checks = {x.name: x for x in rep.checks}
+    assert checks["contact_one_line"].ok and checks["links"].ok, (checks["contact_one_line"].detail, checks["links"].detail)
+    assert "+1 (555)" in rep.extracted_text                        # no need to drop "+1" now

@@ -245,9 +245,10 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
             if row.category.casefold() == "certifications":
                 continue
             tier = tier_of(bank, s.name)
+            also = {canonical(x) for x in sk.get("planned_also", [])}
             if s.name.casefold() in {x.casefold() for x in sk.get("excluded", [])}:
                 out.append(f"skills: '{s.name}' is on the master's Excluded list")
-            elif tier == "planned":
+            elif tier == "planned" or canonical(s.name) in also:
                 planned_hit.append(s.name)
             elif tier == "self-reported":
                 self_n.append(s.name)

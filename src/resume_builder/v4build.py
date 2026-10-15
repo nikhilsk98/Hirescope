@@ -93,6 +93,8 @@ def baseline(analysis: dict | None, bank: Bank, settings) -> Content:
         for name, tier in sk["tier"].items():
             if tier not in ("extended", "self-reported") or canonical(name) in have:
                 continue
+            if canonical(name) in {canonical(x) for x in sk.get("planned_also", [])}:
+                continue                     # planned for an in-progress project: never in Skills until built
             if not rules_v4.mentions(analysis, name):
                 continue
             if tier == "self-reported":
@@ -252,6 +254,9 @@ def patch_header(header: str, c: Content, bank: Bank, drop_plus: bool = False) -
     h = header
     if c.contact_location == "relocation" and ct.get("relocation") and ct.get("location"):
         h = h.replace(ct["location"], tex(ct["relocation"]), 1)
+        # rule 31 (v4.2): relocation jobs drop the GitHub link from the contact line (the projects link GitHub)
+        gh = re.escape(ct.get("github") or "github.com")
+        h = re.sub(rf"\s*\\,\\textbar\\,\s*\\href\{{https?://(?:www\.)?{gh}/?\}}\{{[^}}]*\}}", "", h, count=1)
     if drop_plus:
         h = h.replace("+1 (", "(", 1)
     return h

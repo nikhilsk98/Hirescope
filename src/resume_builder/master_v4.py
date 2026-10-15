@@ -485,7 +485,8 @@ def parse(text: str, source: str = "master_resume.md"):
         v4.roles[r["entry_id"]].update(display_org=r["org"], display_location=r["location"], display_title=r["title"])
 
     # ---- skills inventory ----
-    sk = {"rows": [], "tier": {}, "category": {}, "excluded": [], "planned": [], "concepts": [], "self_max": 4}
+    sk = {"rows": [], "tier": {}, "category": {}, "excluded": [], "planned": [], "planned_also": [], "concepts": [],
+          "self_max": 4}
     inv = by_name.get("skills inventory") or []
     mode = None
     tbl: list[str] = []
@@ -522,8 +523,12 @@ def parse(text: str, source: str = "master_resume.md"):
             sk["concepts"] = [x.strip() for x in s[2:].split(",")]
         elif mode == "planned" and s.startswith("- "):
             first, *rest = s[2:].split(".")
-            also = set(split_skills(" ".join(rest).replace("are also self-reported above", "").replace(" and ", ", ")))
+            also = set(split_skills(re.sub(r"\s+(?:is|are) also self-reported.*$", "", " ".join(rest).strip())
+                                    .replace(" and ", ", ")))
             sk["planned"] = [x for x in split_skills(re.sub(r"\(.*?\)", "", first)) if x not in also]
+            # "also self-reported" planned tech (Redis, PyTorch, …): known, but never in Technical Skills until built
+            # (rule 50); a design bullet of the in-progress project may still name it
+            sk["planned_also"] = sorted(also)
         elif mode == "excluded" and s.startswith("- "):
             sk["excluded"] = split_skills(s[2:])
     for p in sk["planned"]:

@@ -685,3 +685,12 @@ GitHub Actions bullet; repairs could cut a role below the master's minimum and n
 (HPE v2 was built that way and is superseded; failed / superseded versions stay in the folder, never current); the
 TeX-comment portfolio link and the `\bfseries` name in the header; link boxes shorter than their glyphs.
 Tests: 557 passed (DEMO v4 master + template fixtures; the default-resume regression compares extracted text).
+
+**Decisions applied (2026-10-15, rules v4.2)**: relocation jobs drop the GitHub link from the contact line (rule 31;
+"+1" only if it still wraps); confirmed answers stay in `evidence_additions.md`, never in `master_resume.md` (rules 75,
+77 reworded in your rules file); planned technology — including Redis, PyTorch, Prometheus and Grafana, which the
+master also lists as self-reported — never in Technical Skills, while VibeSpace's design bullet may name Redis (rule
+50); the master's changelog line about the relocation line now says confirmed (the only edit to master_resume.md).
+HPE Cloud Developer Intern rebuilt: **READY v6**, first attempt, no repairs, contact on one line (relocation, "+1"
+kept, GitHub link only on the project lines), coursework kept. C#, Go, Rust (Amazon): still unanswered.
+Tests: 558 passed.

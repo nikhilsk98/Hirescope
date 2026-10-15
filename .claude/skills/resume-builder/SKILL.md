@@ -33,6 +33,9 @@ scripts do everything deterministic. Run every command from the repo root with `
   category never implies a specific tool; a confirmed specific tool may be described by its general category
   ("CI/CD pipelines with Jenkins", "relational databases (MySQL)").
 - **Metrics flagged in the brief (rule 3)**: never change or merge them; tell Nikhil which bullets to check.
+- Confirmed answers go to `evidence_additions.md` (tools to `tool_checklist.md`); never edit `master_resume.md`
+  (rules 75, 77). Planned technology (incl. Redis, PyTorch, Prometheus, Grafana) never goes in Technical Skills; a
+  VibeSpace design bullet may name it (rule 50).
 - Never move a fact to another role. Team work stays "Contributed to" (Accenture), DASH keeps "Team of 3", VibeSpace
   stays "In Progress" with design verbs only ("Designing", "Architecting"; never "Building") and no results (rules 11, 50).
 - One metric of each kind per resume (rule 8). Oracle is skill-only; Node.js stays out of Accenture bullets (12). No
@@ -61,7 +64,8 @@ scripts do everything deterministic. Run every command from the repo root with `
 2. **Draft** (you, as the drafter) → `_work/draft.json` with `notes.stage: "draft"`. With a v4 master, `baseline.json`
    **is** the Default one-page snapshot: keep it and swap bullets for the JD only as the brief's master notes allow
    (e.g. the S3/SQS bullet for cloud roles, the Kafka bullet when the JD asks for Kafka), citing the bank bullet's id;
-   set `contact_location` as the brief says (relocation for remote / out-of-state jobs), and an experience entry's
+   set `contact_location` as the brief says (relocation for remote / out-of-state jobs; the build then drops the
+   GitHub link from the contact line, rule 31), and an experience entry's
    `title` only to a title the master records. Section order is fixed. Then:
    - choose and order entries/bullets by JD relevance, evidence strength, impact and recency. Section order is
      preset from the track and level (co-op / intern / new grad: Education → Skills → Experience → Projects;

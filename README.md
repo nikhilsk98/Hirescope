@@ -494,7 +494,8 @@ checks, reports, versions, HireScope statuses). It never submits applications an
   skill-only facts (Oracle anywhere, Node.js at Accenture) stay out of bullets (12); no compliance claims (13); no
   performance numbers at Rescho, intern-sized claims (14); certifications as the last skills row, AWS always, Azure
   Fundamentals only for cloud roles or an Azure JD (29); "Boston, MA (Open to Relocation)" for remote / out-of-state
-  jobs, dropping "+1" if the contact line wraps (31); the freelance title only as the master records it (37); sector
+  jobs, without the GitHub link, dropping "+1" only if the contact line still wraps (31); the freelance title only as
+  the master records it (37); sector
   labels and at most 2 bullets per client (38–39, review); in-progress VibeSpace bullets start with design verbs, no
   results, no planned tech in Skills (50); no student phrasing (78); the master's overlap pairs (A3/C2, B3/Material UI)
   at most one each. Skills (53): core always; extended when the JD mentions them; self-reported only when the JD asks,
@@ -554,9 +555,11 @@ the next request build a new version.
 - **HireScope reads the same v4 master** for scoring: only usable bullets and facts per role / project, "Yes"
   courses and the core / extended / self-reported skills — never Builder notes, Legacy bullets, planned or Excluded
   skills. Title rules include your Data Engineer and Cloud / AWS Developer tracks; graduation is May 2027.
-- **Open decision (rule 31 vs rule 21)**: for remote / out-of-state jobs the "Boston, MA (Open to Relocation)" contact
-  line wraps even without "+1". The build reports it as a warning (`contact_one_line`); say in resume_rules.md what to
-  drop next (e.g. the GitHub link on those jobs) and the builder will follow it.
+- **Relocation line (rule 31, v4.2)**: for remote / out-of-state jobs the contact line reads "Boston, MA (Open to
+  Relocation)" and drops the GitHub link (the projects already link GitHub); "+1" is dropped only if it still wraps.
+- **Planned technology** (the master's "Planned" line, including Redis, PyTorch, Prometheus and Grafana, which are also
+  self-reported) never appears in Technical Skills until built; an in-progress project's design bullet may name it
+  (Redis in VibeSpace).
 
 ### Evidence interview
 `python -m resume_builder interview <id>` lists the keyword questions (above) and up to 5 more (requirements your
