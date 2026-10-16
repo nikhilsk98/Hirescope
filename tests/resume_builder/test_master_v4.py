@@ -531,3 +531,45 @@ def test_object_oriented_design_not_matched_by_unrelated_text():
     a = {"keywords": [], "requirements": [], "required": ["Design and build REST APIs in Java"], "preferred": [],
          "mentioned": [], "responsibilities": ["Object storage on S3"]}
     assert not rules_v4.mentions(a, "Object-Oriented Design")
+
+
+def _with_ml_and_cloud_skills():
+    t = rc.MASTER_RESUME.read_text()
+    row = "| Stored procedures | Database | DemoCorp | extended |\n"
+    assert row in t
+    rc.MASTER_RESUME.write_text(t.replace(row, row + "| scikit-learn | ML | Freelance | extended |\n"
+                                                    "| GCP | Cloud | Beta | extended |\n"))
+
+
+def test_v44_ml_skill_named_in_a_bullet_is_listed_when_the_jd_wants_ml(v4env):
+    """Rule 85: an extended ML skill is eligible for Skills when the JD asks for machine learning and a bullet on the
+    page names it; the reviewer is told when it's missing; without the bullet (or without ML in the JD) it isn't."""
+    _with_ml_and_cloud_skills()
+    b, s = build_bank(), load_settings()
+    a = _job(v4env, "Requirements\n- Java\nPreferred\n- Experience with machine learning", job_id="v4-ml85")
+    c = pipeline.assign_ids(v4build.baseline(a, b, s))
+    sk = SkillItem(name="scikit-learn", evidence_ids=["skill-scikit-learn"])
+    c.skills[1].items.append(sk)
+    assert any("scikit-learn" in p and "rule 53" in p for p in rules_v4.problems(c, b, s, a))     # no bullet names it
+    c.experience[0].bullets[1].text = "Prototyped order classification for the supplier with scikit-learn."
+    assert not [p for p in rules_v4.problems(c, b, s, a) if "scikit-learn" in p]
+    c.skills[1].items.remove(sk)
+    assert any(f["rule"] == "ML skills listed" and "rule 85" in f["detail"] for f in rules_v4.lint(c, b, s, a))
+    a2 = _job(v4env, "Requirements\n- Java and Spring Boot", job_id="v4-noml85")
+    c.skills[1].items.append(sk)
+    assert any("scikit-learn" in p for p in rules_v4.problems(c, b, s, a2))                     # JD doesn't want ML
+    assert not [f for f in rules_v4.lint(c, b, s, a2) if f["rule"] == "ML skills listed"]
+
+
+def test_v44_extended_cloud_platform_listed_for_a_cloud_jd(v4env):
+    _with_ml_and_cloud_skills()
+    b, s = build_bank(), load_settings()
+    a = _job(v4env, "Requirements\n- Java\nPreferred\n- Familiarity with cloud services", job_id="v4-gcp")
+    c = pipeline.assign_ids(v4build.baseline(a, b, s))
+    assert "GCP" in [x.name for r in c.skills for x in r.items]                    # the baseline offers it
+    assert not [p for p in rules_v4.problems(c, b, s, a) if "GCP" in p]
+    a2 = _job(v4env, "Requirements\n- Java and Spring Boot", job_id="v4-nocloud")
+    c2 = pipeline.assign_ids(v4build.baseline(a2, b, s))
+    assert "GCP" not in [x.name for r in c2.skills for x in r.items]
+    c2.skills[-2].items.append(SkillItem(name="GCP", evidence_ids=["skill-gcp"]))
+    assert any("GCP" in p and "rule 53" in p for p in rules_v4.problems(c2, b, s, a2))

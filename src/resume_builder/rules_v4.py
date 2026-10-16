@@ -215,6 +215,37 @@ def skill_trace_problems(c, bank: Bank) -> list[str]:
     return out
 
 
+ML_JD = re.compile(r"\bmachine[- ]learning\b|\bML\b|\bdeep learning\b", re.I)
+CLOUD_JD = re.compile(r"\bcloud\b", re.I)
+
+
+def skill_category(bank: Bank, name: str) -> str:
+    cats = v4(bank).get("skills", {}).get("category", {})
+    c = canonical(re.sub(r"\s*\(.*\)$", "", name)).casefold()
+    return next((v for n, v in cats.items() if canonical(re.sub(r"\s*\(.*\)$", "", n)).casefold() == c), "") or ""
+
+
+def named_in(text: str, name: str) -> bool:
+    base = re.sub(r"\s*\(.*\)$", "", name)
+    return bool(re.search(rf"(?<![\w.]){re.escape(base)}(?![\w])", text or "", re.I))
+
+
+def extended_ok(analysis: dict | None, name: str, bank: Bank, bullets_text: str) -> bool:
+    """Rule 53 + 85: an extended skill is listed when the JD names it; an extended ML skill also when the JD asks for
+    machine learning and a bullet on the page names it (rule 85); an extended cloud platform (GCP) also when the JD
+    asks for cloud."""
+    if not analysis:
+        return False
+    if mentions(analysis, name):
+        return True
+    cat = skill_category(bank, name).casefold()
+    jt = jd_text(analysis)
+    if cat in ("ml", "ai & ml") and (ML_JD.search(jt) or "Machine Learning" in jd_terms(analysis)) \
+            and named_in(bullets_text, name):
+        return True
+    return cat == "cloud" and bool(CLOUD_JD.search(jt))
+
+
 def tier_of(bank: Bank, name: str) -> str | None:
     tiers = v4(bank).get("skills", {}).get("tier", {})
     if name in tiers:
@@ -389,8 +420,10 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
                     out.append(f"skills: '{s.name}' is coursework-level: only when the JD asks for it (rule 75)")
                 if "(coursework)" not in s.name:
                     out.append(f"skills: '{s.name}' is coursework-level: list it as '{s.name} (coursework)' (rule 75)")
-            elif tier == "extended" and analysis and not mentions(analysis, s.name):
-                out.append(f"skills: '{s.name}' is an extended skill the JD doesn't mention (rule 53)")
+            elif tier == "extended" and analysis and not extended_ok(
+                    analysis, s.name, bank, " ".join(b.text for _s, _e, b in bullets)):
+                out.append(f"skills: '{s.name}' is an extended skill the JD doesn't mention (rule 53; an ML skill "
+                           "also when the JD asks for ML and a bullet names it, rule 85)")
             elif tier is None and row.category.casefold() != "concepts":
                 out.append(f"skills: '{s.name}' is not in the master's Skills inventory (rule 53)")
     if planned_hit:
@@ -468,7 +501,7 @@ def lint(c, bank: Bank, settings, analysis: dict | None) -> list[dict]:
     if analysis:
         from .jd_analysis import set_category_terms
         set_category_terms(settings)                  # rule 77's specific → general map, also in a fresh process
-        out += show_dont_list(c, bank, analysis) + area_findings(c, analysis)
+        out += show_dont_list(c, bank, analysis) + area_findings(c, analysis) + ml_skills_listed(c, bank, analysis)
     for ex in [*c.experience, *c.projects]:
         verbs = [b.text.split()[0].lower() for b in ex.bullets if b.text.split()]
         for a, b_ in zip(verbs, verbs[1:]):
@@ -519,4 +552,19 @@ def area_findings(c, analysis: dict) -> list[dict]:
         if n >= 3:
             out.append({"where": "resume", "rule": "distinct areas",
                         "detail": f"{n} bullets show only {a}; swap one for evidence of another area (rule 81)"})
+    return out
+
+
+def ml_skills_listed(c, bank: Bank, analysis: dict) -> list[dict]:
+    """Rule 85: when the JD asks for machine learning, an extended ML skill a bullet names belongs in Skills too."""
+    if not (ML_JD.search(jd_text(analysis)) or "Machine Learning" in jd_terms(analysis)):
+        return []
+    text = " ".join(b.text for _s, _e, b in c.all_bullets())
+    listed = {canonical(re.sub(r"\s*\(.*\)$", "", x.name)).casefold() for r in c.skills for x in r.items}
+    out = []
+    for name, tier in v4(bank).get("skills", {}).get("tier", {}).items():
+        if tier == "extended" and skill_category(bank, name).casefold() in ("ml", "ai & ml") and named_in(text, name) \
+                and canonical(re.sub(r"\s*\(.*\)$", "", name)).casefold() not in listed:
+            out.append({"where": "skills", "rule": "ML skills listed",
+                        "detail": f"{name} is named in a bullet and the JD asks for ML: list it in Skills (rule 85)"})
     return out

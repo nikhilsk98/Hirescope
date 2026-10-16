@@ -92,12 +92,14 @@ def baseline(analysis: dict | None, bank: Bank, settings) -> Content:
     if analysis:
         added, self_n = [], 0
         have = {canonical(bank.items[i].text) for _l, ids in rows for i in ids}
+        page = " ".join(b.text for e in [*exp, *projs] for b in e.bullets)
         for name, tier in sk["tier"].items():
             if tier not in ("extended", "self-reported", "coursework") or canonical(name) in have:
                 continue
             if canonical(name) in {canonical(x) for x in sk.get("planned_also", [])}:
                 continue                     # planned for an in-progress project: never in Skills until built
-            if not rules_v4.mentions(analysis, name):
+            if not (rules_v4.extended_ok(analysis, name, bank, page) if tier == "extended"
+                    else rules_v4.mentions(analysis, name)):
                 continue
             if tier == "self-reported":
                 if self_n >= int(sk.get("self_max", 4)):
@@ -377,6 +379,8 @@ def brief_lines(analysis: dict, bank: Bank, settings) -> list[str]:
               "- TDD is not automated testing: never claim or map TDD from test-writing bullets (rule 82).",
               "- Every Skills / certification item cites its master entry; the JD only selects (rule 83).",
               "- Introduce a client / sector before a bullet refers back to it (\"the distributor\") (rule 84).",
+              "- JD asks for ML: an extended ML skill a bullet names goes in Skills too; an extended cloud platform "
+              "(GCP) may be listed when the JD asks for cloud (rule 85).",
               "- Overflow: JD-irrelevant skills go before coursework or a project (rule 67)."]
     sk = X["skills"]
     asked = [(n, t) for n, t in sk["tier"].items() if t in ("extended", "self-reported") and rules_v4.mentions(analysis, n)]

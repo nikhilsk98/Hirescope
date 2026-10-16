@@ -741,3 +741,13 @@ resume_rules.md v4.3 adds rules 79–84 and extends rule 67; the builder enforce
 - 67: overflow drops JD-irrelevant skills (not named or covered by the JD, not in a bullet, certifications never) where
   a row loses a line, before coursework or a project (`pipeline.trim_skills`).
 LineVision (job 124710) regenerated under v4.3: READY v3, one page. Tests: 569 passed.
+
+## Rule 85 + GCP (2026-10-16)
+- resume_rules.md v4.4, rule 85: when the JD asks for machine learning, an extended ML skill a bullet names (scikit-learn
+  in the document-classification bullet) is eligible for Technical Skills, and the reviewer is told when it's missing
+  (`rules_v4.extended_ok`, `ml_skills_listed`); an extended cloud platform (GCP) is eligible when the JD asks for cloud.
+  The baseline uses the same check.
+- Master: GCP moved from Planned to the inventory (extended, VibeSpace, confirmed by Nikhil; no specific services yet);
+  VibeSpace line "Python, FastAPI, GCP (planned: Redis)". resume_template.tex still reads "Redis, GCP" (not edited).
+- Nissan Global (job 142563) regenerated: READY v3, one page (scikit-learn and GCP in Skills, Vue.js / Nuxt.js out).
+  Tests: 606 passed.
