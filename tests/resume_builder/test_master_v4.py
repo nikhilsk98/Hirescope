@@ -513,3 +513,21 @@ def test_v43_show_dont_list_and_distinct_areas_are_reviewer_findings(v4env):
     for x in c.experience[1].bullets:
         x.text = "Migrated messaging workflows to Kafka queues for Demo Bank's REST endpoints."
     assert any("show only backend / database" in d for d in [x["detail"] for x in rules_v4.area_findings(c, a)])
+
+
+@pytest.mark.parametrize("phrase", ["Understanding of object-oriented design principles", "Experience with OOP",
+                                    "object-oriented and functional design principles", "Object Oriented Design",
+                                    "OO design patterns", "Solid object-oriented programming skills"])
+def test_object_oriented_design_matches_jd_wording(phrase):
+    """The extended skill 'Object-Oriented Design' counts as asked for whatever the JD calls it, in a requirement or
+    only in its responsibilities."""
+    for where in ("required", "responsibilities"):
+        a = {"keywords": [], "requirements": [], "required": [], "preferred": [], "mentioned": [], "responsibilities": []}
+        a[where] = [phrase]
+        assert rules_v4.mentions(a, "Object-Oriented Design"), (phrase, where)
+
+
+def test_object_oriented_design_not_matched_by_unrelated_text():
+    a = {"keywords": [], "requirements": [], "required": ["Design and build REST APIs in Java"], "preferred": [],
+         "mentioned": [], "responsibilities": ["Object storage on S3"]}
+    assert not rules_v4.mentions(a, "Object-Oriented Design")

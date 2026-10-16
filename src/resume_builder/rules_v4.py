@@ -8,6 +8,7 @@ whatever a note says.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 from rapidfuzz import fuzz
 
@@ -95,6 +96,11 @@ def jd_text(analysis: dict | None) -> str:
                      *[k["term"] for k in analysis.get("keywords", [])]])
 
 
+@lru_cache(maxsize=64)
+def _text_terms(text: str) -> frozenset[str]:
+    return frozenset(terms_in(text))
+
+
 def mentions(analysis: dict | None, name: str) -> bool:
     """The JD mentions this skill (its canonical term, or the name itself as a word)."""
     if not analysis:
@@ -103,7 +109,7 @@ def mentions(analysis: dict | None, name: str) -> bool:
     if TDD.search(base):                 # "test-driven software development" in a JD asks for TDD (rule 82)
         return bool(TDD.search(jd_text(analysis)))
     c = canonical(base)
-    if c in jd_terms(analysis):
+    if c in jd_terms(analysis) or c in _text_terms(jd_text(analysis)):    # incl. responsibilities lines
         return True
     return bool(re.search(rf"(?<![\w.+#]){re.escape(base)}(?![\w+#])", jd_text(analysis), re.I))
 
