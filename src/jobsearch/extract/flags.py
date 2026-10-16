@@ -23,7 +23,8 @@ _CITIZEN = re.compile(
     r"(u\.?s\.?|united states)\s+citizen(ship)?\s+(is\s+)?(required|only)"
     r"|must\s+be\s+(a\s+)?(u\.?s\.?|united states)\s+citizen"
     r"|requires?\s+(u\.?s\.?|united states)\s+citizenship"
-    r"|only\s+(u\.?s\.?|united states)\s+citizens",
+    r"|only\s+(u\.?s\.?|united states)\s+citizens"
+    r"|requires?\s+that\s+[^.\n]{0,60}?\bbe\s+(a\s+)?(u\.?s\.?|united states)\s+citizens?",
     re.I,
 )
 # Export-control (ITAR/EAR) "U.S. person" requirements: citizens, permanent residents and protected individuals only.
@@ -33,7 +34,12 @@ _US_PERSON = re.compile(
     rf"|requires?\s+(a\s+|being\s+a\s+|that\s+\w+\s+(be|is)\s+a\s+)?{_USP}"
     rf"|(only|limited to|restricted to)\s+{_USP}"
     rf"|{_USP}\s+(only|status\s+(is\s+)?required|(is\s+)?required|as\s+defined)"
-    rf"|\b(itar|export control\w*|ear)\b[^.\n]{{0,120}}\b{_USP}",
+    rf"|\b(itar|export control\w*|ear)\b[^.\n]{{0,120}}\b{_USP}"
+    # "U.S. Person status (citizen or LPR) is required", "contingent upon verification of U.S. person status",
+    # a requirements-list item "- U.S. Person status, since this role requires …"
+    rf"|{_USP}\s+status\b[^.\n]{{0,120}}\b(required|requires?)\b"
+    rf"|\b(requires?|required|contingent upon|verification of|establish\w*|must (have|hold|provide))\b[^.\n]{{0,80}}{_USP}\s+status"
+    rf"|^[-•·*\s]*{_USP}\s+status\b",
     re.I,
 )
 # the statutes that define a U.S. person (22 CFR 120.62, formerly 120.15; 8 U.S.C. 1324b(a)(3) protected individual)
@@ -66,7 +72,8 @@ _EEO = re.compile(r"without regard to|regardless of|irrespective of|discriminat\
                   r"\b(race|religion|national origin|sexual orientation)\b", re.I)
 # Only this job, unconditionally: "positions requiring…" / "where required" scope it; "may" / "might" hedge it
 _SCOPE = re.compile(r"\b(positions? (with|that|requiring)|roles? (with|that|requiring)|for (all|certain|some|select) "
-                    r"(positions|roles)|if (the|this|a) (position|role)|where (required|applicable)|when required)\b", re.I)
+                    r"(positions|roles)|if (the|this|a) (position|role)|should (the|this|a) (position|role|job) require|where (required|"
+                    r"applicable)|when required)\b", re.I)
 _HEDGE = re.compile(r"\b(may|might|could|potentially|possibly)\b", re.I)
 _ABBR_END = re.compile(r"(?:\b(?:[A-Za-z]\.){1,3}[A-Za-z]|\b[A-Z]|\b(?:e\.g|i\.e|etc|vs|no|inc|corp|co|jr|sr|st|dr|mr|ms))$",
                        re.I)
@@ -122,8 +129,9 @@ def _sentences(text: str):
 
 
 def us_person_kind(s: str) -> str | None:
-    """One sentence → "US citizenship required" / "US person required (export control)" (hard), "possible" (export
-    control mentioned, but scoped to some roles or hedged: check eligibility), or None (no requirement: EEO
+    """One sentence → "US citizenship required" / "US person required (export control)" (hard: only when it explicitly
+    limits the role to U.S. citizens, permanent residents, protected individuals or a defined U.S. person), "possible"
+    (export control without that wording, scoped to some roles, or hedged: check eligibility), or None (no requirement: EEO
     boilerplate, "or otherwise authorized to work", a skill mention)."""
     s = _US_BASED.sub("", s)                         # HireScope lists U.S. jobs: "if this role is based in the U.S."
     citizen, person, cite = _CITIZEN.search(s), _US_PERSON.search(s), _CFR.search(s)
@@ -142,18 +150,19 @@ def us_person_kind(s: str) -> str | None:
     only_green = green and not (person or cite or citizen or export)
     if only_green and _SPONSOR_CTX.search(s):
         return None
-    if export and not (person or cite or citizen or _PERSON_WORDS.search(s)) and _AUTH_ROUTE.search(s):
-        return "possible"                            # "should be eligible for any required authorizations"
+    if export and not (person or cite or citizen or _PERSON_WORDS.search(s)):
+        # export control with no citizen / permanent-resident / protected-individual / U.S.-person wording ("must be
+        # eligible to access export-controlled information", "subject to ITAR"): check eligibility, never filtered
+        return "possible" if (_REQ.search(s) or _HEDGE.search(s) or _EXPORT_ACCESS.search(s) or _AUTH_ROUTE.search(s)
+                              or re.search(r"\bcontingent\b|\binvolves?\b", s, re.I)) else None
     if person or cite:
         return "US person required (export control)"
     if citizen and not _HEDGE.search(s):
         return "US person required (export control)" if _PERSON_WORDS.search(s) else "US citizenship required"
     if _HEDGE.search(s):
         return "possible" if personish else None
-    if green or (export and _REQ.search(s) and _ROLE.search(s)):
+    if green:                                        # citizens / permanent residents / protected individuals only
         return "US person required (export control)"
-    if export and (_EXPORT_ACCESS.search(s) or _REQ.search(s)):
-        return "possible"
     return None
 
 

@@ -19,9 +19,6 @@ HARD = [
     "Candidates must qualify as a U.S. person under 22 C.F.R. 120.15.",                  # 22 CFR 120.15 (old)
     "Candidates must be a U.S. citizen, lawful permanent resident, or protected individual as defined by "
     "8 U.S.C. 1324b(a)(3).",                                                              # 8 U.S.C. 1324b(a)(3)
-    "This position is subject to ITAR.",                                                  # ITAR
-    "This role requires compliance with EAR regulations.",                                # EAR
-    "This position requires access to export-controlled technology.",                     # export controlled
     "Due to export control regulations, applicants are required to be U.S. persons.",     # export control
     "Must be a U.S. citizen or permanent resident.",                                      # citizen or PR
     "Green card holders and U.S. citizens only.",                                         # green card holder
@@ -107,6 +104,12 @@ def test_possible_export_control_kept_with_check_eligibility(cfg, track, title):
     "If this role is based in the United States, it requires access to export-controlled information or items that "
     "require “U.S. Person” status.",                                                                    # quoted, U.S.-based
     "- This position is restricted to US citizens or lawful permanent residents",
+    "- U.S. Person status (citizenship or lawful permanent residency) required for ITAR and export controlled work",
+    "- U.S. Person status, since this role requires access to export-controlled data.",
+    "U.S. Person status (U.S. citizen or lawful permanent resident) is required, and TNC does not provide visa "
+    "sponsorship for these roles.",
+    "Employment in this role is contingent upon verification of U.S. person status and the ability to access "
+    "controlled or restricted information as required for the position.",
     # the ITAR boilerplate's licence route is still a requirement in practice
     "To conform to U.S. Government space technology export regulations, including the International Traffic in Arms "
     "Regulations (ITAR) you must be a U.S. citizen, lawful permanent resident of the U.S., protected individual as "
@@ -114,10 +117,15 @@ def test_possible_export_control_kept_with_check_eligibility(cfg, track, title):
     "State.",
     "- Applicants must be either a U.S. citizen, U.S. national, legal permanent resident, asylee, refugee, or eligible "
     "to apply for and obtain the appropriate export control license from the U.S. Department of State.",
-    "As such, applicants must be eligible to access export-controlled information as defined under applicable law.",
 ])
 def test_real_hard_requirements(text):
     assert extract_flags(text)["citizenship"]["value"] == PERSON, text
+
+
+def test_requires_that_the_candidate_be_a_us_citizen():
+    f = extract_flags("Export Control : This position requires that the candidate selected be a U.S. Citizen in order to "
+                      "comply with U.S. government-imposed requirements related to the nature of the work.")
+    assert f["citizenship"]["value"] == "US citizenship required"
 
 
 @pytest.mark.parametrize("text", [
@@ -125,6 +133,19 @@ def test_real_hard_requirements(text):
     "defined by 8 U.S.C. 1324b(a)(3) – may have to go through an export review process.",
     "To conform to US export control regulations, candidates should be eligible for any required authorizations from "
     "the US government.",
+    # export control with no citizen / permanent-resident / protected-individual / U.S.-person wording
+    "This position is subject to ITAR.",
+    "This role requires compliance with EAR regulations.",
+    "This position requires access to export-controlled technology.",
+    "As such, applicants must be eligible to access export-controlled information as defined under applicable law.",
+    "This offer of employment is contingent upon the applicant being eligible to access U.S. export-controlled "
+    "technology.",
+    "Export Control Analysis: This position involves access to technology that is subject to U.S. export controls.",
+    "Except for U.S. citizens, lawful permanent residents, or protected individuals as defined by 8 U.S.C. 1324b(a)(3), "
+    "all applicants may be subject to an export license review process prior to employment.",
+    "Should the position require, and Kodiak determines that a candidate’s residence, U.S. person status, and/or "
+    "citizenship status necessitate an export license, bar the candidate from the position, or otherwise fall under "
+    "national security requirements, the offer may be rescinded.",
     # sanctioned-country boilerplate
     "Elasticsearch develops and distributes technology and information that is subject to U.S. and other countries’ "
     "export controls and licensing requirements for individuals who are nationals of sanctioned countries.",

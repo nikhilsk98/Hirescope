@@ -768,3 +768,10 @@ LineVision (job 124710) regenerated under v4.3: READY v3, one page. Tests: 569 p
 - Rescore: job 35173 (RTX) filtered — "This job requires a U.S. Person."; 4,707 open jobs carry the U.S.-person
   reason, 358 of them newly hidden (26 co-op, 332 full-time); 146 kept with the flag (12 co-op, 134 full-time); no job
   the old rule filtered was lost. Tests: 619 passed.
+- Later the same day (Nikhil): filter only when the JD explicitly limits the role to U.S. citizens, permanent
+  residents, protected individuals or a defined U.S. person; export control without that wording (Marvell, Tenstorrent
+  "eligible to access export-controlled…", Fab2, Commonwealth Fusion, some Skydio) is flagged instead. Added "requires
+  that the candidate be a U.S. citizen" (Amazon Leo), "U.S. Person status …" forms (Anduril, The Nuclear Company,
+  Skydio), "should the position require" as conditional (Kodiak). Rescore: 5,393 open jobs filtered for U.S. person /
+  citizenship; 179 flagged (25 co-op, 154 full-time); vs the previous commit 20 jobs became visible (Fab2, Marvell,
+  Commonwealth Fusion, Skydio) and 4 Amazon jobs hidden. Tests: 628 passed.
