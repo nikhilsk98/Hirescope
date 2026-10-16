@@ -269,7 +269,9 @@ def score_job(job: dict, resume: Resume, prefs: Preferences, rules: RuleResult, 
     # scoring is either "Not stated" or the co-op CPT/OPT case, which is flagged, not penalized.
     if rules.signals.get("check_cpt_opt"):
         gaps.append("States no visa sponsorship — check whether CPT/OPT is allowed for this co-op/internship")
-    if auth.us_citizen is None and flags.get("citizenship", {}).get("value", "").startswith(("US citizenship", "US person")):
+    cit_v = flags.get("citizenship", {}).get("value", "")
+    if (auth.us_citizen is None and cit_v.startswith("US citizenship")) or (
+            auth.us_citizen is None and auth.us_person is None and cit_v.startswith("US person")):
         penalties.append({"reason": "Citizenship / US person requirement (your status isn't set)", "points": sc.citizenship_penalty})
     if flags.get("clearance", {}).get("value") == "Clearance required" and auth.us_citizen is None:
         penalties.append({"reason": "Security clearance required", "points": sc.clearance_penalty})

@@ -387,6 +387,16 @@ top 8 JD lines' best resume match. This is a heuristic.
 Flags (sponsorship, citizenship, clearance) are set only when the JD states them explicitly, and the dashboard
 quotes the sentence. Otherwise they read "Not stated".
 
+**U.S. person / export control** (`work_authorization.us_person`; unset follows `us_citizen`): a JD sentence that
+requires a U.S. person — "This job requires a U.S. Person", "US person as defined in 22 CFR 120.62" (or 120.15),
+"protected individual … 8 U.S.C. 1324b(a)(3)", "subject to ITAR" / EAR, "requires access to export-controlled …",
+"must be a U.S. citizen or permanent resident", green card holders only — sets the citizenship flag to "US person
+required (export control)", and with `us_person: false` the job is Filtered Out on both tracks with that sentence as
+the reason. Sentences are read whole ("U.S." doesn't end one). EEO statements that list citizenship status as a
+protected class and "citizen, permanent resident, or otherwise authorized to work" are not requirements. Export control
+that only might apply ("may require access to export-controlled information", "for positions requiring ITAR access…")
+sets the `export_control` flag instead: the job stays, with a **Check eligibility** chip quoting the line.
+
 ## Job package format (v2, stable contract for the Resume Builder)
 
 The **Job package** button in a job's panel downloads `Company_Role_JobID.md`, copies it to the clipboard, and sets

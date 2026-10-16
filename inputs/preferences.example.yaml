@@ -56,6 +56,7 @@ salary:
 work_authorization:       # never assumed: fill these in yourself
   needs_sponsorship: null # true -> full-time "no sponsorship" filtered, co-op flagged (CPT/OPT); null = unknown
   us_citizen: null        # false -> "US citizens / US persons only" and "clearance required" filtered
+  us_person: null         # false -> export-control "U.S. person" requirements filtered (both tracks); null follows us_citizen
   coop_no_sponsorship: flag  # co-op/intern says "no sponsorship": flag = keep with "check CPT/OPT", filter = hide
 
 # --- Companies (tiers) --------------------------------------------------

@@ -21,6 +21,9 @@ class Salary(BaseModel):
 class WorkAuth(BaseModel):
     needs_sponsorship: bool | None = None
     us_citizen: bool | None = None
+    # export control: a U.S. person is a citizen, permanent resident or protected individual (22 CFR 120.62);
+    # None → follows us_citizen
+    us_person: bool | None = None
     # co-op/intern posting that states "no sponsorship": flag = keep it with "check CPT/OPT"; filter = hide it
     coop_no_sponsorship: Literal["flag", "filter"] = "flag"
 

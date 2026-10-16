@@ -751,3 +751,20 @@ LineVision (job 124710) regenerated under v4.3: READY v3, one page. Tests: 569 p
   VibeSpace line "Python, FastAPI, GCP (planned: Redis)". resume_template.tex still reads "Redis, GCP" (not edited).
 - Nissan Global (job 142563) regenerated: READY v3, one page (scikit-learn and GCP in Skills, Vue.js / Nuxt.js out).
   Tests: 606 passed.
+
+## U.S. person / export control filter (2026-10-16)
+- `work_authorization.us_person` (false for Nikhil; unset follows `us_citizen`). `extract/flags.py` reads whole
+  sentences ("U.S." / "U.S.C." / "120.62" don't end one) and sets the citizenship flag to "US person required (export
+  control)" for: "requires a U.S. Person", 22 CFR 120.62 / 120.15, 8 U.S.C. 1324b(a)(3), ITAR / EAR / export-controlled
+  with a requirement about the role, "U.S. citizen or permanent resident", green card holders only, protected
+  individual — filtered on both tracks with the sentence quoted. The ITAR boilerplate's "or eligible to obtain the
+  required authorizations" stays a requirement.
+- Not requirements: EEO statements (citizenship status as a protected class), "or otherwise authorized to work",
+  sponsorship statements naming green cards (left to the sponsorship flag, so co-ops keep "check CPT/OPT"), export
+  control named as a skill.
+- Kept with "Check eligibility: export control" (new `export_control` flag): "may require access…", "certain
+  positions…", "except U.S. persons … may", sanctioned-country boilerplate, export "authorizations" with no
+  citizen/person wording.
+- Rescore: job 35173 (RTX) filtered — "This job requires a U.S. Person."; 4,707 open jobs carry the U.S.-person
+  reason, 358 of them newly hidden (26 co-op, 332 full-time); 146 kept with the flag (12 co-op, 134 full-time); no job
+  the old rule filtered was lost. Tests: 619 passed.

@@ -241,6 +241,8 @@ def _two_track(job: dict, prefs: Preferences, rules: TitleRules, res: RuleResult
 def _work_authorization(job: dict, prefs: Preferences, res: RuleResult, fail) -> None:
     """Only what the JD explicitly states (flags default to 'Not stated'; silence never filters anything).
 
+    U.S. person (export control) requirements follow work_authorization.us_person (both tracks); export control that
+    only might apply is kept with a "Check eligibility: export control" signal quoting the line.
     Full-time: no sponsorship (if you need it), US citizens / US persons only (if you aren't one), or security
     clearance required -> filtered with the quote. Co-op/Intern: citizens / US persons only or clearance required
     -> filtered; "no sponsorship" alone follows work_authorization.coop_no_sponsorship: "flag" (default) keeps it
@@ -252,8 +254,17 @@ def _work_authorization(job: dict, prefs: Preferences, res: RuleResult, fail) ->
     cit = flags.get("citizenship") or {}
     clr = flags.get("clearance") or {}
     q = lambda f: f" — “{f.get('evidence')}”" if f.get("evidence") else ""  # noqa: E731
-    if auth.us_citizen is False and cit.get("value", "").startswith(("US citizenship required", "US person required")):
+    not_person = auth.us_person is False or (auth.us_person is None and auth.us_citizen is False)
+    if auth.us_citizen is False and cit.get("value", "").startswith("US citizenship required"):
         fail("work_authorization", f"{cit['value']}{q(cit)}")
+    if not_person and cit.get("value", "").startswith("US person required"):
+        fail("work_authorization", f"{cit['value']}{q(cit)}")
+    exp = flags.get("export_control") or {}
+    if auth.us_person is not True and exp.get("value", "").startswith("Possibly required"):
+        # scoped ("positions requiring…") or hedged ("may require access to export-controlled…"): kept, flagged
+        note = f"Export control — “{exp.get('evidence')}”"
+        prev = res.signals.get("check_eligibility")
+        res.signals["check_eligibility"] = f"{prev}; {note}" if prev else note
     if auth.us_citizen is False and clr.get("value") == "Clearance required":
         fail("work_authorization", f"Security clearance required{q(clr)}")
     if auth.needs_sponsorship and spons.get("value") == "No sponsorship":
