@@ -105,7 +105,7 @@ def test_failed_build_retries_once_then_fails_with_reason(qenv):
     run_worker()
     it = qenv.conn.execute("SELECT * FROM resume_queue WHERE job_pk=?", (qenv.a,)).fetchone()
     assert it["status"] == "failed" and it["attempts"] == 2
-    assert "DEMO build failed on purpose" in it["message"]
+    assert "DEMO build failed on purpose" in it["message"] and "queue item" not in it["message"]
     st = qenv.conn.execute("SELECT status, message FROM resume_status WHERE job_pk=?", (qenv.a,)).fetchone()
     assert st["status"] == "failed" and "DEMO" in st["message"]
     logs = sorted((hs_paths.LOG_DIR / "queue").glob(f"job{qenv.a}-*.log"))

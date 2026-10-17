@@ -332,7 +332,7 @@ def outcome(conn, item: dict, started: str, rc_: int | None, log_file: Path | No
         if row and row["status"] == "failed" and row["message"]:
             reason = row["message"]
     if not reason and text:
-        lines = [x.strip() for x in text.strip().splitlines() if x.strip()]
+        lines = [x.strip() for x in text.strip().splitlines() if x.strip() and not x.startswith("# ")]   # not our header
         reason = " ".join(lines[-3:])[:400] if lines else ""
     if not reason:
         reason = f"the build stopped without saving a version (exit code {rc_})"
