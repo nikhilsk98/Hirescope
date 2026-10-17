@@ -141,3 +141,12 @@ def test_stage_changes_and_bad_status_links(bconn):
             launcher.parse(bad)
     with pytest.raises(launcher.LinkError, match="Export statuses"):
         launcher.handle("hirescope://status?app=nope&stage=offer")
+
+
+def test_load_export_accepts_format_6(tmp_path):
+    f = tmp_path / "jobsearch-statuses.json"
+    f.write_text(json.dumps({"format": 6, "statuses": {}, "bucket": {}}))
+    assert statuses.load_export(f)["format"] == 6
+    f.write_text(json.dumps({"format": 7, "statuses": {}}))
+    with pytest.raises(ValueError, match="unknown export format"):
+        statuses.load_export(f)

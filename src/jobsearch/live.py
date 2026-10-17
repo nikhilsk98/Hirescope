@@ -40,8 +40,10 @@ def payload(conn) -> dict:
     try:
         from resume_builder import queue
         q = queue.items(conn)
+        qs = queue.settings()
+        settings = {"batch_warn": qs["batch_warn"], "concurrency": qs["concurrency"]}
     except (ImportError, sqlite3.OperationalError):
-        q = []
+        q, settings = [], {}
     keep = ("id", "job_pk", "company", "title", "status", "regenerate", "attempts", "added_at", "started_at",
             "finished_at", "message", "result", "origin", "batch")
     try:
@@ -53,7 +55,7 @@ def payload(conn) -> dict:
     return {"generated_at": db.utcnow(), "queue": [{k: r.get(k) for k in keep} for r in q],
             "worker": _meta(conn, "queue_worker"), "excel": _meta(conn, "excel_applications"),
             "launcher": _meta(conn, "launcher_last"), "bucket_at": bucket_at, "sync_at": db.get_meta(conn, "sync_at"),
-            "questions_open": questions}
+            "questions_open": questions, "settings": settings}
 
 
 def write(conn, path: Path | None = None) -> Path:

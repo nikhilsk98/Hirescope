@@ -223,8 +223,9 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
 ## Dashboard
 
 `dashboard/index.html` (double-click; `file://`, no server, no network calls).
-- **Co-op / Internships** and **Full-time** tabs at the top are separate workspaces (own view, filters, sort,
-  search, Apply Today, stats); `#coop` / `#fulltime` are bookmarkable. Unclear jobs show in both with a "?" badge
+- Four top tabs, one navigation (arrow keys move between them; keys `1`–`3`): **Co-op / Internships** and
+  **Full-time** are separate workspaces with the sidebar views (own view, filters, sort, search, Apply Today, stats);
+  **Bucket** is your apply-list (below). `#coop` / `#fulltime` / `#bucket` are bookmarkable. Unclear jobs show in both with a "?" badge
   and **Move to Co-op / Move to Full-time** (saved in the browser and included in Export statuses).
 - Day tabs (recent days first-seen; older days in a dropdown) and a **Log** link in the header.
 - Sidebar views: Last 24h (default when it has jobs), Apply Today, All Jobs, My Companies, **My Applications**,
@@ -246,20 +247,31 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
   breakdown (incl. learned adjustments), Full JD (collapsible sections, keywords highlighted, Jump to requirements;
   one click on a keyword chip highlights it there with its evidence), Similar jobs (click a card — or its "More like
   this" — to open that job the way ⌘K does: its track and view, filters cleared with a notice if they'd hide it, its
-  card focused; "← Back to …" returns to the job you came from; only the checkbox bulk-selects; a job with no loaded
-  details shows the ⌘K info card), Notes & History; actions Generate
+  card focused; "← Back to …" returns to the job you came from; a job with no loaded details shows the ⌘K info card),
+  Notes & History; actions Generate
   Resume, Open Application, Shortlist, **Mark Applied**, Skip with reason, status, LinkedIn search, Levels.fyi /
   Glassdoor / engineering blog (`config/eng_blogs.yaml`, verified URLs; a search link otherwise). The panel keeps
   keyboard focus inside while open; `Esc` closes it and focus returns to the job's card.
-- **Bulk select** (checkbox on hover, or `Space`): shortlist, skip with a reason, or export CSV for many jobs at once.
+- **Bucket** (your apply-list): the checkbox before every job title — cards, table rows, the Similar list, the detail
+  panel (⌘K opens jobs there) and the ⌘K info card — adds a copy of the job to the Bucket (`Space` on a focused job
+  does the same; untick to remove). The Bucket tab shows its live count and lists jobs from both tracks with a track
+  badge, score, resume status and deadline; sortable (recently added, score, deadline, company, resume status); a job
+  stays after its posting closes ("Closed"). Per job: **Generate Resume** (or Regenerate / Cancel), **Open
+  Application**, **Mark Applied**, **Remove**. Bucket-wide: **Generate resumes for all** (every job without a current
+  READY resume; asks first above `resume_queue.batch_warn` = 5, with the count and a usage warning; "…" → Regenerate
+  for all, Export CSV) and bulk actions for the rows you select (generate, remove, export CSV). **Mark Applied**
+  anywhere removes the job from the Bucket and adds it to My Applications with today's date and the exact resume
+  version (Undo in the toast restores both). The Bucket saves in the browser instantly, reaches SQLite right away
+  through the launcher (`hirescope://bucket?job=<id>&op=add|remove`; table `bucket`), goes out with Export statuses
+  (format 6) and comes back in `sync.js`.
 - **Command palette** `⌘K`: jump to any job, company, application, view or action. Jobs are searched across **both
   tracks and every view** — the lists, Filtered Out, jobs below the top N per track, filtered jobs the Filtered Out
   list doesn't show, and closed jobs (`dashboard/search.js`, written by each run, loaded the first time you open the
   palette). Each result shows its track and view; opening one switches to that tab and view (clearing filters that
   would hide it) and opens the job; a job the dashboard holds no details for (closed, not listed, beyond the top N)
   opens a short info card with its status and filter reason.
-- Keys: `j`/`k`, `Enter`, `s` shortlist, `x` skip (reason picker: `1`–`9`, `0`), `a` mark applied, `o` open, `g` Generate Resume (copy command), `/` search, `1`/`2` tabs,
-  `Space` select, `⌘K` palette, `[` / `]` move a board card, `?` help.
+- Keys: `j`/`k`, `Enter`, `s` shortlist, `x` skip (reason picker: `1`–`9`, `0`), `a` mark applied, `o` open, `g` Generate Resume (queued), `/` search, `1`/`2`/`3` tabs,
+  `Space` add to / remove from the Bucket, `⌘K` palette, `[` / `]` move a board card, `?` help.
 
 ### My Applications (`#applications`)
 - **Mark Applied** (or `a`, or status → applied) on any job — HireScope or External — moves it here with today's date

@@ -21,6 +21,8 @@
   <nav class="track-tabs" role="tablist" aria-label="Track">
     <button class="track-tab coop_intern" role="tab" data-track="coop_intern" id="tab-coop"><span class="swatch" aria-hidden="true"></span>Co-op / Internships <span class="count">0</span></button>
     <button class="track-tab full_time" role="tab" data-track="full_time" id="tab-ft"><span class="swatch" aria-hidden="true"></span>Full-time <span class="count">0</span></button>
+    <span class="tab-sep" aria-hidden="true"></span>
+    <button class="track-tab page-tab bucket" role="tab" data-page="bucket" id="tab-bucket" title="Your apply-list: jobs you ticked, from both tracks (key 3)"><span class="swatch" aria-hidden="true"></span>Bucket <span class="count">0</span></button>
     <label class="track-both"><input id="both" type="checkbox"> Show both tracks</label>
   </nav>
 
@@ -76,7 +78,7 @@
     <div class="panel-head">
       <button id="p-back" class="link-btn p-back" type="button" hidden></button>
       <div class="top">
-        <div style="flex:1;min-width:0"><h2 id="p-title"></h2><div class="sub" id="p-sub"></div><div class="card-badges" id="p-badges"></div></div>
+        <div style="flex:1;min-width:0"><div class="p-title-row"><span id="p-bucket"></span><h2 id="p-title"></h2></div><div class="sub" id="p-sub"></div><div class="card-badges" id="p-badges"></div></div>
         <div id="p-ring"></div>
         <button id="p-close" class="btn ghost" type="button" aria-label="Close details (Esc)">✕</button>
       </div>
@@ -146,6 +148,7 @@
     <h3 id="job-info-title" style="margin-top:0"></h3>
     <p class="muted" id="job-info-sub" style="margin-top:0"></p>
     <div id="job-info-body"></div>
+    <label class="job-info-bucket" id="job-info-bucket"></label>
     <div class="row-end"><a class="btn" id="job-info-li" target="_blank" rel="noopener noreferrer">LinkedIn search</a><button class="btn primary" type="button" id="job-info-close">Close</button></div>
   </dialog>
 
@@ -174,10 +177,10 @@
       <tr><td><span class="kbd">o</span></td><td>Open application</td></tr>
       <tr><td><span class="kbd">g</span></td><td>Generate Resume (queued; builds in the background)</td></tr>
       <tr><td><span class="kbd">/</span></td><td>Search</td></tr>
-      <tr><td><span class="kbd">1</span> / <span class="kbd">2</span></td><td>Co-op / Full-time tab</td></tr>
+      <tr><td><span class="kbd">1</span> / <span class="kbd">2</span> / <span class="kbd">3</span></td><td>Co-op / Full-time / Bucket tab</td></tr>
       <tr><td><span class="kbd">⌘K</span></td><td>Command palette: jump to any job, company, view or action</td></tr>
       <tr><td><span class="kbd">[</span> / <span class="kbd">]</span></td><td>My Applications board: move the focused card to the previous / next stage</td></tr>
-      <tr><td><span class="kbd">Space</span></td><td>Select the focused job (bulk shortlist / skip / export)</td></tr>
+      <tr><td><span class="kbd">Space</span></td><td>Add the focused job to the Bucket (or remove it)</td></tr>
       <tr><td><span class="kbd">Esc</span></td><td>Close panel / dialog</td></tr>
     </table>
     <p class="muted">Statuses and applications save in this browser instantly. Use <b>Export statuses</b> to hand them to the pipeline (it keeps them in SQLite and backs them up).</p>

@@ -302,16 +302,14 @@ dialog table td { padding: 3px 10px 3px 0; font-size: var(--fs-sm); }
 table.grid td.loc { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 table.grid td.role { min-width: 220px; }
 
-/* ---------- Phase 4: selection, bulk bar ---------- */
-.avatar-wrap { position: relative; }
-.pick { position: absolute; top: -6px; left: -6px; width: 18px; height: 18px; margin: 0; accent-color: var(--accent); opacity: 0; transition: opacity var(--dur); cursor: pointer; }
-.card:hover .pick, .card:focus-within .pick, .picking .pick, .pick:focus-visible { opacity: 1; }
-.compact .pick { top: -4px; left: -4px; }
-td.pickcol { width: 28px; } td.pickcol .pick { position: static; opacity: 1; }
-.card.picked { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
-table.grid tr.picked td { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+/* ---------- the Bucket checkbox before every job title; the Bucket's own bulk bar ---------- */
+.bucket-cb { width: 17px; height: 17px; margin: 0 8px 0 0; vertical-align: -3px; accent-color: var(--accent); cursor: pointer; flex: none; }
+td.pickcol { width: 28px; } td.pickcol input { margin: 0; vertical-align: middle; }
+.card.in-bucket { box-shadow: inset 3px 0 0 var(--accent), var(--shadow-1); }
+table.grid tr.in-bucket td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .bulkbar { position: sticky; bottom: 16px; z-index: 25; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: var(--sp-3); padding: var(--sp-2) var(--sp-3);
   border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--accent); box-shadow: var(--shadow-2); }
+.bulkbar.inline { position: static; margin: 0 0 var(--sp-3); box-shadow: none; }
 .bulkbar .spacer { flex: 1; }
 .salary-pop { min-width: 280px; } .salary-pop input[type=range] { width: 100%; accent-color: var(--accent); }
 
@@ -462,3 +460,22 @@ table.manual-table tr.due-row td:first-child { box-shadow: inset 3px 0 0 var(--s
 .more-pop { top: auto; bottom: 36px; left: auto; right: 0; min-width: 250px; display: flex; flex-direction: column; gap: 2px; }
 .more-pop .btn { justify-content: flex-start; text-align: left; width: 100%; }
 .section .more-pop, .card .more-pop { top: 32px; bottom: auto; }
+
+/* ---------- top tabs: two track workspaces + pages (one tablist) ---------- */
+.tab-sep { width: 1px; align-self: stretch; margin: 6px var(--sp-2) 10px; background: var(--border); }
+.track-tab.bucket { --tab-accent: var(--accent); } .track-tab.builder { --tab-accent: var(--text-2); }
+.track-tab[aria-selected="true"].bucket .count { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); color: var(--text); }
+.track-tab .swatch { flex: none; }
+.page-toolbar { flex-wrap: wrap; }
+
+/* ---------- Bucket page ---------- */
+.bucket-table td { vertical-align: middle; }
+.bucket-table .row-title { font-weight: 600; text-align: left; padding: 0; color: var(--text); }
+.bucket-table .row-title:hover { color: var(--accent); text-decoration: underline; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.closed-row td { background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); }
+.warn-text { color: var(--warn); font-weight: 600; }
+.small-link { font-size: var(--fs-xs); }
+.p-title-row { display: flex; align-items: flex-start; gap: 0; }
+.p-title-row .bucket-cb { margin-top: 6px; }
+@media (max-width: 760px) { .tab-sep { display: none; } .row-actions .btn { padding: 0 8px; } }

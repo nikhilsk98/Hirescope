@@ -43,13 +43,17 @@ export async function launch({ width = 1440, height = 900, dark = false } = {}) 
       const loaded = new Promise((r) => { const f = (m) => { if (m.method === "Page.loadEventFired") { listeners.splice(listeners.indexOf(f), 1); r(); } }; listeners.push(f); });
       await send("Page.navigate", { url }); await loaded; await page.sleep(300);
     },
+    async reload() {
+      const loaded = new Promise((r) => { const f = (m) => { if (m.method === "Page.loadEventFired") { listeners.splice(listeners.indexOf(f), 1); r(); } }; listeners.push(f); });
+      await send("Page.reload", { ignoreCache: true }); await loaded; await page.sleep(300);
+    },
     async eval(expr) {
       const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
       if (r.exceptionDetails) throw new Error(`eval failed: ${r.exceptionDetails.exception ? r.exceptionDetails.exception.description : r.exceptionDetails.text}\n${expr.slice(0, 200)}`);
       return r.result.value;
     },
     async key(key, opts = {}) {
-      const map = { Tab: [9, "Tab"], Enter: [13, "Enter"], Escape: [27, "Escape"], " ": [32, "Space"], ArrowDown: [40, "ArrowDown"], ArrowUp: [38, "ArrowUp"] };
+      const map = { ArrowLeft: [37, "ArrowLeft"], ArrowRight: [39, "ArrowRight"], Tab: [9, "Tab"], Enter: [13, "Enter"], Escape: [27, "Escape"], " ": [32, "Space"], ArrowDown: [40, "ArrowDown"], ArrowUp: [38, "ArrowUp"] };
       const [code, codeName] = map[key] || [key.toUpperCase().charCodeAt(0), `Key${key.toUpperCase()}`];
       const mods = (opts.shift ? 8 : 0) | (opts.meta ? 4 : 0);
       const base = { key, code: codeName, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, modifiers: mods };

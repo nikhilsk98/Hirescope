@@ -73,3 +73,7 @@ def test_generate_resume_queues_through_the_launcher(demo_dashboard):
 def test_setup_banner_without_the_launcher(demo_dashboard):
     live.write_launcher_js(False, demo_dashboard.dir / "launcher.js")
     scenario(demo_dashboard, "setup_banner")
+
+
+def test_bucket_tab_add_remove_mark_applied_undo_generate_all(demo_dashboard):
+    scenario(demo_dashboard, "bucket")

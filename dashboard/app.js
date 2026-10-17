@@ -10,7 +10,7 @@
   const K = { statuses: "jobsearch.statuses.v1", overrides: "jobsearch.trackOverrides.v1", theme: "jobsearch.theme", apps: "jobsearch.applications.v1",
               ui: "jobsearch.ui.v2", exported: "jobsearch.lastExport", tip: "jobsearch.tipDismissed.v2",
               manual: "jobsearch.manualChecks.v1", resumeReviews: "jobsearch.resumeReviews.v1",
-              resumeQueued: "jobsearch.resumeQueued.v1", resumeMapped: "jobsearch.resumeMapped.v1" };
+              resumeQueued: "jobsearch.resumeQueued.v1", resumeMapped: "jobsearch.resumeMapped.v1", bucket: "jobsearch.bucket.v1" };
   const STATUSES = ["", "interested", "shortlisted", "package exported", "applied", "interviewing", "offer", "rejected", "skipped"];
   const SKIP_REASONS = ["not interested in role", "location", "too senior", "too junior", "missing skills", "company",
                         "compensation", "visa/sponsorship", "start date", "duplicate", "other"];
@@ -99,11 +99,15 @@
   const overrides = {};
   for (const [k, v] of Object.entries(store.get(K.overrides, {}))) overrides[k] = typeof v === "string" ? { track: v, updated_at: "1970-01-01T00:00:00Z" } : v;
   let apps = store.get(K.apps, {});
+  // the Bucket (your apply-list): {job id: {in, added_at, updated_at, snap: copy of the job}}; a removal stays as a
+  // dated tombstone so an older copy can't bring it back. Saved here instantly, sent to SQLite through the launcher.
+  const bucket = store.get(K.bucket, {});
+  const saveBucket = () => store.set(K.bucket, bucket);
   // manualChecks: {company: {checked_at (YYYY-MM-DD), history: [dates], updated_at}} — the Manual Checks view
   const manualChecks = store.get(K.manual, {});
   const saveManual = () => store.set(K.manual, manualChecks);
   const MANUAL_DAYS = Number((META.manual_checks_cfg || {}).remind_days) || 7;   // preferences manual_checks.remind_days
-  const ui = Object.assign({ track: "full_time", both: false, mode: "cards", compact: false, perTrack: {}, appTab: "board" }, store.get(K.ui, {}));
+  const ui = Object.assign({ track: "full_time", both: false, mode: "cards", compact: false, perTrack: {}, appTab: "board", page: "jobs" }, store.get(K.ui, {}));
   const tstate = () => (ui.perTrack[ui.track] = ui.perTrack[ui.track] || { view: null, sort: "overall", filters: {}, q: "", modes: {} });
   const saveUI = () => store.set(K.ui, ui);
   const keyOf = (j) => `${j.company}::${j.source}::${j.job_id}`;
@@ -126,7 +130,8 @@
     for (const [k, v] of Object.entries(S.track_overrides || {})) if (!overrides[k] || String(v.updated_at) > String(overrides[k].updated_at || "")) { overrides[k] = v; changed = true; }
     for (const a of S.applications || []) { const m = C.mergeApp(apps[a.id], a); if (JSON.stringify(m) !== JSON.stringify(apps[a.id])) { apps[a.id] = m; changed = true; } }
     for (const [k, v] of Object.entries(S.manual_checks || {})) if (!manualChecks[k] || String(v.updated_at) > String(manualChecks[k].updated_at || "")) { manualChecks[k] = v; changed = true; }
-    if (changed) { store.set(K.statuses, statuses); saveOverrides(); saveApps(); saveManual(); }
+    for (const [k, v] of Object.entries(S.bucket || {})) if (!bucket[k] || String(v.updated_at) > String(bucket[k].updated_at || "")) { bucket[k] = Object.assign({}, bucket[k] || {}, v, { snap: Object.assign({}, (bucket[k] || {}).snap || {}, v.snap || {}) }); changed = true; }
+    if (changed) { store.set(K.statuses, statuses); saveOverrides(); saveApps(); saveManual(); saveBucket(); }
   }
   mergeSync();
 
@@ -345,6 +350,7 @@
     for (const [k, v] of Object.entries(S.track_overrides || {})) m.o[k] = v.updated_at || "";
     for (const a of S.applications || []) m.a[a.id] = a.updated_at || "";
     for (const [k, v] of Object.entries(S.manual_checks || {})) m.m[k] = v.updated_at || "";
+    m.b = {}; for (const [k, v] of Object.entries(S.bucket || {})) m.b[k] = v.updated_at || "";
     return m;
   };
   let SYNC_AT = syncAt();
@@ -352,7 +358,7 @@
     const last = store.get(K.exported, null) || "";
     const newer = (map) => ([k, x]) => { const t = String(x.updated_at || ""); return t > last && t > (map[k] || ""); };
     return Object.entries(statuses).some(newer(SYNC_AT.s)) || Object.entries(overrides).some(newer(SYNC_AT.o)) || Object.entries(apps).some(newer(SYNC_AT.a)) ||
-      Object.entries(manualChecks).some(newer(SYNC_AT.m));
+      Object.entries(manualChecks).some(newer(SYNC_AT.m)) || Object.entries(bucket).some(newer(SYNC_AT.b));
   }
   function renderBanners() {
     const box = $("#banners"); box.textContent = "";
@@ -418,9 +424,9 @@
     }
   }
   function renderCounts() {
-    for (const b of document.querySelectorAll(".track-tab")) {
+    renderTopTabs();
+    for (const b of document.querySelectorAll(".track-tab[data-track]")) {
       const t = b.dataset.track;
-      b.setAttribute("aria-selected", String(t === ui.track));
       // true totals from the run (the dashboard holds the top N per track)
       const bt = ((META.summary || {}).by_track || {});
       const total = bt[t] ? bt[t].visible + ((bt.unclear || {}).visible || 0) : null;
@@ -430,7 +436,7 @@
     }
     $("#both").checked = ui.both;
     const nav = $("#views"); nav.textContent = "";
-    const cur = tstate().view || defaultView();
+    const cur = ui.page === "jobs" ? tstate().view || defaultView() : null;
     let group = null;
     for (const v of VIEWS) {
       if (v.group && v.group !== group) { group = v.group; nav.append(el("div", { class: "group", text: group })); }
@@ -566,11 +572,9 @@
     const c = el("article", { class: `card ${trackOf(j)}`, tabindex: "0", "data-id": j.id, "aria-label": `${j.title} at ${j.company}, score ${j.score == null ? "none" : Math.round(j.score)}`,
       onclick: (e) => { if (e.target.closest("input, button, a")) return; open(); },
       onkeydown: (e) => { if (e.key === "Enter" && e.target === c) { e.stopPropagation(); open(); } } },
-      el("div", { class: "avatar-wrap" },
-        el("div", { class: "avatar", style: `background:${avatarColor(j.company)}`, "aria-hidden": "true", text: (j.company.match(/[A-Za-z0-9]/) || ["?"])[0].toUpperCase() }),
-        selBox(j)),
+      el("div", { class: "avatar", style: `background:${avatarColor(j.company)}`, "aria-hidden": "true", text: (j.company.match(/[A-Za-z0-9]/) || ["?"])[0].toUpperCase() }),
       el("div", { class: "card-body" },
-        el("div", { class: "card-title", text: j.title }),
+        el("div", { class: "card-title" }, bucketBox(j), el("span", { text: j.title })),
         el("div", { class: "card-sub", text: `${j.company}${j.tier ? ` · tier ${j.tier}` : ""} · ${j.location} · ${j.work_mode}` }),
         el("div", { class: "card-badges" }, badgesOf(j)),
         el("div", { class: "card-meta" }, el("span", { text: postedText(j) }),
@@ -583,7 +587,7 @@
             onclick: (e) => { e.stopPropagation(); openJob(j.id, { tab: "Similar", from: nav }); }, onkeydown: (e) => e.stopPropagation() }, `More like this (${j.similar.length})`) : null)),
       el("div", { class: "card-side" }, j.filtered ? el("span", { class: "chip", text: "Filtered" }) : ring(j.score, j.label), moveButtons(j)));
     if (selectedId === j.id) c.classList.add("selected");
-    if (picked.has(j.id)) c.classList.add("picked");
+    if (inBucket(j.id)) c.classList.add("in-bucket");
     return c;
   }
   // Unclear jobs: one-click Move to Co-op / Full-time right on the card (saved as an override, respected by later runs)
@@ -593,38 +597,43 @@
       onclick: (e) => { e.stopPropagation(); setTrack(j, t); }, onkeydown: (e) => e.stopPropagation() }, label);
     return el("div", { class: "move-btns", role: "group", "aria-label": "Move this Unclear job" }, b("coop_intern", "→ Co-op"), b("full_time", "→ Full-time"));
   }
-  // bulk selection
-  const picked = new Set();
-  function selBox(j) {
-    const cb = el("input", { type: "checkbox", class: "pick", "aria-label": `Select ${j.title} at ${j.company}`, checked: picked.has(j.id),
-      onclick: (e) => e.stopPropagation(), onkeydown: (e) => e.stopPropagation() });
-    cb.addEventListener("change", () => togglePick(j.id, cb.checked));
+  // the checkbox before every job title: add a copy of the job to the Bucket (untick: remove). Works the same on cards,
+  // table rows, the Similar list and the detail panel (⌘K opens jobs there); bulk actions live inside the Bucket.
+  const inBucket = (id) => !!(bucket[id] && bucket[id].in);
+  const bucketItems = () => Object.entries(bucket).filter(([, e]) => e && e.in).map(([id, e]) => ({ id: Number(id), e, j: BY_ID.get(Number(id)) || null }));
+  function jobSnap(j) {
+    return { id: j.id, company: j.company, title: j.title, source: j.source, job_id: j.job_id, key: j.company && j.source ? keyOf(j) : undefined,
+      track: j.track ? trackOf(j) : undefined, score: j.score == null ? null : Math.round(j.score), label: j.label, location: j.location,
+      deadline: j.deadline, apply_url: safeUrl(j.apply_url) || undefined, level: j.level, job_status: j.job_status || "open" };
+  }
+  function bucketBox(j) {
+    const on = inBucket(j.id);
+    const cb = el("input", { type: "checkbox", class: "bucket-cb", "data-bucket": j.id, checked: on, title: on ? "In your Bucket (untick to remove)" : "Add to Bucket (your apply-list)",
+      "aria-label": `${on ? "Remove" : "Add"} ${j.title} at ${j.company} ${on ? "from" : "to"} the Bucket`, onclick: (e) => e.stopPropagation(), onkeydown: (e) => { if (e.key !== " ") e.stopPropagation(); } });
+    cb.addEventListener("change", () => setBucket(j, cb.checked));
     return cb;
   }
-  function togglePick(id, on) {
-    if (on ?? !picked.has(id)) picked.add(id); else picked.delete(id);
-    for (const n of document.querySelectorAll(`#list [data-id="${id}"]`)) { n.classList.toggle("picked", picked.has(id)); const cb = n.querySelector("input.pick"); if (cb) cb.checked = picked.has(id); }
-    document.body.classList.toggle("picking", picked.size > 0);
-    renderBulkbar();
+  async function setBucket(j, on, opts = {}) {
+    const id = j.id; const before = bucket[id] ? JSON.parse(JSON.stringify(bucket[id])) : null;
+    if (!!(before && before.in) === on) return;
+    const at = new Date().toISOString();
+    bucket[id] = { in: on, added_at: on ? at : (before || {}).added_at || null, updated_at: at,
+      snap: Object.assign({}, (before || {}).snap || {}, BY_ID.has(id) ? jobSnap(BY_ID.get(id)) : jobSnap(j)) };
+    saveBucket(); refreshBucket(id);
+    if (!opts.local) launch(`hirescope://bucket?job=${id}&op=${on ? "add" : "remove"}`, on ? "Add to Bucket" : "Remove from Bucket");
+    if (!opts.quiet) toast(on ? `Added to Bucket: ${j.title}` : `Removed from Bucket: ${j.title}`, () => {
+      if (before) bucket[id] = before; else delete bucket[id];
+      saveBucket(); refreshBucket(id);
+      launch(`hirescope://bucket?job=${id}&op=${on ? "remove" : "add"}`);
+    });
   }
-  function renderBulkbar() {
-    const bar = $("#bulkbar"); bar.textContent = ""; bar.hidden = picked.size === 0;
-    if (!picked.size) return;
-    const jobs = [...picked].map((id) => BY_ID.get(id)).filter(Boolean);
-    const reason = el("select", { "aria-label": "Skip selected with reason" }, el("option", { value: "", text: "Skip selected…" }), SKIP_REASONS.map((r) => el("option", { value: r, text: r })));
-    reason.addEventListener("change", () => { if (reason.value) bulk(jobs, { status: "skipped", skip_reason: reason.value }, `Skipped ${jobs.length} (${reason.value})`); });
-    bar.append(el("b", { text: `${jobs.length} selected` }),
-      el("button", { class: "btn small", type: "button", onclick: () => bulk(jobs, { status: "shortlisted" }, `Shortlisted ${jobs.length}`) }, "Shortlist"), reason,
-      el("button", { class: "btn small", type: "button", onclick: () => exportJobsCsv(jobs) }, "Export CSV"),
-      el("button", { class: "btn small ghost", type: "button", onclick: () => { current.forEach((j) => picked.add(j.id)); renderList(true); renderBulkbar(); } }, `Select all ${current.length.toLocaleString()}`),
-      el("span", { class: "spacer" }),
-      el("button", { class: "btn small ghost", type: "button", onclick: clearPicks }, "Clear"));
-  }
-  function clearPicks() { picked.clear(); document.body.classList.remove("picking"); renderList(true); renderBulkbar(); }
-  function bulk(jobs, patch, msg) {
-    const undos = jobs.map((j) => setStatus(j, patch));
-    toast(msg, () => undos.reverse().forEach((u) => u()));
-    picked.clear(); document.body.classList.remove("picking"); renderAll(true); renderBulkbar();
+  function refreshBucket(id) {          // checkboxes for this job everywhere, the tab count, and the Bucket page
+    for (const cb of document.querySelectorAll(`input.bucket-cb[data-bucket="${id}"]`)) {
+      cb.checked = inBucket(id); cb.title = cb.checked ? "In your Bucket (untick to remove)" : "Add to Bucket (your apply-list)";
+      const card2 = cb.closest(".card, tr"); if (card2) card2.classList.toggle("in-bucket", cb.checked);
+    }
+    renderTopTabs();
+    if (ui.page === "bucket") renderList(true);
   }
   const csvCell = (v) => { let x = v == null ? "" : String(v); if (/^[=+\-@]/.test(x)) x = "'" + x; return /[",\r\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
   function exportJobsCsv(jobs) {
@@ -635,7 +644,7 @@
     toast(`Exported ${jobs.length} jobs`);
   }
   const COLS = [   // [header, cell, sort key, class, width]
-    ["", (j) => selBox(j), null, "pickcol", "36px"],
+    ["", (j) => bucketBox(j), null, "pickcol", "36px"],
     ["Score", (j) => (j.score == null ? "—" : Math.round(j.score)), "overall", "num", "64px"],
     ["Role", (j) => el("div", null, el("div", { class: "title", text: j.title }), el("div", { class: "muted", text: j.company })), "company", "role", null],
     ["Track", (j) => el("span", { class: `chip ${trackOf(j)}`, text: TRACKS[trackOf(j)] }), null, "", "112px"],
@@ -648,11 +657,11 @@
     ["Deadline", (j) => j.deadline || "", "deadline", "nowrap", "96px"],
     ["Status", (j) => statusOf(j) || "", null, "", "104px"],
   ];
-  const row = (j) => el("tr", { class: (selectedId === j.id ? "selected" : "") + (picked.has(j.id) ? " picked" : ""), "data-id": j.id, onclick: () => openPanel(j.id) },
+  const row = (j) => el("tr", { class: (selectedId === j.id ? "selected" : "") + (inBucket(j.id) ? " in-bucket" : ""), "data-id": j.id, onclick: () => openPanel(j.id) },
     COLS.map(([, f, , cls]) => el("td", { class: cls || "" }, f(j))));
   function table(list) {
     const st = tstate();
-    const head = el("tr", null, COLS.map(([h, , sk]) => el("th", { scope: "col", "aria-sort": sk && st.sort === sk ? "descending" : null, title: sk ? "Sort" : null, "aria-label": h || "Select",
+    const head = el("tr", null, COLS.map(([h, , sk]) => el("th", { scope: "col", "aria-sort": sk && st.sort === sk ? "descending" : null, title: sk ? "Sort" : null, "aria-label": h || "In Bucket",
       onclick: () => { if (sk) { st.sort = sk; saveUI(); renderList(); } } }, h, sk && st.sort === sk ? " ↓" : "")));
     const padTop = el("tr", { class: "vpad", "aria-hidden": "true" }, el("td", { colspan: COLS.length }));
     const padBot = el("tr", { class: "vpad", "aria-hidden": "true" }, el("td", { colspan: COLS.length }));
@@ -697,13 +706,37 @@
   }
 
   let current = []; let selectedId = null; let vlist = null;
-  function setView(id) { tstate().view = id; saveUI(); closePop(); renderBanners(); renderAll(); }
+  function setView(id) { tstate().view = id; ui.page = "jobs"; saveUI(); closePop(); renderBanners(); renderAll(); }
+  // the four top tabs are one navigation: two track workspaces (with the sidebar views) and two pages
+  function renderTopTabs() {
+    for (const b of document.querySelectorAll(".track-tab")) {
+      const sel = b.dataset.page ? ui.page === b.dataset.page : ui.page === "jobs" && b.dataset.track === ui.track;
+      b.setAttribute("aria-selected", String(sel)); b.tabIndex = sel ? 0 : -1;
+    }
+    const n = bucketItems().length; const bc = $("#tab-bucket .count"); if (bc) bc.textContent = n.toLocaleString();
+    document.body.dataset.page = ui.page;
+  }
+  function switchPage(page) {
+    ui.page = page; saveUI(); closePop(); if (pJob) closePanel();
+    renderBanners(); renderAll();
+    for (const n of [$("#main")]) { n.classList.remove("swap-in"); void n.offsetWidth; n.classList.add("swap-in"); }
+  }
   const modeOf = (vid) => (tstate().modes || {})[vid] || ui.mode || "cards";
   const SPECIAL = { coverage: () => renderCoverage, skillgaps: () => renderSkillGaps, applications: () => renderApplications,
     followups: () => renderFollowups, stats: () => renderStatsView, runlog: () => renderRunLog, seasons: () => renderSeasons,
     manual: () => renderManualChecks };
+  const PAGES = { bucket: { title: "Bucket", render: () => renderBucket } };
   function renderList(keepScroll) {
     const st = tstate();
+    if (PAGES[ui.page]) {
+      const box = $("#list"); box.textContent = ""; box.removeAttribute("aria-busy");
+      if (vlist) { vlist.destroy(); vlist = null; }
+      $("#view-title").textContent = PAGES[ui.page].title; $("#count").textContent = "";
+      for (const n of ["#sort", "#mode-toggle", "#density", "#saved-wrap"]) $(n).hidden = true;
+      $("#filters").hidden = true; renderPinned(null); writeHash();
+      PAGES[ui.page].render()(box); if (!keepScroll) window.scrollTo({ top: 0 });
+      return;
+    }
     const v = viewById(st.view || defaultView());
     $("#view-title").textContent = v.label;
     $("#sort").value = st.sort;
@@ -936,8 +969,141 @@
         resume: resumeRef(j) } });
     const undoStatus = setStatus(j, { status: "applied" });
     apps[a.id] = a; saveApps();
-    toast(`Marked applied: ${j.company} (date editable in My Applications)`, () => { delete apps[a.id]; saveApps(); undoStatus(); });
+    const bBefore = bucket[j.id] ? JSON.parse(JSON.stringify(bucket[j.id])) : null; const wasIn = inBucket(j.id);
+    if (wasIn) { bucket[j.id] = Object.assign({}, bucket[j.id], { in: false, updated_at: new Date().toISOString() }); saveBucket(); refreshBucket(j.id); }
+    const ref = a.job.resume;
+    launch(`hirescope://status?job=${j.id}&stage=applied&app=${a.id}&date=${a.applied_date}${ref ? `&v=${ref.version}` : ""}`, "Mark Applied");
+    toast(`Marked applied: ${j.company}${wasIn ? " — moved from the Bucket to My Applications" : ""}`, () => {
+      delete apps[a.id]; saveApps(); undoStatus();
+      if (bBefore) { bucket[j.id] = Object.assign({}, bBefore, { updated_at: new Date().toISOString() }); saveBucket(); refreshBucket(j.id); }
+      launch(`hirescope://status?job=${j.id}&stage=undo&app=${a.id}`);
+      renderAll(true); if (pJob) renderActions();
+    });
     renderAll(true); if (pJob) renderActions();
+  }
+
+  // ---------- Bucket page: your apply-list, both tracks ----------
+  const bucketSel = new Set();      // rows ticked for the Bucket's own bulk actions
+  const batchWarn = () => Number(((LIVE.settings || {}).batch_warn)) || 5;   // resume_queue.batch_warn
+  function bucketJob(x) {           // the loaded job, or a stand-in from the saved copy (closed / not on this dashboard)
+    if (x.j) return x.j;
+    const sn = x.e.snap || {};
+    return { id: x.id, company: sn.company || "?", title: sn.title || `Job ${x.id}`, source: sn.source || "", job_id: sn.job_id || "", track: sn.track || "full_time",
+      score: sn.score ?? null, label: sn.label || "", location: sn.location || "", deadline: sn.deadline || null, apply_url: sn.apply_url || "", level: sn.level || "", badges: [], stub: true };
+  }
+  function bucketClosed(x) {
+    const sn = x.e.snap || {}; if (sn.job_status === "closed") return true; if (x.j) return false;
+    const st = ((window.SYNC || {}).job_state || {})[sn.key]; return !!(st && st[0] === "closed");
+  }
+  const HAS_RESUME = ["ready", "ready_q", "reviewed", "queued", "generating"];
+  const RS_ORDER = { failed: 0, "": 1, ready_q: 2, queued: 3, generating: 4, ready: 5, reviewed: 6 };
+  const BUCKET_SORTS = {
+    added: [(a, b) => String(b.e.added_at || "").localeCompare(String(a.e.added_at || "")), "Recently added"],
+    score: [(a, b) => (b.job.score ?? -1) - (a.job.score ?? -1), "Score"],
+    deadline: [(a, b) => (a.job.deadline || "9999").localeCompare(b.job.deadline || "9999"), "Deadline"],
+    company: [(a, b) => a.job.company.localeCompare(b.job.company), "Company"],
+    resume: [(a, b) => (RS_ORDER[resumeStatus(a.job)] ?? 1) - (RS_ORDER[resumeStatus(b.job)] ?? 1), "Resume status"],
+  };
+  function renderBucket(box) {
+    const items = bucketItems().map((x) => Object.assign(x, { job: bucketJob(x), closed: bucketClosed(x) }));
+    for (const id of [...bucketSel]) if (!inBucket(id)) bucketSel.delete(id);
+    const sortKey = BUCKET_SORTS[ui.bucketSort] ? ui.bucketSort : "added";
+    items.sort((a, b) => BUCKET_SORTS[sortKey][0](a, b) || a.id - b.id);
+    const todo = items.filter((x) => !HAS_RESUME.includes(resumeStatus(x.job)));
+    const sort = el("select", { "aria-label": "Sort the Bucket" }, Object.entries(BUCKET_SORTS).map(([k, [, label]]) => el("option", { value: k, text: `Sort: ${label}`, selected: k === sortKey })));
+    sort.addEventListener("change", () => { ui.bucketSort = sort.value; saveUI(); renderList(true); });
+    box.append(el("div", { class: "toolbar page-toolbar" },
+      el("span", { class: "muted", text: `${items.length} job${items.length === 1 ? "" : "s"} · both tracks · ${todo.length} without a resume` }),
+      el("span", { class: "spacer" }), sort,
+      el("button", { class: "btn primary", type: "button", disabled: !items.length, onclick: () => generateAll(false),
+        title: "Queue every Bucket job without a current READY resume (they build one after another in the background)" }, todo.length ? `Generate resumes for all (${todo.length})` : "Generate resumes for all"),
+      moreMenu([["Regenerate resumes for all (new versions)", () => generateAll(true), "Every Bucket job, even those with a READY resume"],
+        ["Export Bucket as CSV", () => exportJobsCsv(items.map((x) => x.job)), null]], "More Bucket actions")));
+    if (!items.length) {
+      box.append(el("div", { class: "empty" }, el("b", { text: "Your Bucket is empty." }),
+        el("div", { style: "margin-top:6px", text: "Tick the box before any job title (or press Space on a focused job) to add it here — from either track, the Similar list or ⌘K. Then generate all their resumes in one click." }),
+        el("div", { style: "margin-top:10px" }, el("button", { class: "btn small", type: "button", onclick: () => switchTrack(ui.track) }, `Browse ${TRACKS[ui.track]} jobs`))));
+      return;
+    }
+    if (bucketSel.size) {
+      const sel = items.filter((x) => bucketSel.has(x.id));
+      box.append(el("div", { class: "bulkbar inline", role: "region", "aria-label": "Bulk actions for the selected Bucket jobs" },
+        el("b", { text: `${sel.length} selected` }),
+        el("button", { class: "btn small", type: "button", onclick: () => generateJobs(sel.map((x) => x.job), false) }, "Generate resumes"),
+        el("button", { class: "btn small", type: "button", onclick: () => removeFromBucket(sel.map((x) => x.job)) }, "Remove from Bucket"),
+        el("button", { class: "btn small", type: "button", onclick: () => exportJobsCsv(sel.map((x) => x.job)) }, "Export CSV"),
+        el("span", { class: "spacer" }), el("button", { class: "btn small ghost", type: "button", onclick: () => { bucketSel.clear(); renderList(true); } }, "Clear selection")));
+    }
+    const all = el("input", { type: "checkbox", "aria-label": "Select every Bucket job", checked: bucketSel.size === items.length && items.length > 0,
+      onchange: (e) => { bucketSel.clear(); if (e.target.checked) items.forEach((x) => bucketSel.add(x.id)); renderList(true); } });
+    const body = el("tbody");
+    for (const x of items) body.append(bucketRow(x));
+    box.append(el("div", { class: "table-wrap" }, el("table", { class: "grid bucket-table", "aria-label": "Bucket" },
+      el("colgroup", null, ["36px", null, "120px", "64px", "230px", "120px", "300px"].map((w) => el("col", { style: w ? `width:${w}` : null }))),
+      el("thead", null, el("tr", null, el("th", { scope: "col" }, all), ...["Role", "Track", "Score", "Resume", "Deadline", "Actions"].map((h, i) => el("th", { scope: "col", class: i === 2 ? "num" : "", text: h })))),
+      body)));
+    box.append(el("p", { class: "muted", style: "font-size:12px", text: "Jobs stay here until you mark them applied or remove them, even after a posting closes. Marking a job applied moves it to My Applications." }));
+  }
+  function bucketRow(x) {
+    const j = x.job; const rs = resumeStatus(j); const r = resumeOf(j); const app = j.stub ? null : appForJob(j);
+    const pick = el("input", { type: "checkbox", "aria-label": `Select ${j.title} at ${j.company}`, checked: bucketSel.has(x.id),
+      onchange: (e) => { if (e.target.checked) bucketSel.add(x.id); else bucketSel.delete(x.id); renderList(true); } });
+    const open = () => (BY_ID.has(x.id) ? openJob(x.id) : showMissingJob(x.id));
+    const d = j.deadline ? daysUntil(j.deadline) : null;
+    const apply = safeUrl(j.apply_url);
+    const busy = rs === "queued" || rs === "generating";
+    return el("tr", { "data-bucket-row": x.id, class: x.closed ? "closed-row" : "" },
+      el("td", { class: "pickcol" }, pick),
+      el("td", { class: "role" }, el("button", { class: "link-btn row-title", type: "button", onclick: open, title: "Open the job" }, j.title),
+        el("div", { class: "muted" }, j.company, x.closed ? [" ", el("span", { class: "chip flag", title: "The posting disappeared from its source; kept in your Bucket", text: "Closed" })] : null,
+          app ? [" ", el("span", { class: "chip info", text: STAGE_LABEL[app.stage] })] : null)),
+      el("td", null, el("span", { class: `chip ${j.track}`, text: TRACKS[j.track] || j.track })),
+      el("td", { class: "num", text: j.score == null ? "—" : String(Math.round(j.score)) }),
+      el("td", null, rs ? resumeBadge(rs, resumeTitle(j)) : el("span", { class: "muted", text: "No resume yet" }),
+        r && r.current && !busy ? el("div", null, el("a", { href: r.current.pdf, target: "_blank", rel: "noopener", class: "small-link" }, `Preview v${r.current.version}`)) : null),
+      el("td", { class: "nowrap" }, j.deadline ? el("span", { class: d != null && d <= 7 ? "warn-text" : "", text: `${fmtDate(j.deadline)}${d != null ? ` (${d < 0 ? "passed" : d === 0 ? "today" : `${d}d`})` : ""}` }) : el("span", { class: "muted", text: "Not stated" })),
+      el("td", { class: "row-actions" },
+        busy ? el("button", { class: "btn small ghost", type: "button", onclick: () => cancelBuild(j), "aria-label": `Cancel the resume build for ${j.company}` }, "Cancel")
+          : el("button", { class: "btn small" + (HAS_RESUME.includes(rs) ? "" : " primary"), type: "button", onclick: () => queueResume(j, HAS_RESUME.includes(rs)),
+            "aria-label": `${HAS_RESUME.includes(rs) ? "Regenerate" : "Generate"} resume for ${j.title} at ${j.company}` }, HAS_RESUME.includes(rs) ? "Regenerate" : "Generate Resume"),
+        apply ? el("a", { class: "btn small", href: apply, target: "_blank", rel: "noopener noreferrer", "aria-label": `Open the application for ${j.company}` }, "Open Application") : null,
+        el("button", { class: "btn small", type: "button", onclick: () => markApplied(j), "aria-label": `Mark ${j.title} at ${j.company} applied` }, "Mark Applied"),
+        el("button", { class: "btn small ghost", type: "button", onclick: () => setBucket(j, false), "aria-label": `Remove ${j.title} at ${j.company} from the Bucket`, title: "Remove from Bucket" }, "Remove")));
+  }
+  async function removeFromBucket(jobs) {
+    if (!jobs.length) return;
+    const before = jobs.map((j) => [j.id, JSON.parse(JSON.stringify(bucket[j.id] || null))]);
+    const at = new Date().toISOString();
+    for (const j of jobs) bucket[j.id] = Object.assign({}, bucket[j.id], { in: false, updated_at: at });
+    saveBucket(); bucketSel.clear(); renderTopTabs(); renderList(true);
+    launch(`hirescope://bucket?job=${jobs.map((j) => j.id).join(",")}&op=remove`, "Remove from Bucket");
+    toast(`Removed ${jobs.length} from the Bucket`, () => {
+      for (const [id, b] of before) { if (b) bucket[id] = b; else delete bucket[id]; }
+      saveBucket(); renderTopTabs(); renderList(true);
+      launch(`hirescope://bucket?job=${jobs.map((j) => j.id).join(",")}&op=add`);
+    });
+  }
+  async function generateJobs(jobs, regenerate, viaList) {
+    if (!jobs.length) { toast("Every one of these already has a current READY resume (or is in the queue)"); return; }
+    if (jobs.length > batchWarn() && !(await confirmDialog(`Queue ${jobs.length} resume builds?`, [
+      `${jobs.length} jobs will build one after another in the background (you can cancel any queued one).`,
+      "Each build is a full Claude Code drafter + reviewer + truth pass: about the usage of running /resume-builder once per job.",
+      regenerate ? "Regenerate builds a new version even for jobs whose resume is READY." : "Jobs with a current READY resume are skipped."], `Queue ${jobs.length}`))) return;
+    if (!LAUNCHER.installed) { toast("Install the launcher once (./scripts/install_launcher.sh) to generate resumes from here"); return; }
+    const url = viaList ? `hirescope://queue?list=bucket${regenerate ? "&regenerate=1" : ""}` : `hirescope://queue?job=${jobs.map((j) => j.id).join(",")}${regenerate ? "&regenerate=1" : ""}`;
+    const sent = await launch(url, "Queue resumes");
+    if (!sent) return;
+    const at = new Date().toISOString(); for (const j of jobs) resumeQueued[j.id] = at; store.set(K.resumeQueued, resumeQueued);
+    bucketSel.clear(); toast(`Queued ${jobs.length} resume build${jobs.length === 1 ? "" : "s"} — they build one after another in the background`);
+    renderAll(true);
+  }
+  function generateAll(regenerate) {
+    const items = bucketItems().map(bucketJob);
+    const jobs = regenerate ? items.filter((j) => !["queued", "generating"].includes(resumeStatus(j))) : items.filter((j) => !HAS_RESUME.includes(resumeStatus(j)));
+    // SQLite already has every one of them in its Bucket: the short link; otherwise name the jobs
+    const S = (window.SYNC || {}).bucket || {};
+    const synced = items.every((j) => S[j.id] && S[j.id].in);
+    return generateJobs(jobs, regenerate, synced);
   }
 
   // ----- page -----
@@ -1332,6 +1498,7 @@
     $("#p-back").textContent = prev ? `← Back to ${prev.title} · ${prev.company}` : "";
     $("#panel").classList.add("open"); $("#panel").setAttribute("aria-hidden", "false"); $("#scrim").classList.add("open");
     $("#p-title").textContent = j.title;
+    const pbk = $("#p-bucket"); pbk.textContent = ""; pbk.append(bucketBox(j));
     $("#p-sub").textContent = `${j.company}${j.tier ? ` · tier ${j.tier}` : ""} · ${j.location} · ${j.work_mode} · ${postedText(j)}`;
     const pb = $("#p-badges"); pb.textContent = ""; pb.append(...badgesOf(j));
     const pr = $("#p-ring"); pr.textContent = ""; if (!j.filtered) pr.append(ring(j.score, j.label, 60));
@@ -1814,8 +1981,8 @@
     d.showModal(); box.querySelector("button").focus();
   }
   function exportStatuses() {
-    const payload = { exported_at: new Date().toISOString(), format: 5, statuses, track_overrides: overrides, applications: apps,
-                      manual_checks: manualChecks, resume_reviews: resumeReviews };
+    const payload = { exported_at: new Date().toISOString(), format: 6, statuses, track_overrides: overrides, applications: apps,
+                      manual_checks: manualChecks, resume_reviews: resumeReviews, bucket };
     download("jobsearch-statuses.json", JSON.stringify(payload, null, 2), "application/json");
     store.set(K.exported, payload.exported_at); renderBanners(); toast("Exported jobsearch-statuses.json — the next run imports it, or now: ./scripts/import_pending.sh");
   }
@@ -1923,11 +2090,18 @@
   });
 
   // ---------- track tabs, toolbar ----------
-  for (const b of document.querySelectorAll(".track-tab")) b.addEventListener("click", () => switchTrack(b.dataset.track));
+  for (const b of document.querySelectorAll(".track-tab")) b.addEventListener("click", () => (b.dataset.page ? switchPage(b.dataset.page) : switchTrack(b.dataset.track)));
+  // arrow keys move between the four top tabs (one tablist)
+  $(".track-tabs").addEventListener("keydown", (e) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) || !e.target.classList.contains("track-tab")) return;
+    const tabs = [...document.querySelectorAll(".track-tab")]; let i = tabs.indexOf(e.target);
+    i = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (i + (e.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    e.preventDefault(); tabs[i].focus(); tabs[i].click();
+  });
   function switchTrack(t) {
     const onApps = ["applications", "stats", "followups"].includes(tstate().view);
     const v = tstate().view;
-    ui.track = t; if (onApps) tstate().view = v; saveUI();
+    ui.track = t; ui.page = "jobs"; if (onApps) tstate().view = v; saveUI();
     $("#q").value = tstate().q || ""; closePop(); renderAll();
     for (const n of [$("#main"), $("#tiles")]) { n.classList.remove("swap-in"); void n.offsetWidth; n.classList.add("swap-in"); }
   }
@@ -1935,7 +2109,8 @@
   function writeHash() {
     const st = tstate(); const v = st.view || defaultView(); const tr = ui.track === "coop_intern" ? "coop" : "fulltime";
     let h;
-    if (v === "applications") h = `#applications/${tr}`;
+    if (PAGES[ui.page]) h = `#${ui.page}`;
+    else if (v === "applications") h = `#applications/${tr}`;
     else {
       const p = new URLSearchParams();
       for (const f of FILTERS) { const vals = st.filters[f.id]; if (vals && vals.length) p.set(f.id, vals.join("|")); }
@@ -1949,7 +2124,9 @@
   }
   let bootJob = null; let bootTab = null;
   function readHash() {
+    if (/^#(bucket|builder)$/.test(location.hash || "")) { ui.page = location.hash.slice(1); return; }
     const m = /^#(coop|fulltime|applications)(?:\/([a-z0-9]+))?(?:\?(.*))?$/.exec(location.hash || ""); if (!m) return;
+    ui.page = "jobs";
     if (m[1] === "applications") { if (m[2] === "coop" || m[2] === "fulltime") ui.track = m[2] === "coop" ? "coop_intern" : "full_time"; tstate().view = "applications"; return; }
     ui.track = m[1] === "coop" ? "coop_intern" : "full_time";
     const st = tstate();
@@ -1979,6 +2156,8 @@
       ...VIEWS.map((v) => ({ kind: "View", label: v.label, run: () => setView(v.id) })),
       { kind: "Action", label: "Export statuses", run: exportStatuses },
       ...manualRows().map(({ r }) => ({ kind: "Manual check", label: r.company, sub: "Mark checked today", run: () => markManualChecked(r.company) })),
+      { kind: "Action", label: "Open the Bucket", sub: `${bucketItems().length} jobs`, run: () => switchPage("bucket") },
+      { kind: "Action", label: "Generate resumes for all Bucket jobs", run: () => generateAll(false) },
       { kind: "Action", label: "Add application", run: () => openAddApp() },
       { kind: "Action", label: "Add external job", run: () => openAddExt() },
       { kind: "Action", label: "Switch to Co-op / Internships", run: () => switchTrack("coop_intern") },
@@ -2071,6 +2250,9 @@
       el("p", { class: "muted", style: "font-size:12px", text: "Full details aren't loaded for this job. You can still queue its resume." }),
       el("button", { class: "btn small", type: "button", onclick: () => { $("#job-info").close(); queueResume({ id: res.id, company: res.company, title: res.title }, false); } }, "Generate Resume"));
     $("#job-info-li").href = linkedinSearch(res.company, res.title);
+    const jb = $("#job-info-bucket"); jb.textContent = "";
+    const stub = { id: res.id, company: res.company, title: res.title, track: res.track || "full_time", job_status: res.state === "c" ? "closed" : "open" };
+    jb.append(bucketBox(stub), "Add to Bucket (kept even if the posting closed)");
     d.showModal(); $("#job-info-close").focus();
   }
   $("#job-info-close").addEventListener("click", () => $("#job-info").close());
@@ -2141,10 +2323,10 @@
       case "j": move(1); break;
       case "k": move(-1); break;
       case "Enter": if (sel && tag !== "button" && tag !== "a") openPanel(sel.id); else return; break;
-      case "Escape": if (pJob) closePanel(); else if (picked.size) clearPicks(); else closePop(); break;
+      case "Escape": if (pJob) closePanel(); else closePop(); break;
       case "s": if (sel) shortlist(sel); break;
       case "a": if (sel && !sel.filtered) markApplied(sel); break;
-      case " ": if (sel && tag !== "button" && tag !== "a") { e.preventDefault(); togglePick(sel.id); } else return; break;
+      case " ": if (sel && tag !== "button" && tag !== "a") { e.preventDefault(); setBucket(sel, !inBucket(sel.id)); } else return; break;
       case "x": if (sel) openSkipPicker(sel); break;
       case "o": if (sel && safeUrl(sel.apply_url)) window.open(sel.apply_url, "_blank", "noopener"); break;
       case "g": if (sel && !sel.filtered) queueResume(sel, false); break;
@@ -2152,12 +2334,17 @@
       case "?": $("#help").showModal(); break;
       case "1": switchTrack("coop_intern"); break;
       case "2": switchTrack("full_time"); break;
+      case "3": switchPage("bucket"); break;
       default: return;
     }
   });
 
   // ---------- boot ----------
-  function renderAll(keepScroll) { renderCounts(); renderDayTabs(); renderTiles(); renderList(keepScroll); }
+  function renderAll(keepScroll) {
+    const jobsPage = !PAGES[ui.page];
+    $(".day-row").hidden = !jobsPage; $("#tiles").hidden = !jobsPage;
+    renderCounts(); if (jobsPage) { renderDayTabs(); renderTiles(); } renderList(keepScroll);
+  }
   if (!["coop_intern", "full_time"].includes(ui.track)) ui.track = "full_time";
   readHash();
   $("#q").value = tstate().q || "";

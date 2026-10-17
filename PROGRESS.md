@@ -918,7 +918,8 @@ commit and a push.
 ## Status
 - [x] 0 — Zero-CLI: install_launcher.sh (hirescope:// app + launchd worker), Generate Resume queues via the launcher,
       "Copy command" only under "…", setup banner (2026-10-17)
-- [ ] 1 — Bucket tab (checkbox = add to Bucket; per-job + bucket actions; Mark Applied removes with Undo; export 6)
+- [x] 1 — Bucket tab (checkbox = add to Bucket; per-job + bucket actions; Mark Applied removes with Undo; export 6)
+      (2026-10-17)
 - [ ] 2 — Resume Builder tab (form → saved file → hirescope://external → import + queue; "Ready to apply" stage)
 - [ ] 3 — launcher: every link type, strict validation, silent except interactive, one-time browser tip
 - [ ] 4 — queue: statuses, concurrency, cancel, persistence, retry, --queue questions, notifications, panel, pause
@@ -972,3 +973,25 @@ commit and a push.
   so no test can touch real data; tests/resume_builder/test_queue.py (queue, worker with stub builds, launcher
   validation, silent mode, installer), test_questions.py, tests/test_dashboard_browser.py (headless Chrome via
   tests/browser/cdp.mjs: no console errors, Generate Resume → hirescope://queue, tip once, live statuses, `g`).
+
+Real queue build (scratch copy of the data, not the real folders): job 2134 (Applied Intuition, Build & Release New
+Grad). First item: two content failures (a required VibeSpace bullet and a reworded Freelance bullet ran to 3 lines;
+the build's repair can trim but not reword) → retried once → Failed with the reason, as designed. Fix: the worker
+now tells the retry what failed (--append-system-prompt) and SKILL.md queue mode says to keep required bullets at
+master length and the baseline's bullet count. Second item: READY v4 on its first attempt, PDF copied to the (scratch)
+Desktop folder, no Terminal.
+
+## Section 1 report (2026-10-17): Bucket
+- The checkbox before every job title (cards, table rows, Similar list, detail panel, ⌘K info card) adds a copy of the
+  job to the Bucket; `Space` does the same; the old bulk select (and its bar) is gone. Bucket tab (one tablist with
+  the track tabs: arrow keys, `3`, `#bucket`) with a live count; table: track badge, score, resume badge (+ Preview),
+  deadline, Closed badge, per-job Generate / Regenerate / Cancel, Open Application, Mark Applied, Remove; sort (added,
+  score, deadline, company, resume status); bulk actions for selected rows; Generate resumes for all (confirmation
+  with the count and a usage warning above 5; "…" → Regenerate for all, Export CSV).
+- Mark Applied anywhere: leaves the Bucket, joins My Applications with today's date and the exact resume version; one
+  `status?…&stage=applied&app=<id>&date=…&v=…` link (SQLite: application with the dashboard's id, Bucket removal,
+  undo record); the toast's Undo reverts locally and sends `stage=undo`.
+- `src/jobsearch/bucket.py` (snapshot copy, tombstones, newer-wins merge); export format 6; sync.js `bucket`.
+- Tests: tests/test_bucket.py (7), headless-Chrome "bucket" scenario (tick 3 jobs from both tracks and the Similar
+  list, Space, live count, Bucket page, sort, Mark Applied + Undo, Generate all, Remove, persistence across reload,
+  export format 6, arrow-key tab navigation, no console errors).
