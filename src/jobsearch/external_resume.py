@@ -5,6 +5,11 @@ The dashboard saves the job you entered (pasted JD, a JD file, or a URL only) as
 from Terminal: ./scripts/external_resume.sh "<file>" (a name in ~/Downloads or inputs/external_jobs/, or a path in
 one of them). If the file isn't there, the newest pending external job is used instead, and the output says so.
 
+The launcher never opens a file in ~/Downloads itself: macOS asks once per app before an app may read that folder,
+and the launcher app has no window to show the question in, so it would hang. It checks the name only (`named_path`) and
+leaves a request (data.nosync/state/external_requests/); the background worker, whose Python already may read
+~/Downloads, resolves the path for real (`allowed_path`: symlinks resolved, folder checked) and imports it.
+
 Import = the usual external-job import (dedupe: same URL, same JD, or same company and role with a similar JD; a
 match uses the existing job's ID instead of adding a copy). A URL with no JD goes through Add job by URL. Then the job's
 resume is queued (skipped when it already has a current READY resume) and the worker is started; the dashboard data
@@ -18,6 +23,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from . import external, paths
@@ -64,6 +70,82 @@ def allowed_path(v: str) -> Path:
     if real.parent not in roots:
         raise FileRefused("files only from ~/Downloads or inputs/external_jobs/")
     return real
+
+
+def named_path(v: str) -> Path:
+    """The same rules as allowed_path from the text alone, touching nothing in ~/Downloads (the launcher's check)."""
+    v = str(v or "").strip()
+    if not v:
+        raise FileRefused("no file given")
+    if "/" in v:
+        p = Path(os.path.expanduser(v))
+        if not p.is_absolute():
+            raise FileRefused("give a file name or an absolute path")
+        p = Path(os.path.normpath(p))
+        if str(p.parent) not in {os.path.normpath(os.path.expanduser(str(d))) for d in allowed_dirs()}:
+            raise FileRefused("files only from ~/Downloads or inputs/external_jobs/")
+    else:
+        inbox = paths.EXTERNAL_INBOX / v                  # the drop folder is the repo's own: safe to look at
+        p = inbox if inbox.exists() else downloads_dir() / v
+    if not _NAME.match(p.name):
+        raise FileRefused("unexpected characters in the file name")
+    if p.suffix.lower() not in FILE_TYPES:
+        raise FileRefused(f"only {', '.join(FILE_TYPES)} files")
+    return p
+
+
+def requests_dir() -> Path:
+    return paths.STATE_DIR / "external_requests"
+
+
+def request(file_arg: str) -> Path:
+    """The launcher's half: remember which file to import (the worker does the rest)."""
+    named_path(file_arg)
+    d = requests_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}-{os.getpid()}.json"
+    p.write_text(json.dumps({"file": file_arg, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}),
+                 encoding="utf-8")
+    return p
+
+
+def pending_requests() -> list[Path]:
+    d = requests_dir()
+    return sorted(d.glob("*.json")) if d.is_dir() else []
+
+
+def process_requests(conn, cfg=None) -> list[dict]:
+    """The worker's half: import each requested file and queue its resume; the outcome goes to live.js (the Resume
+    Builder tab shows it). A file that is refused or can't be imported is reported and dropped."""
+    import sqlite3
+    out = []
+    for r in pending_requests():
+        try:
+            req = json.loads(r.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            r.unlink(missing_ok=True)
+            continue
+        if cfg is None:
+            from .config import load_config
+            cfg = load_config(paths.PREFERENCES)
+        at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        try:
+            res = import_and_queue(conn, cfg, req["file"])
+            msg, ok = (f"{res['note']}; {res['message']}" if res["note"] else res["message"]), True
+        except sqlite3.OperationalError:
+            break                                         # the database is busy: try again on the next round
+        except (FileRefused, ValueError, external.ExternalError) as e:
+            msg, ok = f"{Path(str(req.get('file'))).name}: {e}", False
+        db.set_meta(conn, "launcher_last", json.dumps({"at": at, "action": "external", "ok": ok, "message": msg}))
+        conn.commit()
+        r.unlink(missing_ok=True)
+        out.append({"file": req.get("file"), "ok": ok, "message": msg})
+        try:
+            from . import hooks
+            hooks.after_change(conn, reason="external job")
+        except Exception:  # noqa: BLE001
+            pass
+    return out
 
 
 def wait_for(p: Path, seconds: float) -> bool:

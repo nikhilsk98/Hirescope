@@ -504,6 +504,13 @@ class Worker:
                 launcher.drain_spool(self.db_path)
         except Exception as e:  # noqa: BLE001
             log.warning("spooled links not applied", extra={"error": str(e)[:200]})
+        try:                                        # Resume Builder tab submissions (the launcher only names the file)
+            from jobsearch import external_resume
+            if external_resume.pending_requests():
+                self._write_live(conn, "importing")
+                external_resume.process_requests(conn)
+        except Exception as e:  # noqa: BLE001
+            log.warning("external jobs not imported", extra={"error": str(e)[:200]})
         if db.get_meta(conn, "publish_pending"):      # new external jobs: scored + on the dashboard before their builds
             self._write_live(conn, "publishing")
             try:
@@ -545,6 +552,8 @@ class Worker:
                 from jobsearch import launcher as _launcher
                 queued = conn.execute("SELECT COUNT(*) FROM resume_queue WHERE status='queued'").fetchone()[0] + \
                     bool(db.get_meta(conn, "publish_pending")) + len(_launcher.spooled())
+                from jobsearch import external_resume as _ext
+                queued += len(_ext.pending_requests())
                 state = "paused" if self.paused and queued else "running" if self.running or queued else "idle"
                 retry_locked(self._write_live, conn, state)
                 if not self.running and not queued:

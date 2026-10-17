@@ -87,9 +87,9 @@ def _date(v: str) -> str:
 
 
 def _file(v: str) -> str:
-    from .external_resume import FileRefused, allowed_path
+    from .external_resume import FileRefused, named_path
     try:
-        allowed_path(v)
+        named_path(v)              # by name only: the launcher never opens ~/Downloads (see external_resume)
     except FileRefused as e:
         raise LinkError(str(e)) from None
     return v
@@ -294,15 +294,15 @@ def do_status(conn, p: dict) -> str:
 
 
 def do_external(conn, p: dict) -> str:
-    from .config import load_config
-    from .external import ExternalError
-    from .external_resume import FileRefused, import_and_queue
+    """Hand the saved file to the background worker (it may read ~/Downloads; this app may not without asking)."""
+    from resume_builder.queue import kick
+    from .external_resume import FileRefused, request
     try:
-        out = import_and_queue(conn, load_config(paths.PREFERENCES), p["file"])
-    except (FileRefused, ExternalError, ValueError) as e:
+        request(p["file"])
+    except FileRefused as e:
         raise LinkError(str(e)) from None
-    _after(conn, "external job")
-    return f"{out['note']}; {out['message']}" if out["note"] else out["message"]
+    kick()
+    return "saved — HireScope imports it in the background and queues its resume"
 
 
 def do_note(conn, p: dict) -> str:

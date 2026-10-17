@@ -28,6 +28,15 @@ def env(cfg, monkeypatch):
     conn.close()
 
 
+def external_link(conn, name: str) -> str:
+    """hirescope://external as it runs for real: the launcher only names the file; the worker imports it."""
+    first = launcher.handle(f"hirescope://external?file={name}")
+    assert "imports it in the background" in first
+    out = ER.process_requests(conn)
+    assert out, "the worker found no request"
+    return out[-1]["message"]
+
+
 def saved(downloads, name="hirescope-external-job-DemoCorp-20261017T120000-ab12.json", **fields):
     payload = {"kind": "hirescope_external_job", "format": 1, "origin": "resume_builder", "created_at": "2026-10-17T12:00:00Z",
                "company": "DemoCorp", "role": "Software Engineer Co-op (DEMO)", "location": "Boston, MA", "url": "",
@@ -60,7 +69,7 @@ def test_allowed_paths_only_downloads_and_the_drop_folder(env, tmp_path):
 def test_external_link_imports_and_queues_in_one_click(env):
     conn, downloads = env
     p = saved(downloads)
-    msg = launcher.handle(f"hirescope://external?file={p.name}")
+    msg = external_link(conn, p.name)
     assert "imported DemoCorp — Software Engineer Co-op (DEMO)" in msg and "resume queued" in msg
     pk = conn.execute("SELECT id FROM jobs WHERE source='external'").fetchone()[0]
     it = queue.active_item(conn, pk)
@@ -72,7 +81,7 @@ def test_external_link_imports_and_queues_in_one_click(env):
     assert list((paths.IMPORTS_DIR / "external").glob(f"*{p.name}"))
     # the same job again (a new file): dedupe → the existing job's ID, no second job, no second build
     p2 = saved(downloads, name="hirescope-external-job-DemoCorp-20261017T130000-cd34.json")
-    msg = launcher.handle(f"hirescope://external?file={p2.name}")
+    msg = external_link(conn, p2.name)
     assert "matched existing" in msg and f"job {pk}" in msg
     assert conn.execute("SELECT COUNT(*) FROM jobs WHERE source='external'").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM resume_queue WHERE job_pk=? AND status='queued'", (pk,)).fetchone()[0] == 1
@@ -103,7 +112,7 @@ def test_url_only_uses_add_job_by_url(env, monkeypatch):
     monkeypatch.setattr("jobsearch.add_url.add_job", fake_add_job)
     p = saved(downloads, name="hirescope-external-job-demo-url-20261017T120000-q1.json", company="", role="",
               jd_text="", url="https://jobs.demo.example/postings/42")
-    msg = launcher.handle(f"hirescope://external?file={p.name}")
+    msg = external_link(conn, p.name)
     assert calls and calls[0][0] == "https://jobs.demo.example/postings/42" and "resume queued" in msg
 
 
@@ -128,7 +137,7 @@ def test_bad_external_links_rejected():
 
 # --- Ready to apply ---------------------------------------------------------------------------------------------------
 def _external_ready(conn, downloads, version=1):
-    launcher.handle(f"hirescope://external?file={saved(downloads).name}")
+    external_link(conn, saved(downloads).name)
     pk = conn.execute("SELECT id FROM jobs WHERE source='external'").fetchone()[0]
     queue.cancel(conn, pk)
     conn.execute("INSERT INTO resume_builds (job_pk, version, status, pdf_path, manifest_path, created_at, summary) "
@@ -188,8 +197,23 @@ def test_worker_publishes_new_external_jobs_before_building(env, monkeypatch):
     conn, downloads = env
     calls = []
     monkeypatch.setattr(queue, "publish_dashboard", lambda: calls.append("publish") or db.set_meta(conn, "publish_pending", "") or conn.commit() or "published")
-    launcher.handle(f"hirescope://external?file={saved(downloads).name}")
+    external_link(conn, saved(downloads).name)
     started = []
     monkeypatch.setattr(queue.Worker, "start", lambda self, c, item: started.append(item["job_pk"]))
     queue.Worker(poll=0.01).tick(conn)
     assert calls == ["publish"] and started
+
+
+def test_launcher_never_opens_the_downloads_folder(env):
+    """macOS asks before an app may read ~/Downloads, and the launcher app can't show that question (it would hang,
+    found in the end-to-end run): the launcher checks the file by name only; the worker reads it."""
+    conn, downloads = env
+    p = saved(downloads)
+    os.chmod(downloads, 0)                                    # unreadable to everyone, like an unanswered prompt
+    try:
+        msg = launcher.handle(f"hirescope://external?file={p.name}")
+        assert "imports it in the background" in msg and len(ER.pending_requests()) == 1
+    finally:
+        os.chmod(downloads, 0o755)
+    assert "imported DemoCorp" in ER.process_requests(conn)[0]["message"] and not ER.pending_requests()
+    assert json.loads(db.get_meta(conn, "launcher_last"))["action"] == "external"

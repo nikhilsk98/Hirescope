@@ -1131,3 +1131,15 @@ Low (left as is): the native file input's look; the faint ⌘K hint.
   "database is locked" and lose the click. Now a link waits ~20 s at most (busy_timeout 4 s × 4 tries), then is saved to
   data.nosync/state/launcher_spool/ and applied in order as soon as the database is free (the worker drains the spool
   when no run holds the lock; so does the next link). Test: a held write lock → two links spooled → applied in order.
+
+## Launcher and ~/Downloads (2026-10-17, found in the end-to-end run, step d)
+- The Resume Builder link hung: the launcher (a child of the HireScope Launcher app) opened the saved file in ~/Downloads,
+  macOS put up its one-time "would like to access files in your Downloads folder" prompt for the app, and the launcher
+  sat in open() waiting for an answer (the app has no window; every later link would queue behind it). Stopped it.
+- Fix: the launcher never touches ~/Downloads. It validates the file name only (`external_resume.named_path`), leaves a
+  request in data.nosync/state/external_requests/ and kicks the worker; the worker (launchd's Python already may read
+  ~/Downloads, verified for scheduled runs) resolves the path for real (`allowed_path`: symlinks resolved, folder
+  checked), imports and queues, and reports the outcome through live.js (the Resume Builder tab shows it). Test: the
+  launcher succeeds with ~/Downloads unreadable.
+- Needs Nikhil (optional): if the prompt "HireScope Launcher would like to access files in your Downloads folder" is
+  still on screen, either answer is fine now (the launcher no longer needs that access).
