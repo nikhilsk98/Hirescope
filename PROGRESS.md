@@ -1249,6 +1249,15 @@ history, never the current file.
   Excel sync, Bucket and hooks: queue 74 → 100%, launcher 92 → 99%, installer 81 → 99%, Excel 94 → 100%, Bucket
   94 → 100%, hooks 84 → 100%. Suite: 880 passed, line coverage 92%.
 
+## Quieter terminal output (2026-10-17)
+- Without `--verbose` the terminal shows warnings and errors only, and ends on the run summary. The JSON run summary,
+  coverage line, per-source ok/failed/unavailable/timeout lines, HTTP retry warnings, per-company MANUAL CHECK and
+  PARTIAL lines, and lines the summary already repeats (REOPENED, SOURCE HEALTH, external jobs) go to the log only.
+- Manual-check companies collapse into one terminal line (count, first 5 names, "and N more"). Real failures
+  (INCOMPLETE COVERAGE, errors) still print; a one-off non-JSON response stays log-only (the summary notes it).
+- `--dry-run` now prints the summary too (nothing written). `--verbose` shows everything as before.
+- Tests: `tests/test_terminal_output.py`; the end-to-end test checks the terminal ends on the summary. Suite: 883 passed.
+
 ## Needs Nikhil (this work)
 1. **macOS folder access for background jobs** (recommended): System Settings → Privacy & Security → Files and Folders →
    allow **Python** and **HireScope Launcher** the Desktop and Downloads folders (or answer the prompts when shown).

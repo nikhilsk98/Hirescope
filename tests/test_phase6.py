@@ -284,7 +284,7 @@ def test_quick_check_skips_the_aggregator(conn, cfg, monkeypatch):
 
 
 # --- end to end: python -m jobsearch.run with mocked sources (DEMO) --------------------------------
-def test_main_end_to_end_with_mocked_sources(monkeypatch, tmp_path, cfg, greenhouse_payload):
+def test_main_end_to_end_with_mocked_sources(monkeypatch, tmp_path, cfg, greenhouse_payload, capfd):
     """The whole run: plan -> fetch (mocked Greenhouse) -> extract -> score -> SQLite -> dashboard data.js/sync.js ->
     run summary, all inside tmp_path (the real data/ and dashboard/ are never touched)."""
     from jobsearch import paths
@@ -321,6 +321,9 @@ def test_main_end_to_end_with_mocked_sources(monkeypatch, tmp_path, cfg, greenho
     assert (tmp_path / "dashboard" / "sync.js").exists()
     summary = (tmp_path / "logs" / "last_run_summary.txt").read_text()
     assert "2 of 2 sources OK" in summary and "0 failed" in summary
+    err = capfd.readouterr().err   # quiet terminal: ends on the summary; the JSON summary is in the log only
+    assert err.rstrip().endswith(summary.rstrip()) and "run summary:" not in err and "source ok:" not in err
+    assert "run summary:" in (tmp_path / "logs" / "jobsearch.log").read_text()
     import sqlite3
     c = sqlite3.connect(tmp_path / "jobs.db")
     assert c.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 4

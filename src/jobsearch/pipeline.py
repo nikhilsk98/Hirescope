@@ -38,6 +38,7 @@ from .storage import db
 from .watchlist import WatchItem
 
 log = logging.getLogger(__name__)
+LOG_ONLY = {"log_only": True}   # extra=: per-source detail; on the terminal only with --verbose (see run.setup_logging)
 
 # Bump when extraction logic changes; stored jobs are then re-extracted from their saved title/location/JD.
 EXTRACT_VERSION = "2026-10-17.27"  # .27: a citizenship requirement listed under its intro line ("will require the following: - U.S. citizenship"), or in the title ("(US Citizen)"); .26: "should the position require" is conditional; .25: "U.S. Person status" forms; .24: "requires that the candidate be a U.S. citizen"; .23: export control without citizen/permanent-resident/protected-individual/U.S.-person wording is flagged, never filtered; .22: green-card mentions in sponsorship statements, "except U.S. persons … may", export "authorizations" without person words → not hard; .21: ITAR licence-route boilerplate stays hard; .20: "work authorization" labels aren't an open path; sanctioned-country and company-wide export lines flagged; export skills ignored; .19: U.S. person / export control (22 CFR 120.62, 8 U.S.C. 1324b, ITAR/EAR, green card) by sentence; EEO and "otherwise authorized" lines skipped; scoped or hedged export control → export_control flag; .18: seasons in school-enrollment phrases are not work terms; .17: clearance from titles and "Clearance: Secret" headers; "graduating by X or Y" uses the later date; "Spring/Summer 2027" season lists; "Spring Boot" / "6-month period" are not terms; .16: seasons in graduation phrases are not work terms; .15: "staff" inside "member of technical staff" is not a level; .14: "2027 Summer Intern" term order; .13: "Toronto, CA" = Canada
@@ -499,7 +500,8 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
                     if i in begun and now - begun[i] > source_timeout and not fut.done():
                         pending.pop(fut)
                         abandoned += 1
-                        log.warning("source timed out: %s after %.0f min; moving on", item[1].name, source_timeout / 60)
+                        log.warning("source timed out: %s after %.0f min; moving on", item[1].name, source_timeout / 60,
+                                    extra=LOG_ONLY)
                         give_up(item, f"timed out after {source_timeout / 60:g} min (schedule.source_timeout_minutes)")
             if deadline is not None and now >= deadline and pending:
                 waiting = [it for f, (i, it) in pending.items() if f.cancel()]
@@ -509,7 +511,7 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
                     conn.commit()
                 started = [it for f, (i, it) in pending.items() if not f.cancelled()]
                 log.warning("quick-check time limit reached: %d source(s) still running were abandoned, %d not "
-                            "started wait for the next run", len(started), len(waiting))
+                            "started wait for the next run", len(started), len(waiting), extra=LOG_ONLY)
                 for item in started:
                     abandoned += 1
                     give_up(item, "quick-check time limit reached while this source was running "
@@ -547,7 +549,7 @@ def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
             if not since or datetime.fromisoformat(since) > datetime.now(timezone.utc) - UNAVAILABLE_GRACE:
                 # the provider's own outage page: listings kept, retried next run, not a failure of this source
                 out.status = "unavailable"
-                log.warning("source unavailable: %s/%s: %s", label, name, out.error)
+                log.warning("source unavailable: %s/%s: %s", label, name, out.error, extra=LOG_ONLY)
                 db.set_source_status(conn, name, label, "unavailable", out.error, None, **extra)
                 return out
             out.error = f"{out.error} (no successful check since {since[:10]})"
@@ -556,7 +558,8 @@ def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
                                                                           r"paused for the rest", out.error or ""))
         (log.warning if out.transient and not out.repeated else log.error)(
             "source failed: %s/%s: %s%s", label, name, out.error,
-            " (one-off non-JSON response; fails the run only if it repeats)" if out.transient and not out.repeated else "")
+            " (one-off non-JSON response; fails the run only if it repeats)" if out.transient and not out.repeated else "",
+            extra=LOG_ONLY)   # the run's INCOMPLETE COVERAGE lines and summary report it
         if f.planned.watch is not None:
             db.bump_company_source_failure(conn, name)
         db.set_source_status(conn, name, label, "failed", out.error, None, **extra)
@@ -603,7 +606,7 @@ def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
             rec = to_record(raw, cfg, jd_dir, f.official)
             _, status = db.upsert_job(conn, rec, now)
         except Exception as e:  # noqa: BLE001 - one bad posting must not sink the company
-            log.warning("skipping %s/%s job %s: %s", label, name, raw.job_id, e)
+            log.warning("skipping %s/%s job %s: %s", label, name, raw.job_id, e, extra=LOG_ONLY)
             continue
         seen.add(raw.job_id)
         out.new += status == "new"

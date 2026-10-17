@@ -73,7 +73,7 @@ and `- ` bullets.
 
 ```sh
 ./scripts/run.sh                         # full run, writes dashboard/data.js
-source ~/.venvs/hirescope/bin/activate && python -m jobsearch.run --verbose     # same thing
+source ~/.venvs/hirescope/bin/activate && python -m jobsearch.run --verbose     # same, with every log line on the terminal
 python -m jobsearch.run --company "Figma" --verbose               # one company
 python -m jobsearch.run --source greenhouse --dry-run             # only that adapter; fetch + score, write nothing
 python -m jobsearch.run --no-email                                # skip LinkedIn alert emails (IMAP) this run
@@ -83,6 +83,10 @@ python -m jobsearch.run --rescore                                 # no fetching:
 python -m jobsearch.run --all                                     # ignore tier schedules this run
 python -m jobsearch.run --resume path.md --prefs path.yaml        # alternate inputs
 ```
+
+The terminal shows only real problems (failed sources, errors), one line for all manual-check companies, and the
+run summary at the end. The JSON summary and per-source details go to `data.nosync/logs/jobsearch.log`;
+`--verbose` puts everything on the terminal too.
 
 Then double-click `dashboard/index.html` (opens via `file://`, no server). The exit code is `0` when no
 source failed (companies marked "Manual check needed" and partial listings are reported, not errors), `1` when any

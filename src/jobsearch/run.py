@@ -25,7 +25,7 @@ from .output.dashboard import coverage_rows, eng_blogs, select_visible, write_da
 from .output.h1b import load_h1b, match_companies
 from .output.links import check_links
 from . import pipeline
-from .pipeline import compute_similar, ensure_extraction_current, extraction_stale, run
+from .pipeline import LOG_ONLY, compute_similar, ensure_extraction_current, extraction_stale, run
 from .watchlist import WatchlistError, load_watchlist, resolve
 from .storage import db
 from .tracker import feedback, referrals, statuses
@@ -47,7 +47,17 @@ class _JsonFormatter(logging.Formatter):
         return json.dumps(d)
 
 
+def _quiet_console(record: logging.LogRecord) -> bool:
+    """Without --verbose the terminal shows warnings and errors only, minus log-only detail and HTTP retry noise
+    (a source that still fails after its retries is reported in the run summary)."""
+    if getattr(record, "log_only", False):
+        return False
+    return not (record.name.startswith("jobsearch.adapters") and record.levelno < logging.ERROR)
+
+
 def setup_logging(verbose: bool) -> Path:
+    """Everything goes to the JSON log file; the terminal gets the run summary and real problems (all of it with
+    --verbose)."""
     paths.LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = paths.LOG_DIR / "jobsearch.log"
     fh = logging.handlers.RotatingFileHandler(log_file, maxBytes=2_000_000, backupCount=5, encoding="utf-8")
@@ -55,13 +65,23 @@ def setup_logging(verbose: bool) -> Path:
     fh.setLevel(logging.DEBUG)
     ch = logging.StreamHandler(sys.stderr)
     ch.setFormatter(logging.Formatter("%(levelname)-7s %(message)s"))
-    ch.setLevel(logging.DEBUG if verbose else logging.INFO)
+    ch.setLevel(logging.DEBUG if verbose else logging.WARNING)
+    if not verbose:
+        ch.addFilter(_quiet_console)
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)
     root.handlers[:] = [fh, ch]
     for noisy in ("httpx", "httpcore", "sentence_transformers", "urllib3", "filelock", "huggingface_hub"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     return log_file
+
+
+def manual_line(manual: list[dict], show: int = 5) -> str:
+    """All manual-check companies as one terminal line (each one is in the log and on the dashboard)."""
+    names = sorted({m["company"] for m in manual}, key=str.lower)
+    more = f" and {len(names) - show} more" if len(names) > show else ""
+    return (f"MANUAL CHECK NEEDED: {len(names)} compan{'y' if len(names) == 1 else 'ies'} "
+            f"({', '.join(names[:show])}{more}); details in the log and on the dashboard")
 
 
 def import_dirs(setting: str | list[str]) -> list[Path]:
@@ -292,7 +312,7 @@ def _main(args, log_file: Path) -> int:
     if not args.dry_run:   # external jobs: the drop folder + "Add external job" files from the dashboard
         ext = external.import_pending(conn, cfg, paths.EXTERNAL_INBOX, import_dirs(cfg.prefs.statuses_import_dir))
         for o in ext:
-            (log.info if o.status == "new" else log.warning)("external job %s", external.summary_line(o))
+            (log.info if o.status == "new" else log.warning)("external job %s", external.summary_line(o), extra=LOG_ONLY)
     learned = feedback.learn(db.labeled_jobs(conn), cfg.prefs)
     if learned.labeled:
         log.info("feedback learning: %s", learned.describe()["status"])
@@ -327,14 +347,14 @@ def _main(args, log_file: Path) -> int:
     s["links"] = links
     s["reopened"] = [f"{r['company']}: {r['title']}" for r in statuses.reopened_shortlisted(conn, run_started)]
     for r in s["reopened"]:
-        log.warning("REOPENED (you had it shortlisted): %s", r)
+        log.warning("REOPENED (you had it shortlisted): %s", r, extra=LOG_ONLY)
     s["external"] = [external.summary_line(o) for o in ext]
     s["scope"] = "rescore" if args.rescore else "quick" if args.quick else (
         "partial" if (args.company or args.source or args.watchlist) else "full")
     s["health_alerts"] = [] if args.rescore else health.check(
         summary.outcomes, lambda c, src: db.recent_job_counts(conn, c, src, 5), cfg.prefs.health)
     for a in s["health_alerts"]:
-        log.warning("SOURCE HEALTH: %s", a["message"])
+        log.warning("SOURCE HEALTH: %s", a["message"], extra=LOG_ONLY)
     rows, early = alerts.new_strong(conn, run_started, cfg.prefs.notifications.early_bird_hours)
     s["new_strong_rows"], s["early_bird"] = ([] if args.rescore else rows[:50]), ([] if args.rescore else early[:50])
     db.finish_run(conn, run_id, s)
@@ -381,7 +401,8 @@ def _main(args, log_file: Path) -> int:
             alerts.send(s, cfg.prefs.notifications.early_bird_hours)
         text = alerts.summary_text(s)
         (paths.LOG_DIR / "last_run_summary.txt").write_text(text + "\n", encoding="utf-8")
-        print(text, file=sys.stderr)
+    else:
+        text = alerts.summary_text(s)
     conn.close()
     if tmp:
         tmp.cleanup()
@@ -390,12 +411,16 @@ def _main(args, log_file: Path) -> int:
     ok, attempted = s["sources_ok"], s["sources_checked"]
     log.info("coverage: %d of %d companies/sources checked successfully this run (%d not due, skipped)",
              ok, attempted, s["sources_skipped"])
-    for f in s["failures"]:
-        log.warning("INCOMPLETE COVERAGE: %s (%s) failed: %s", f["company"], f["source"], f["error"])
+    for f in s["failures"]:   # a one-off non-JSON response is only a warning (the summary notes it)
+        log.warning("INCOMPLETE COVERAGE: %s (%s) failed: %s", f["company"], f["source"], f["error"],
+                    extra=LOG_ONLY if f.get("transient") and not f.get("repeated") else None)
     for m in s["manual"]:
-        log.warning("MANUAL CHECK NEEDED: %s %s (%s)", m["company"], m["url"] or "", m["error"])
+        log.warning("MANUAL CHECK NEEDED: %s %s (%s)", m["company"], m["url"] or "", m["error"], extra=LOG_ONLY)
+    if s["manual"]:
+        log.warning("%s", manual_line(s["manual"]))
     for p in s["partial"]:
-        log.warning("PARTIAL: %s (%s): %s", p["company"], p["source"], p["why"])
+        log.warning("PARTIAL: %s (%s): %s", p["company"], p["source"], p["why"], extra=LOG_ONLY)
+    print(text, file=sys.stderr)   # last, so the terminal ends on the summary
     return exit_code(s)
 
 
