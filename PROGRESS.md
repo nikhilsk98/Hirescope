@@ -927,7 +927,7 @@ commit and a push.
       (2026-10-17)
 - [x] 5 — Applications Excel on the Desktop (3 sheets, atomic write, open-in-Excel fallback, instant sync)
       (2026-10-17)
-- [x] 6 — two projects on every resume (rules v4.6, commit eb37894; remaining: re-check READY resumes)
+- [x] 6 — two projects on every resume (rules v4.6, eb37894; 17/19 READY resumes OK; 2 need an unlock: Needs Nikhil)
 - [ ] 7 — UI review (screenshots light/dark, 13" + narrow; fix high/medium; ask before big changes)
 - [ ] 8 — no "In Progress" anywhere (hard check on the rendered PDF; scan + regenerate)
 - [ ] 9 — end-to-end test (coverage, real run + import, real launcher/worker, a–j, cleanup)
@@ -1060,3 +1060,15 @@ Desktop folder, no Terminal.
 - Real check: a no-op status link through the installed launcher rewrote the real file in ~1 s (no permission prompt);
   7 rows; every file link resolves. Two external jobs with READY resumes (LineVision, Tesla) now show as Ready to apply.
 - Tests: tests/test_applications_excel.py (7), headless-Chrome "excel" scenario (stage + note links, Excel notice).
+
+## Section 6 check (2026-10-17): two projects
+- Rules v4.6, builder validation, trimmer order and tests were done in eb37894 (rules backed up to
+  inputs/resume/archive/resume_rules.before-two-projects.md; changelog entry present; rule 48 retired).
+- Scan of every current READY resume: 17 of 19 show 2 projects and 1 page. The earlier regenerations (Axos Bank v2, Bose
+  v4, Copart v4, HPE Cloud Engineer Intern v3, Wikimedia v3) were built directly before the queue existed.
+- **Needs Nikhil** — Centric Software (46867, v4) and DoorDash (16070, v2) still have 1 project. Each has an Accenture
+  bullet you locked under the pre-v4 master: DoorDash "…increasing processing reliability by 70%…" (the master now lists
+  70% under Legacy bullets, "do not use") and Centric "…across 20+ client deployments". A regeneration keeps locked
+  bullets, so it can't pass the truth check. To fix: `~/.venvs/hirescope/bin/python -m resume_builder unlock 16070
+  exp-accenture:006984` and `… unlock 46867 exp-accenture:cbbee0`, then Regenerate both from the dashboard (or the
+  Bucket's Regenerate). Until then their current versions stay as they are.
