@@ -121,6 +121,8 @@ def baseline(analysis: dict | None, bank: Bank, settings) -> Content:
             have.add(canonical(name))
         if added:
             notes.selection.append("Skills added for this JD (rule 53): " + ", ".join(added) + ".")
+        cap_rows(rows, {label: len(ids) for label, ids in bank.skill_categories},
+                 lambda x: bank.items[x[1] if isinstance(x, tuple) else x].text, notes.removed)
     def item(x):
         if isinstance(x, tuple):                     # a coursework-level skill: "Go (coursework)"
             return SkillItem(name=f"{bank.items[x[1]].text} (coursework)", evidence_ids=[x[1]])
@@ -156,6 +158,24 @@ def baseline(analysis: dict | None, bank: Bank, settings) -> Content:
         if (analysis or {}).get("track") in ("coop_intern", "full_time", "unclear") else "full_time",
         section_order=list(rules_v4.ORDER), skills=skills, education=edu, experience=exp, projects=projs,
         requirements=reqs, notes=notes, contact_location=loc)
+
+
+ROW_MAX = 12          # content_schema.SkillCategory.items max_length
+
+
+def cap_rows(rows: list, n_default: dict, name, removed: list) -> None:
+    """A Skills row holds at most ROW_MAX items (the content schema's limit; a 13-item row crashed prepare on
+    2026-10-17): keep the skills added for the JD and drop the row's least JD-relevant default items (rows are sorted
+    by relevance, defaults first). Notes what was left out."""
+    for r in rows:
+        extra = len(r[1]) - ROW_MAX
+        if extra <= 0:
+            continue
+        d = n_default.get(r[0], 0)
+        drop = r[1][max(0, d - extra):d]
+        r[1] = [x for x in r[1] if x not in drop][:ROW_MAX]
+        removed.append(f"Skills row '{r[0]}' kept to {ROW_MAX} items: left out {', '.join(name(x) for x in drop)} "
+                       "(least relevant to this JD).")
 
 
 def _apply_notes(bank: Bank, analysis: dict | None, entries: list, notes: Notes) -> None:

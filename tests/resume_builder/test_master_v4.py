@@ -723,3 +723,12 @@ def test_rule8_figure_dropped_for_another_bullets_metric_is_not_a_lost_result(v4
     assert not lost()                                   # the freelance bullet shows the pipeline-duration figure
     fl.bullets[k] = Bullet(text=b.items["exp-freelance-a2"].text, evidence_ids=["exp-freelance-a2"])
     assert lost()                                       # no other such figure: dropping it is a lost result
+
+
+def test_skills_row_capped_at_the_schema_limit():
+    """Job 124710 (2026-10-17): JD-added skills pushed a row to 13 items and prepare crashed on the schema."""
+    rows = [["Backend & Testing", [f"d{i}" for i in range(11)] + ["jd1", "jd2"]], ["Cloud", ["c1"]]]
+    removed = []
+    v4build.cap_rows(rows, {"Backend & Testing": 11, "Cloud": 1}, lambda x: x.upper(), removed)
+    assert len(rows[0][1]) == 12 and rows[0][1][-2:] == ["jd1", "jd2"] and "d10" not in rows[0][1]
+    assert rows[1][1] == ["c1"] and "left out D10" in removed[0]
