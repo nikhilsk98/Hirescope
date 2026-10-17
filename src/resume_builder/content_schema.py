@@ -94,6 +94,8 @@ class Notes(_M):
     selection: list[str] = Field(default_factory=list, max_length=20)   # why these projects / roles / bullets
     removed: list[str] = Field(default_factory=list, max_length=40)
     reviewer: list[str] = Field(default_factory=list, max_length=30)    # reviewer critique applied
+    # self-reported skills Nikhil approved for this resume although the JD doesn't name them (rule 53; at most 4)
+    approved_skills: list[str] = Field(default_factory=list, max_length=4)
     stage: Literal["baseline", "draft", "reviewed"] = "baseline"
 
 

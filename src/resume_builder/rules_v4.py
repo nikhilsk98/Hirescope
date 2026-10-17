@@ -262,6 +262,101 @@ def is_cloud(analysis: dict | None, profile: str | None) -> bool:
                                                               analysis.get("role") or "", re.I))
 
 
+# rule 2: master "Builder:" notes that name a role type ("Use bullet 3 for data-engineering, MLOps, or cloud roles";
+# "Swap D2 (…) in for C1 on cloud and backend-distributed roles") are applied when the JD is that type of role
+NOTE_USE = re.compile(r"\buse bullet (\d+)\b[^.]*?\bfor ([^.]*?)\broles?\b", re.I)
+NOTE_SWAP = re.compile(r"\bswap ([A-Z]\d+)\b[^.]*?\bin for ([A-Z]\d+)\b on ([^.]*?)\broles?\b", re.I)
+ML_OPS = re.compile(r"\b(deploy\w*|monitor\w*|serving|retrain\w*|productioni[sz]\w*|operationali[sz]\w*|drift|"
+                    r"model registry)\b", re.I)
+
+
+def _jd_lines(analysis: dict) -> list[str]:
+    return [*analysis.get("responsibilities", []), *analysis.get("required", []), *analysis.get("preferred", []),
+            *analysis.get("mentioned", [])]
+
+
+def role_type_match(analysis: dict | None, profile: str | None, kind: str) -> bool:
+    """Does this JD fit a role type a master note names? MLOps: "MLOps" in the JD, or a responsibility / requirement
+    about deploying, monitoring or retraining machine-learning models (one line names both)."""
+    if not analysis:
+        return False
+    k = re.sub(r"[\s_]+", "-", kind.strip().casefold())
+    role = analysis.get("role") or ""
+    if k == "mlops":
+        return bool(re.search(r"\bMLOps\b", jd_text(analysis), re.I)) or any(
+            ML_JD.search(ln) and ML_OPS.search(ln) for ln in _jd_lines(analysis))
+    if k == "cloud":
+        return is_cloud(analysis, profile)
+    if k in ("ml", "machine-learning"):
+        return bool(ML_JD.search(jd_text(analysis)))
+    if k in ("data-engineering", "data-engineer", "data"):
+        return profile == "data" or bool(re.search(r"\bdata engineer|\bETL\b|\bdata pipelines?\b", jd_text(analysis), re.I))
+    if k in ("backend-distributed", "distributed"):
+        return bool(re.search(r"\bdistributed\b", jd_text(analysis), re.I)) and (
+            profile in ("backend", "cloud") or bool(re.search(r"\bback[- ]?end\b", role, re.I)))
+    if k in ("backend", "back-end"):
+        return profile == "backend" or bool(re.search(r"\bback[- ]?end\b", role, re.I))
+    if k in ("frontend", "front-end"):
+        return profile == "fullstack" and bool(re.search(r"\bfront[- ]?end\b", role, re.I))
+    if k in ("full-stack", "fullstack"):
+        return profile == "fullstack" or bool(re.search(r"\bfull[- ]?stack\b", role, re.I))
+    return False
+
+
+def _kinds(text: str) -> list[str]:
+    return [x for x in (y.strip(" ,") for y in re.split(r",|\bor\b|\band\b", text)) if x]
+
+
+def note_swaps(bank: Bank, analysis: dict | None, profile: str | None) -> list[dict]:
+    """The master's role-type notes that apply to this JD: {eid, add, replace, kinds, note} (bank ids)."""
+    X = v4(bank)
+    if not (X and analysis):
+        return []
+    out = []
+    srcs = [(eid, p.get("notes", [])) for eid, p in X.get("projects", {}).items()] + \
+           [(eid, r.get("notes", [])) for eid, r in X.get("roles", {}).items()]
+    for eid, notes in srcs:
+        for note in notes:
+            for m in NOTE_USE.finditer(note):
+                kinds = [k for k in _kinds(m.group(2)) if role_type_match(analysis, profile, k)]
+                add = f"{eid}-b{m.group(1)}"
+                if kinds and add in bank.items:
+                    out.append({"eid": eid, "add": add, "replace": None, "kinds": kinds, "note": note})
+            for m in NOTE_SWAP.finditer(note):
+                kinds = [k for k in _kinds(m.group(3)) if role_type_match(analysis, profile, k)]
+                add, rep = f"{eid}-{m.group(1).lower()}", f"{eid}-{m.group(2).lower()}"
+                if kinds and add in bank.items:
+                    out.append({"eid": eid, "add": add, "replace": rep if rep in bank.items else None,
+                                "kinds": kinds, "note": note})
+    return out
+
+
+# rule 67: a shortened bullet keeps its evaluation / result clause while Technical Skills still has JD-irrelevant
+# items to cut ("evaluated predictions on held-out labeled documents", "integrated … into the application")
+EVAL = re.compile(r"\b(evaluat\w*|validat\w*|held[- ]out|benchmark\w*|verifi\w*|measur\w*|integrat\w*(?=[^,;.]*\binto\b))",
+                  re.I)
+
+
+def dropped_clauses(text: str, source: str) -> list[str]:
+    """Evaluation / result phrases of the cited evidence that a reworded bullet no longer has."""
+    low = text.casefold()
+    out = []
+    for m in [*EVAL.finditer(source), *RESULT.finditer(source)]:
+        stem = m.group(1).casefold()[:6]
+        if stem not in low:
+            out.append(source[m.start():m.start() + 60].split(";")[0].rstrip(" ,"))
+    return out
+
+
+def irrelevant_skills(c, analysis: dict | None) -> list[str]:
+    """Technical Skills items the JD doesn't ask for and no bullet shows (what rule 67 trims first)."""
+    if not analysis:
+        return []
+    shown = " ".join(b.text for _s, _e, b in c.all_bullets())
+    return [s.name for row in c.skills if row.category.casefold() != "certifications" for s in row.items
+            if not jd_relevant_skill(analysis, s.name) and not named_in(shown, s.name)]
+
+
 def wants_relocation(analysis: dict | None) -> bool:
     """Rule 31: remote or out-of-state jobs get the relocation line. A job listing Massachusetts among its locations
     is in-state; no stated location → the default line."""
@@ -395,6 +490,10 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
     # skills: tiers (rule 53), excluded, planned, self-reported ≤ 4 (never in bullets); certifications last (rule 29)
     sk = X.get("skills", {})
     self_n, planned_hit = [], []
+    approved = {canonical(x) for x in getattr(c.notes, "approved_skills", [])}
+    for x in getattr(c.notes, "approved_skills", []):
+        if tier_of(bank, x) != "self-reported":
+            out.append(f"notes.approved_skills: '{x}' is not a self-reported skill; approval covers only those (rule 53)")
     rows = [r for r in c.skills]
     if not rows or rows[-1].category.casefold() != "certifications":
         out.append("skills: the last row is Certifications (rule 29)")
@@ -413,8 +512,9 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
                 out.append(f"skills: '{s.name}' — you said you haven't used it (evidence_additions.md)")
             elif tier == "self-reported":
                 self_n.append(s.name)
-                if not mentions(analysis, s.name):
-                    out.append(f"skills: '{s.name}' is self-reported: only when the JD explicitly asks for it (rule 53)")
+                if not mentions(analysis, s.name) and canonical(re.sub(r"\s*\(.*\)$", "", s.name)) not in approved:
+                    out.append(f"skills: '{s.name}' is self-reported: only when the JD explicitly asks for it, or "
+                               "when Nikhil approves it for this resume (notes.approved_skills) (rule 53)")
             elif tier == "coursework":
                 if not mentions(analysis, re.sub(r"\s*\(coursework\)$", "", s.name)):
                     out.append(f"skills: '{s.name}' is coursework-level: only when the JD asks for it (rule 75)")
@@ -466,6 +566,23 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
                        "test-writing is not TDD (rule 82): use transferable or missing_evidence")
     out += skill_trace_problems(c, bank)                                       # rule 83
     out += backref_problems(c, bank)                                           # rule 84
+    # rule 2: a master note that names this JD's role type is applied ("Use bullet 3 for … MLOps … roles")
+    used_ids = {bank_id(bank, ev) for _s, _e, b in bullets for ev in b.evidence_ids}
+    on_page = {x.entry_id for x in [*c.experience, *c.projects]}
+    for sw in note_swaps(bank, analysis, c.profile):
+        if sw["eid"] in on_page and sw["add"] not in used_ids:
+            out.append(f"{sw['eid']}: the master's note applies to this JD ({', '.join(sw['kinds'])} role): use "
+                       f"{sw['add']} — \"{sw['note'][:120]}\" (rule 2)")
+    # rule 67: cut JD-irrelevant skills before a bullet's evaluation / result clause
+    spare = irrelevant_skills(c, analysis)
+    if spare:
+        for _s, _e, b in bullets:
+            for ev in b.evidence_ids:
+                it = I.get(ev)
+                if it and it.kind in ("bullet", "snapshot") and (lost := dropped_clauses(b.text, it.text)):
+                    out.append(f"{b.id}: drops the evaluation / result clause of {ev} (\"{lost[0]}\") while Technical "
+                               f"Skills still lists JD-irrelevant {', '.join(spare[:4])}: cut those first (rule 67)")
+                    break
     # rule 31: relocation line
     want = "relocation" if wants_relocation(analysis) else "default"
     if c.contact_location != want:

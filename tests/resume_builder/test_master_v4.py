@@ -588,3 +588,83 @@ def test_project_line_planned_annotations_print_as_plain_stack():
         "Python, FastAPI, GCP, Redis | Northeastern University"
     assert _display_context("C++17, Python | CS5800 Algorithms, Northeastern University | Team of 3") == \
         "C++17, Python | CS5800 Algorithms, Northeastern University | Team of 3"
+
+
+# --- rule 2: role-type Builder notes; rule 67: evaluation clauses; rule 53: approved self-reported skills ----------
+def _with_beta_mlops_note():
+    t = rc.MASTER_RESUME.read_text()
+    last = "- Architecting real-time personalization in which swipe events update a Redis session embedding for re-ranking.\n"
+    assert last in t
+    head, _, tail = t.rpartition(last)                                   # the bullet bank, not the snapshot
+    rc.MASTER_RESUME.write_text(head + last + (
+        "- Designing the DEMO MLOps lifecycle: retraining DAGs, experiment tracking, and drift detection.\n\n"
+        "_Builder: default picks are bullet 1 and bullet 2. Use bullet 3 for data-engineering, MLOps, or cloud roles._\n")
+        + tail)
+
+
+def test_mlops_match_reads_ml_deployment_and_monitoring_responsibilities():
+    a = {"role": "Software Developer Intern", "keywords": [], "requirements": [], "required": [], "preferred": [],
+         "mentioned": [], "responsibilities": ["Guide and oversee deployment of implemented machine learning solutions "
+                                               "and monitor their operation"]}
+    assert rules_v4.role_type_match(a, "backend", "MLOps")
+    a["responsibilities"] = ["Deploy web services and monitor their uptime", "Design machine learning algorithms"]
+    assert not rules_v4.role_type_match(a, "backend", "MLOps")      # deployment and ML on different lines
+    a["mentioned"] = ["Experience with MLOps tooling"]
+    assert rules_v4.role_type_match(a, "backend", "MLOps")
+    assert rules_v4.role_type_match({**a, "role": "Cloud Developer Intern"}, "backend", "cloud")
+
+
+def test_role_type_note_is_applied_when_the_jd_matches(v4env):
+    _with_beta_mlops_note()
+    b, s = build_bank(), load_settings()
+    assert "proj-beta-b3" in b.items
+    jd = ("Responsibilities\n- Guide and oversee deployment of machine learning solutions and monitor their operation\n"
+          "Requirements\n- Python and Java")
+    a = _job(v4env, jd, title="Software Developer Intern", track="coop_intern", job_id="v4-mlops")
+    assert [sw["add"] for sw in rules_v4.note_swaps(b, a, a["profile"]["picked"])] == ["proj-beta-b3"]
+    c = pipeline.assign_ids(v4build.baseline(a, b, s))
+    beta = next(p for p in c.projects if p.entry_id == "proj-beta")
+    assert [x.evidence_ids[0] for x in beta.bullets][-1] == "proj-beta-b3"     # in for the last default pick
+    assert beta.bullets[0].evidence_ids[0] != "proj-beta-b3"
+    assert any("Master note applied" in n for n in c.notes.selection)
+    assert any("Master notes that apply" in ln for ln in v4build.brief_lines(a, b, s))
+    assert not [p for p in rules_v4.problems(c, b, s, a) if "rule 2" in p]
+    beta.bullets[-1] = Bullet(text=b.items["proj-beta-b2"].text, evidence_ids=["proj-beta-b2"])
+    assert any("proj-beta-b3" in p and "MLOps" in p and "rule 2" in p for p in rules_v4.problems(c, b, s, a))
+    a2 = _job(v4env, "Requirements\n- Java and Spring Boot", job_id="v4-plain")       # not an MLOps / cloud role
+    assert not rules_v4.note_swaps(b, a2, a2["profile"]["picked"])
+    c2 = pipeline.assign_ids(v4build.baseline(a2, b, s))
+    assert "proj-beta-b3" not in {ev for _s, _e, x in c2.all_bullets() for ev in x.evidence_ids}
+
+
+def test_evaluation_clause_kept_while_jd_irrelevant_skills_remain(v4env):
+    b, s = build_bank(), load_settings()
+    a = _job(v4env, "Requirements\n- Python and Java\n- Validate algorithms on benchmarks", job_id="v4-eval")
+    c = pipeline.assign_ids(v4build.baseline(a, b, s))
+    alpha = next(p for p in c.projects if p.entry_id == "proj-alpha")
+    alpha.bullets[-1] = Bullet(text="Compared Alpha against BFS on 1,000 randomized grids.", evidence_ids=["proj-alpha-b2"])
+    spare = rules_v4.irrelevant_skills(c, a)
+    assert spare                                                         # e.g. Vue.js, MongoDB: not in this JD
+    assert any("evaluation / result clause" in p and "rule 67" in p for p in rules_v4.problems(c, b, s, a))
+    for row in c.skills:                                                 # once the irrelevant skills are gone …
+        row.items = [x for x in row.items if x.name not in spare] or row.items
+    assert not rules_v4.irrelevant_skills(c, a)
+    assert not [p for p in rules_v4.problems(c, b, s, a) if "evaluation / result clause" in p]
+    alpha.bullets[-1].text = b.items["proj-alpha-b2"].text               # … or the clause is kept
+    assert not [p for p in rules_v4.problems(c, b, s, a) if "evaluation / result clause" in p]
+    assert rules_v4.dropped_clauses("Prototyped classification with scikit-learn, evaluated on held-out documents.",
+                                    "Prototyped classification with scikit-learn, evaluated predictions on held-out "
+                                    "documents, and integrated suggestions into the app for staff approval.") == \
+        ["integrated suggestions into the app for staff approval."]
+
+
+def test_self_reported_skill_the_jd_does_not_name_needs_approval(v4env):
+    b, s = build_bank(), load_settings()
+    a = _job(v4env, "Requirements\n- Java and Python", job_id="v4-approve")
+    c = pipeline.assign_ids(v4build.baseline(a, b, s))
+    c.skills[0].items.append(SkillItem(name="Go", evidence_ids=["skill-go"]))
+    assert any("'Go' is self-reported" in p for p in rules_v4.problems(c, b, s, a))
+    c.notes.approved_skills = ["Go"]
+    assert not [p for p in rules_v4.problems(c, b, s, a) if "'Go'" in p]
+    c.notes.approved_skills = ["Go", "LightGBM"]                         # approval covers self-reported only
+    assert any("approved_skills: 'LightGBM'" in p for p in rules_v4.problems(c, b, s, a))

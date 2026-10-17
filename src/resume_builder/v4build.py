@@ -81,6 +81,7 @@ def baseline(analysis: dict | None, bank: Bank, settings) -> Content:
         keep = sorted(projs, key=lambda p: -score[p.entry_id])[:dflt]
         projs = [p for p in projs if p in keep]
         notes.selection.append(f"Projects: {dflt} for this level (rules 46–48): kept {', '.join(p.entry_id for p in projs)}.")
+    _apply_notes(bank, analysis, exp + projs, notes)
     # skills: the default rows; JD-relevant items first; extended / self-reported only when the JD asks (rule 53)
     sk = X["skills"]
     rows = []
@@ -155,6 +156,28 @@ def baseline(analysis: dict | None, bank: Bank, settings) -> Content:
         if (analysis or {}).get("track") in ("coop_intern", "full_time", "unclear") else "full_time",
         section_order=list(rules_v4.ORDER), skills=skills, education=edu, experience=exp, projects=projs,
         requirements=reqs, notes=notes, contact_location=loc)
+
+
+def _apply_notes(bank: Bank, analysis: dict | None, entries: list, notes: Notes) -> None:
+    """Rule 2: a master note naming this JD's role type swaps its bullet in — for the bullet it names, else for the
+    entry's last default pick (the master lists its default picks most important first)."""
+    from rapidfuzz import fuzz
+    profile = ((analysis or {}).get("profile") or {}).get("picked")
+    for sw in rules_v4.note_swaps(bank, analysis, profile):
+        ent = next((e for e in entries if e.entry_id == sw["eid"]), None)
+        if not ent or any(rules_v4.bank_id(bank, ev) == sw["add"] for b in ent.bullets for ev in b.evidence_ids):
+            continue
+        k = len(ent.bullets) - 1
+        if sw["replace"]:
+            sim = [max(100 if rules_v4.bank_id(bank, ev) == sw["replace"] else 0,
+                       fuzz.token_set_ratio(bank.items[sw["replace"]].text, b.text)) for b in ent.bullets for ev in b.evidence_ids[:1]]
+            if sim and max(sim) >= 60:
+                k = sim.index(max(sim))
+        old = ent.bullets[k]
+        ent.bullets[k] = Bullet(text=bank.items[sw["add"]].text, evidence_ids=[sw["add"]], origin="verbatim",
+                                priority=old.priority)
+        notes.selection.append(f"Master note applied ({', '.join(sw['kinds'])} role, rule 2): {sw['add']} in for "
+                               f"{old.evidence_ids[0]}.")
 
 
 def _gap(gaps: dict, key: str = "entry") -> str:
@@ -353,6 +376,11 @@ def brief_lines(analysis: dict, bank: Bank, settings) -> list[str]:
     for eid, r in X.get("roles", {}).items():
         for x in r.get("notes", []):
             L.append(f"- [{eid}] {x}")
+    applied = rules_v4.note_swaps(bank, analysis, (analysis.get("profile") or {}).get("picked"))
+    if applied:
+        L += ["", "## Master notes that apply to this JD (rule 2: applied in baseline.json; the build requires them)"]
+        L += [f"- [{sw['eid']}] {', '.join(sw['kinds'])} role → use {sw['add']}"
+              + (f" in for {sw['replace']}" if sw["replace"] else "") for sw in applied]
     L += ["", "## Swap candidates (bank bullets not on the snapshot, most JD-relevant first)"]
     snap = {i for r in X["snapshot"]["experience"] + X["snapshot"]["projects"] for i in r["bullets"]}
     from .rules_v4 import bank_id, metric_kinds
@@ -381,7 +409,11 @@ def brief_lines(analysis: dict, bank: Bank, settings) -> list[str]:
               "- Introduce a client / sector before a bullet refers back to it (\"the distributor\") (rule 84).",
               "- JD asks for ML: an extended ML skill a bullet names goes in Skills too; an extended cloud platform "
               "(GCP) may be listed when the JD asks for cloud (rule 85).",
-              "- Overflow: JD-irrelevant skills go before coursework or a project (rule 67)."]
+              "- Overflow: JD-irrelevant skills go before coursework or a project (rule 67), and before shortening a "
+              "bullet's evaluation / result clause (\"evaluated on held-out …\", \"integrated … into\"); the build "
+              "refuses a shortened bullet that lost it while JD-irrelevant skills remain.",
+              "- A self-reported skill the JD doesn't name only with Nikhil's approval for this resume: list it in "
+              "notes.approved_skills (rule 53)."]
     sk = X["skills"]
     asked = [(n, t) for n, t in sk["tier"].items() if t in ("extended", "self-reported") and rules_v4.mentions(analysis, n)]
     L += ["", "## Skills (rule 53)", "- Default rows from the master; JD-relevant first. Core always; extended / "

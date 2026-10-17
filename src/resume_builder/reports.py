@@ -128,6 +128,8 @@ def changes_md(c, bank, analysis: dict, repairs: list[str], cov: dict) -> str:
         if tiers.get(t):
             L.append(f"- {t}: {', '.join(tiers[t])}" + (" (no evidence in the master; Skills only, at most 4)"
                                                        if t == "self-reported" else ""))
+    if getattr(c.notes, "approved_skills", None):
+        L.append(f"- approved by Nikhil for this resume (the JD doesn't name them): {', '.join(c.notes.approved_skills)}")
     L += ["", "## Bullets (before → after)"]
     for _sec, eid, b in c.all_bullets():
         before = " / ".join(bank.items[i].text for i in b.evidence_ids if i in bank.items)

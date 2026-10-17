@@ -787,3 +787,20 @@ LineVision (job 124710) regenerated under v4.3: READY v3, one page. Tests: 569 p
 
 **Tests**: 629 passed (fixtures without the label; "Built" flagged on an unlabeled in-progress project; planned-note
 printing).
+
+## Role-type notes, evaluation clauses, HPE v8 (2026-10-17)
+- Rule 2: master "Builder:" notes that name a role type ("Use bullet 3 for data-engineering, MLOps, or cloud roles";
+  "Swap D2 (…) in for C1 on cloud and backend-distributed roles") are applied in the baseline when the JD matches,
+  listed in the brief, and required by the build. MLOps matches "MLOps" in the JD or a JD line about deploying /
+  monitoring / retraining ML (HPE: "Guide and oversee deployment of … machine learning solutions and monitor …").
+- Rule 67: a reworded bullet that drops its evidence's evaluation / result clause ("evaluated … held-out",
+  "integrated … into", "cut …") is refused while Technical Skills still lists JD-irrelevant items.
+- Rule 53: `notes.approved_skills` — self-reported skills Nikhil approves for one resume although the JD doesn't name
+  them (listed in the change report; self-reported tier only).
+- HPE Cloud Developer Intern v8 (ready, 1 page): E2 related-product suggestions in for the B2B bullet, D2 by the
+  cloud note, full D4 classification, DASH differential testing, VibeSpace bullet 3 (MLOps), Cloud Computing + MLOps,
+  Machine Learning row (scikit-learn; Pandas, NumPy approved). v7 failed (2 pages; repair cut coursework and
+  VibeSpace) and was superseded.
+
+**Tests**: 633 passed (MLOps match from responsibilities, role-type note applied / required / not applied for a plain
+JD, evaluation clause vs JD-irrelevant skills, approved self-reported skills).

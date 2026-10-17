@@ -41,7 +41,8 @@ scripts do everything deterministic. Run every command from the repo root with `
   ("Designing", "Architecting"; never "Building" or "Built") and no results (rules 11, 50, 51).
 - One metric of each kind per resume (rule 8). Oracle is skill-only; Node.js stays out of Accenture bullets (12). No
   compliance claims (13). No performance numbers at Rescho (14). Skills: core always; extended / self-reported only when
-  the JD mentions them (self-reported ≤ 4, never in a bullet); planned never (53). Certifications are the last skills row:
+  the JD mentions them (self-reported ≤ 4, never in a bullet), or a self-reported item Nikhil explicitly approves for
+  this resume, listed in `notes.approved_skills`; planned never (53). Certifications are the last skills row:
   AWS always, Azure Fundamentals only for cloud roles or an Azure JD (29). The build checks all of these.
 
 ## Steps (one generation per request)
@@ -85,7 +86,12 @@ scripts do everything deterministic. Run every command from the repo root with `
      bullet rather than only in Skills; distinct evidence across areas (brief → "Selection quality"); never claim or
      map TDD from test-writing bullets (TDD only as the self-reported skill); every Skills item cites its master
      entry; introduce a client before a bullet says "the distributor".
-     Shortening wording comes before cutting: if a build overflows, tighten bullets and build again;
+     Shortening wording comes before cutting: if a build overflows, drop JD-irrelevant skills first, then tighten
+     bullets and build again. Never shorten away a bullet's evaluation / result clause ("evaluated on held-out …",
+     "integrated … into") while JD-irrelevant skills remain: the build refuses it (rule 67);
+   - master notes that name a role type ("Use bullet 3 for … MLOps, or cloud roles", "Swap D2 in for C1 on cloud …
+     roles") are applied in `baseline.json` when the JD matches (brief → "Master notes that apply"); MLOps includes
+     JD lines about deploying / monitoring ML. The build refuses content that drops them (rule 2);
    - `requirements`: confirm or correct each category (direct / transferable / missing_evidence / gap); note any
      eligibility concern for Nikhil (never put visa status on the resume);
    - `notes.selection` / `notes.removed`: why these projects/bullets, what was left out.
