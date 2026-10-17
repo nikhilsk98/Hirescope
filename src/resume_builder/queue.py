@@ -385,7 +385,8 @@ def publish_dashboard() -> str:
 def notify(title: str, message: str) -> None:
     try:
         from jobsearch.ops.notify import notify as _n
-        _n(title, message)
+        shown = _n(title, message)
+        log.info("notification %s: %s — %s", "sent" if shown else "not shown", title, message[:160])
     except Exception:  # noqa: BLE001
         pass
 

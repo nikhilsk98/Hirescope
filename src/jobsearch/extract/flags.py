@@ -102,6 +102,12 @@ _CLEARANCE_HEADER = re.compile(
     r"(yes\b|(?:active\s+|current\s+|interim\s+)?(?:ts\s*/\s*sci|top\s+secret|secret|sci|confidential|q\b|l\b|dod|doe|"
     r"u\.?s\.?|eligib|must|candidates must|this position requires|active))", re.I)
 # Titles: "(Active SCI)", "TS/SCI", "Top Secret", "Active Secret", "Secret Clearance", "w/ Poly", "Cleared"
+# "Software Engineer - Reliability (US Citizen)", "… (U.S. Citizens Only)": the title itself limits the role
+_CITIZEN_TITLE = re.compile(r"\b(u\.?\s?s\.?|united\s+states)\s+citizens?(hip)?\b(?!\s+(or|and|/)\b)", re.I)
+# a requirement introduced on one line and listed below it ("this position will require the following:\n- U.S.
+# citizenship at the time of hire."): the intro and its first item read as one sentence
+_LIST_INTRO = re.compile(r"\b(requires?|required|will\s+require|must\s+have|must\s+be)(\s+(the\s+following|these|all\s+of\s+the\s+following))?"
+                         r"\s*:\s*\n?\s*(?:[-•*·]|\d+[.)])\s*", re.I)
 _CLEARANCE_TITLE = re.compile(
     r"\b(ts\s*/\s*sci|top\s+secret|sci|polygraph|poly|(?:active|interim|current)\s+secret|secret\s+(?:clearance|cleared)|"
     r"clearance\s+required|cleared)\b", re.I)
@@ -191,7 +197,7 @@ def extract_flags(text: str, title: str = "") -> dict[str, dict]:
     # some roles, or hedged with "may") → "export_control" (check eligibility, never filtered)
     flags["citizenship"] = {"value": NOT_STATED, "evidence": None}
     flags["export_control"] = {"value": NOT_STATED, "evidence": None}
-    for sent in _sentences(text):
+    for sent in _sentences(_LIST_INTRO.sub(lambda m: m.group(1) + " ", text)):
         kind = us_person_kind(sent)
         if kind == "possible":
             if flags["export_control"]["value"] == NOT_STATED:
@@ -199,6 +205,9 @@ def extract_flags(text: str, title: str = "") -> dict[str, dict]:
         elif kind:
             flags["citizenship"] = {"value": kind, "evidence": sent[:240]}
             break
+
+    if flags["citizenship"]["value"] == NOT_STATED and _CITIZEN_TITLE.search(title or ""):
+        flags["citizenship"] = {"value": "US citizenship required", "evidence": f"Title: {title}"}
 
     flags["clearance"] = {"value": NOT_STATED, "evidence": None}
     for m in _CLEARANCE.finditer(text):

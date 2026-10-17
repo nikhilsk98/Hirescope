@@ -171,3 +171,21 @@ def test_export_control_as_a_skill_is_ignored():
 def test_sponsorship_statements_naming_green_cards_are_not_us_person_rules(text):
     f = extract_flags(text)
     assert f["citizenship"]["value"] == "Not stated" and f["export_control"]["value"] == "Not stated", text
+
+
+def test_requirement_listed_under_an_intro_and_in_the_title():
+    """Found on the real dashboard (Rubrik, 2026-10-17): the requirement sat in a list under its intro line, and the
+    title said "(US Citizen)"."""
+    from jobsearch.extract.flags import extract_flags
+    jd = ("Additional Requirements:\n\nDue to the criteria and security levels for the DEMO FedRAMP program, this position "
+          "will require the following:\n- U.S. citizenship at the time of hire.\n- Residence within the contiguous United States")
+    f = extract_flags(jd, "Software Engineer - Reliability")
+    assert f["citizenship"]["value"] == "US citizenship required" and "citizenship at the time of hire" in f["citizenship"]["evidence"]
+    f = extract_flags("Build reliable services.", "Software Engineer - Reliability (US Citizen)")
+    assert f["citizenship"]["value"] == "US citizenship required" and f["citizenship"]["evidence"].startswith("Title:")
+    for title in ("Software Engineer (U.S. Citizens Only)", "SWE - United States Citizenship Required"):
+        assert extract_flags("", title)["citizenship"]["value"] == "US citizenship required"
+    # not a requirement: a list that merely mentions citizens, a title about something else
+    assert extract_flags("We support:\n- US citizens and visa holders alike", "Engineer")["citizenship"]["value"] == "Not stated"
+    assert extract_flags("", "Software Engineer, US Citizen or Green Card Services")["citizenship"]["value"] == "Not stated"
+    assert extract_flags("The role requires the following:\n- Python and SQL", "Engineer")["citizenship"]["value"] == "Not stated"
