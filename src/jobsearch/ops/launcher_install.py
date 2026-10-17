@@ -78,7 +78,7 @@ def build_app(dest_dir: Path, run=subprocess.run) -> Path:
         src = Path(tmp) / "launcher.applescript"
         src.write_text(applescript(), encoding="utf-8")
         built = Path(tmp) / APP_NAME
-        run(["osacompile", "-o", str(built), str(src)], check=True, capture_output=True)
+        run(["osacompile", "-s", "-o", str(built), str(src)], check=True, capture_output=True)   # -s: stay-open
         patch_info_plist(built)
         run(["codesign", "--force", "--deep", "--sign", "-", str(built)], check=True, capture_output=True)
         dest_dir.mkdir(parents=True, exist_ok=True)

@@ -118,8 +118,8 @@ def parse(url: str) -> tuple[str, dict]:
     u = urlsplit(url)
     if u.scheme.lower() != "hirescope":
         raise LinkError("not a hirescope:// link")
-    action = (u.netloc or u.path.lstrip("/")).lower()
-    if u.netloc and u.path not in ("", "/"):
+    action = u.netloc.lower()                      # hirescope://<action>?…, nothing else
+    if u.path not in ("", "/"):
         raise LinkError("unexpected path in the link")
     if u.fragment:
         raise LinkError("unexpected #fragment in the link")

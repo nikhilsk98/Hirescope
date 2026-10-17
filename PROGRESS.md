@@ -922,7 +922,7 @@ commit and a push.
       (2026-10-17)
 - [x] 2 — Resume Builder tab (form → saved file → hirescope://external → import + queue; "Ready to apply" stage)
       (2026-10-17)
-- [ ] 3 — launcher: every link type, strict validation, silent except interactive, one-time browser tip
+- [x] 3 — launcher: every link type, strict validation, silent except interactive, one-time browser tip (2026-10-17)
 - [ ] 4 — queue: statuses, concurrency, cancel, persistence, retry, --queue questions, notifications, panel, pause
 - [ ] 5 — Applications Excel on the Desktop (3 sheets, atomic write, open-in-Excel fallback, instant sync)
 - [x] 6 — two projects on every resume (rules v4.6, commit eb37894; remaining: re-check READY resumes)
@@ -1017,3 +1017,17 @@ Desktop folder, no Terminal.
   dedupe to the existing ID, uploaded .docx, missing file → newest pending, URL only, Terminal fallback, bad links,
   Ready to apply + Mark Applied + Undo + no re-creation, the setting, stats exclusion in Python and core.js, worker
   publishes before building); headless-Chrome "builder" scenario.
+
+## Section 3 report (2026-10-17): launcher
+- Every link type from the prompt is handled (queue job / list=bucket, external, cancel, status, bucket, interactive);
+  job lists (`job=1,2,3`, ≤ 100) for queue and bucket so one click = one link. Validation: hirescope://<action> only
+  (an empty host such as `hirescope:///queue` is now refused), known parameters once each, numeric IDs of existing jobs,
+  known stages / ops / list, YYYY-MM-DD dates, application ids [A-Za-z0-9_-], files only directly inside ~/Downloads
+  or inputs/external_jobs/ (symlinks resolved, allowed suffixes and name characters), no control characters, ≤ 8000
+  characters; nothing from a link reaches a shell (the applet passes it quoted, Python never uses shell=True).
+- **Bug found and fixed (real app)**: links opened in quick succession were lost (3 of 5 arrived) because the applet
+  quit after each link and dropped events that arrived meanwhile. Now a stay-open applet (osacompile -s) that quits
+  after two idle minutes: 5 of 5, 12 of 12 (warm) and 8 of 8 (cold start) arrived, in order; still no Terminal window; signature valid after the idle quit.
+- Tests: tests/test_launcher.py (every valid link type, 22 invalid forms with short errors, 3000 fuzzed links never
+  crash or run anything, no shell=True and no Terminal for non-interactive links, exit codes, the applet / launcher.sh
+  pass the link as one quoted argument).

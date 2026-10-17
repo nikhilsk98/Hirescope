@@ -247,6 +247,7 @@ def test_launcher_is_silent_except_interactive(qenv, monkeypatch):
 def test_installer_renders_app_and_worker(tmp_path):
     src = launcher_install.applescript()
     assert "on open location theURL" in src and "quoted form of theURL" in src and "{{REPO}}" not in src
+    assert "on idle" in src and "quit" in src and "property " not in src     # quits when idle; no saved state
     code = "\n".join(x for x in src.split("on run")[0].splitlines() if not x.strip().startswith("--"))
     assert "Terminal" not in code and "do shell script" in code           # links run silently: no Terminal window
     pl = plistlib.loads(launcher_install.worker_plist().encode())
@@ -269,7 +270,8 @@ def test_install_and_uninstall_steps(tmp_path, monkeypatch):
     def fake_run(cmd, **kw):
         calls.append(cmd)
         if cmd[0] == "osacompile":
-            app = Path(cmd[2]) / "Contents"
+            assert "-s" in cmd                                   # stay-open: links arriving together queue up
+            app = Path(cmd[cmd.index("-o") + 1]) / "Contents"
             app.mkdir(parents=True)
             (app / "Info.plist").write_bytes(plistlib.dumps({}))
         return type("R", (), {"returncode": 0, "stderr": ""})()

@@ -546,10 +546,17 @@ pending) / Failed**. Each finished build is saved by the build itself (version f
   (dashboard view; `python -m resume_builder questions`), the build goes on without those keywords (truthfully) and
   ends **Ready (questions pending)**. Answer them, then **Regenerate**.
 - From the terminal: `python -m resume_builder queue list | add <job…> [--regenerate] | cancel <job…> | worker`.
-- Links (validated strictly in `src/jobsearch/launcher.py`; anything else is rejected with a short notification):
-  `hirescope://queue?job=<id>[&regenerate=1]`, `queue?list=bucket[&regenerate=1]`, `cancel?job=<id>`,
-  `interactive?job=<id>` (opens Terminal: `cd ~/Projects/hirescope && claude "/resume-builder <id>"`), plus the
-  Bucket, Mark Applied / stage and Resume Builder links described below.
+- Links (validated strictly in `src/jobsearch/launcher.py`; anything else is rejected with a short notification and
+  logged): `hirescope://queue?job=<id>[,<id>…][&regenerate=1]`, `queue?list=bucket[&regenerate=1]`,
+  `external?file=<saved file>`, `cancel?job=<id>`, `status?job=<id>&stage=<stage>[&app=<id>&date=YYYY-MM-DD&v=<n>]`
+  (or `status?app=<id>&stage=<stage>`; stages ready, applied, oa, interviewing, offer, rejected, ghosted, withdrawn, and
+  undo for the Mark Applied toast), `bucket?job=<id>[,<id>…]&op=add|remove`, and `interactive?job=<id>` (the only one
+  that opens a window: Terminal with `cd ~/Projects/hirescope && claude "/resume-builder <id>"`, for a live session
+  where you answer the keyword questions). Job IDs must be numbers of jobs that exist, every option a known value,
+  files only directly inside ~/Downloads or `inputs/external_jobs/` (symlinks resolved first); no part of a link is
+  ever handed to a shell.
+- The launcher is a stay-open applet: links that arrive together (ticking several Bucket boxes quickly) queue up and
+  run in order; it quits after two idle minutes. Each link starts nothing visible.
 
 ### What gets checked
 - **Truth** (blocks "ready"): every bullet, skill, summary and talking point against the evidence ids it cites:
