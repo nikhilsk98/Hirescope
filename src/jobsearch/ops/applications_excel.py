@@ -236,6 +236,8 @@ def update(conn, path: Path | None = None) -> str:
     from .desktop_access import writable
     ok, why = writable(path.parent)          # never hang on a macOS permission prompt in a background job
     if not ok:
+        from .desktop_access import mark_pending
+        mark_pending(why)
         _record(conn, status="error", path=str(path), message=why)
         return why
     wb = build(conn)

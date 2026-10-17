@@ -75,3 +75,23 @@ def readable(folder: Path, name: str | None = None, timeout: float = 8.0) -> tup
                "Downloads Folder for Python (or answer the macOS prompt if one is showing).")
     _cache[key] = res
     return res
+
+
+def pending_marker():
+    from .. import paths
+    return paths.STATE_DIR / "desktop_pending"
+
+
+def mark_pending(why: str) -> None:
+    """A background job couldn't write the Desktop: ask the launcher app (which may) to catch up, right away."""
+    try:
+        m = pending_marker()
+        m.parent.mkdir(parents=True, exist_ok=True)
+        m.write_text(why[:500], encoding="utf-8")
+    except OSError:
+        return
+    if not os.environ.get("HIRESCOPE_NO_KICK"):
+        try:
+            subprocess.run(["open", "-g", "hirescope://sync"], capture_output=True, timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass

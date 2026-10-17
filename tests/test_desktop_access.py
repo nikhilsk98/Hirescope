@@ -66,3 +66,25 @@ def _short(run):
         k["timeout"] = min(k.get("timeout", 1), 1)
         return run(*a, **k)
     return wrapped
+
+
+def test_blocked_desktop_hands_copies_to_the_launcher(tmp_path, monkeypatch):
+    """A background job that can't write the Desktop leaves a marker; the next launcher call (hirescope://sync, sent by
+    that job) makes the copies and clears it."""
+    from jobsearch import launcher
+    from jobsearch.ops.desktop_access import pending_marker
+    desktop_access.forget()
+    monkeypatch.setattr(desktop_access, "_PROBE", "import sys; sys.exit(1)")
+    conn = db.connect(paths.DB)
+    applications_excel.update(conn)
+    assert pending_marker().exists()
+    monkeypatch.undo()                                  # the launcher app may write there
+    monkeypatch.setenv("HIRESCOPE_NO_KICK", "1")
+    monkeypatch.setenv("JOBSEARCH_EXCEL_PATH", str(tmp_path / "Desktop2" / "A.xlsx"))
+    monkeypatch.setattr(paths, "DATA", tmp_path / "sandbox" / "data.nosync")
+    desktop_access.forget()
+    launcher.handle("hirescope://sync")
+    assert not pending_marker().exists() and (tmp_path / "Desktop2" / "A.xlsx").exists()
+    import pytest
+    with pytest.raises(launcher.LinkError):
+        launcher.parse("hirescope://sync?x=1")

@@ -125,7 +125,9 @@ def after_current(job_dir: Path, settings=None) -> str | None:
     from jobsearch.ops.desktop_access import writable
     ok, why = writable(folder)               # a background build never hangs on a macOS permission prompt
     if not ok:
-        return f"Desktop copy skipped: {why}"
+        from jobsearch.ops.desktop_access import mark_pending
+        mark_pending(why)                    # the launcher app copies it (it may write to the Desktop)
+        return f"Desktop copy skipped here: {why}"
     try:
         res = sync_job(job_dir, folder)
     except OSError as e:

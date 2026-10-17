@@ -18,6 +18,8 @@
                                                         dashboard); it covers the keyword in every job that asked
     hirescope://note?job=<id>&text=…  /  note?app=<application id>&text=…
                                                         your notes on a job or an application (≤ 4000 characters)
+    hirescope://sync                                    refresh sync.js, the Excel file and Desktop copies (a
+                                                        background job sends it when it couldn't write the Desktop)
     hirescope://interactive?job=<id>                    Terminal: cd <repo> && claude "/resume-builder <id>"
 
 The page can't run programs: ~/Applications/HireScope Launcher.app (scripts/install_launcher.sh) receives the link
@@ -156,6 +158,7 @@ ACTIONS: dict[str, dict] = {
     "interactive": {"job": lambda v: _one_or_many(v, False)},
     "bucket": {"job": lambda v: _one_or_many(v, True), "op": _choice("add", "remove")},
     "external": {"file": _file, "data": _data},
+    "sync": {},
     "note": {"job": lambda v: _one_or_many(v, False), "app": _app, "text": _text},
     "answer": {"q": lambda v: _one_or_many(v, False), "a": _choice("yes", "no"), "entry": _entry, "level": _level,
                "text": _text},
@@ -361,7 +364,13 @@ def do_answer(conn, p: dict) -> str:
     return f"saved your answer ({out['answer']}) for {out['keyword']}; jobs that asked: {', '.join(map(str, out['jobs']))}"
 
 
-HANDLERS = {"note": do_note, "answer": do_answer, "external": do_external, "queue": do_queue, "cancel": do_cancel, "interactive": do_interactive, "bucket": do_bucket,
+def do_sync(conn, p: dict) -> str:
+    from . import hooks
+    lines = hooks.after_change(conn, reason="sync")
+    return "; ".join(x for x in lines if x)[:300] or "synced"
+
+
+HANDLERS = {"sync": do_sync, "note": do_note, "answer": do_answer, "external": do_external, "queue": do_queue, "cancel": do_cancel, "interactive": do_interactive, "bucket": do_bucket,
             "status": do_status}
 
 

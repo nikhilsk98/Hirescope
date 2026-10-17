@@ -30,6 +30,7 @@ def after_change(conn=None, reason: str = "") -> list[str]:
             steps.append(("applications Excel", lambda: applications_excel.update(conn)))
         except ImportError:
             pass
+        steps.append(("Desktop resume copies", _desktop_catch_up))
         from . import live
         steps.append(("live.js", lambda: live.write(conn)))
         for what, fn in steps:
@@ -51,3 +52,19 @@ def _sync(conn) -> None:
     statuses.write_sync_js(paths.SYNC_JS, statuses.sync_payload(conn))
     db.set_meta(conn, "sync_at", db.utcnow())
     conn.commit()
+
+
+def _desktop_catch_up() -> str:
+    """Copies a background job had to skip (Desktop blocked for it): made now, if this process may write there."""
+    from .ops.desktop_access import pending_marker, writable
+    m = pending_marker()
+    if not m.exists():
+        return ""
+    from resume_builder import desktop
+    enabled, folder = desktop.settings_of()
+    if not enabled or not writable(folder)[0]:
+        return ""
+    code, lines = desktop.sync_all()
+    if code == 0:
+        m.unlink(missing_ok=True)
+    return lines[-1] if lines else ""
