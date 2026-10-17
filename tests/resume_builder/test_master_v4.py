@@ -676,3 +676,30 @@ def test_web_sockets_in_the_jd_makes_socket_io_eligible():
          "responsibilities": []}
     assert rules_v4.jd_relevant_skill(a, "Socket.IO")
     assert not rules_v4.jd_relevant_skill({**a, "required": ["Java and SQL"]}, "Socket.IO")
+
+
+def test_confirmed_yes_covers_its_keyword_even_outside_the_vocabulary(v4env):
+    """A confirmed "yes" to "Have you used data structures?" counts as evidence for that keyword, so it isn't asked
+    again on every prepare (the keyword isn't a vocabulary term)."""
+    from resume_builder.evidence import canonical
+    rc.ADDITIONS.write_text("## 2026-10-17 — proj-alpha\n- Keyword: data structures\n- Question: Have you used data "
+                            "structures?\n- Answer: Yes, in the Alpha route planner (C++17), project level.\n"
+                            "- Status: confirmed\n- Level: project\n", encoding="utf-8")
+    b = build_bank()
+    add = [i for i in b.items.values() if i.id.startswith("add-proj-alpha")]
+    assert add and canonical("data structures") in add[0].technologies
+
+
+def test_rule67_clause_check_reads_the_main_source_and_keeps_reworded_results(v4env):
+    assert rules_v4.dropped_clauses("Cut deployment time by 68%, with health checks.",
+                                    "Reduced deployment duration by 68%, from 25 to 8 minutes.") == []
+    assert rules_v4.dropped_clauses("Moved deployments to CI.", "Reduced deployment duration by 68%.") == \
+        ["Reduced deployment duration by 68%."]
+    b, s = build_bank(), load_settings()
+    a = _job(v4env, "Requirements\n- Python and Java\n- Validate algorithms on benchmarks", job_id="v4-primary")
+    c = pipeline.assign_ids(v4build.baseline(a, b, s))
+    alpha = next(p for p in c.projects if p.entry_id == "proj-alpha")
+    assert rules_v4.irrelevant_skills(c, a)
+    # main source kept whole; a second id cited for one fact (its "Validated … benchmarked" clause isn't this bullet's)
+    alpha.bullets[0] = Bullet(text=b.items["proj-alpha-b1"].text, evidence_ids=["proj-alpha-b1", "proj-alpha-b2"])
+    assert not [p for p in rules_v4.problems(c, b, s, a) if "evaluation / result clause" in p]

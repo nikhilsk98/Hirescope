@@ -833,3 +833,15 @@ JD, evaluation clause vs JD-irrelevant skills, approved self-reported skills).
 
 **Tests**: 642 passed (two HPE jobs in separate Desktop folders + stray/duplicate cleanup, exact job-ID folder and
 reuse, web-sockets → Socket.IO).
+
+## Amazon SysDE Intern (top choice) + keyword-answer fix (2026-10-17)
+- Job 20723 v1 (ready, 1 page): CI/CD, S3/SQS workers, Terraform, B2B platform; Accenture microservices, Solace,
+  concurrency with documented benchmarks; Rescho QA-monitoring tool + JUnit/Docker Compose; DASH + VibeSpace;
+  Building Scalable Distributed Systems + Algorithms; Bash self-reported (approved). Shortlisted as "Top choice";
+  Amazon pinned to tier 1 in preferences. Eligibility flag: one term must remain after the internship (May 2027 grad).
+- A confirmed "yes" keyword answer now covers its keyword even outside the vocabulary ("data structures" was asked
+  again on every prepare).
+- Rule 67 clause check: reads only a bullet's main source (first cited bullet), and a result counts as kept while one
+  of its figures is ("by 68%" for "68%, from 25 to 8 minutes", as the master allows).
+
+**Tests**: 644 passed.

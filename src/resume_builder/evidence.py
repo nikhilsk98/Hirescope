@@ -476,6 +476,9 @@ def parse_additions(text: str, entries: dict[str, Entry], items: dict[str, Item]
         it = Item(iid, sec, ans, e.id if e else None, e.organization if e else None,
                   e.role if e else None, e.dates if e else None, terms_in(ans), a, o, mt,
                   source="additions", added=day, level=blk.get("level"), where=blk.get("where"), line=blk["line"])
+        if kw and canonical(kw) not in it.technologies:
+            # a confirmed "yes" covers the keyword it answers, even one outside the vocabulary ("data structures")
+            it.technologies.append(canonical(kw))
         if kw and sec == "skill":
             # a confirmed skill answer ("Go — coursework"): the skill itself, at its level
             it.text, it.technologies, it.kind = kw, [canonical(kw)], "skill"

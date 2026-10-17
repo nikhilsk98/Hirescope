@@ -343,9 +343,15 @@ def dropped_clauses(text: str, source: str) -> list[str]:
     """Evaluation / result phrases of the cited evidence that a reworded bullet no longer has."""
     low = text.casefold()
     out = []
-    for m in [*EVAL.finditer(source), *RESULT.finditer(source)]:
-        stem = m.group(1).casefold()[:6]
-        if stem not in low:
+    for m in EVAL.finditer(source):
+        if m.group(1).casefold()[:6] not in low:
+            out.append(source[m.start():m.start() + 60].split(";")[0].rstrip(" ,"))
+    for m in RESULT.finditer(source):
+        # a result is kept while one of its figures is: a reworded verb ("reducing" → "cutting") or one form of a
+        # before/after figure ("by 68%" for "68%, from 25 to 8 minutes"; the master allows one form when space is tight)
+        nums = re.findall(r"\d+(?:\.\d+)?", m.group(0))
+        if m.group(1).casefold()[:6] not in low and not (nums and any(re.search(rf"(?<![\d.]){re.escape(x)}(?![\d])",
+                                                                            text) for x in nums)):
             out.append(source[m.start():m.start() + 60].split(";")[0].rstrip(" ,"))
     return out
 
@@ -579,12 +585,12 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
     spare = irrelevant_skills(c, analysis)
     if spare:
         for _s, _e, b in bullets:
-            for ev in b.evidence_ids:
-                it = I.get(ev)
-                if it and it.kind in ("bullet", "snapshot") and (lost := dropped_clauses(b.text, it.text)):
-                    out.append(f"{b.id}: drops the evaluation / result clause of {ev} (\"{lost[0]}\") while Technical "
-                               f"Skills still lists JD-irrelevant {', '.join(spare[:4])}: cut those first (rule 67)")
-                    break
+            # the bullet's own source (first cited bullet); later ids may be cited for a single fact (a sector, a
+            # platform name), not as the accomplishment being shortened
+            ev = next((e for e in b.evidence_ids if I.get(e) and I[e].kind in ("bullet", "snapshot")), None)
+            if ev and (lost := dropped_clauses(b.text, I[ev].text)):
+                out.append(f"{b.id}: drops the evaluation / result clause of {ev} (\"{lost[0]}\") while Technical "
+                           f"Skills still lists JD-irrelevant {', '.join(spare[:4])}: cut those first (rule 67)")
     # rule 31: relocation line
     want = "relocation" if wants_relocation(analysis) else "default"
     if c.contact_location != want:
