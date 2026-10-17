@@ -16,6 +16,8 @@
     hirescope://answer?q=<question id>&a=yes|no[&entry=<role/project id>&level=<level>&text=<what you did>]
                                                         Questions for you: your answer (you confirmed it on the
                                                         dashboard); it covers the keyword in every job that asked
+    hirescope://note?job=<id>&text=…  /  note?app=<application id>&text=…
+                                                        your notes on a job or an application (≤ 4000 characters)
     hirescope://interactive?job=<id>                    Terminal: cd <repo> && claude "/resume-builder <id>"
 
 The page can't run programs: ~/Applications/HireScope Launcher.app (scripts/install_launcher.sh) receives the link
@@ -131,6 +133,7 @@ ACTIONS: dict[str, dict] = {
     "interactive": {"job": lambda v: _one_or_many(v, False)},
     "bucket": {"job": lambda v: _one_or_many(v, True), "op": _choice("add", "remove")},
     "external": {"file": _file},
+    "note": {"job": lambda v: _one_or_many(v, False), "app": _app, "text": _text},
     "answer": {"q": lambda v: _one_or_many(v, False), "a": _choice("yes", "no"), "entry": _entry, "level": _level,
                "text": _text},
     "status": {"job": lambda v: _one_or_many(v, False), "app": _app, "stage": _choice(*STAGES), "date": _date,
@@ -174,12 +177,14 @@ def parse(url: str) -> tuple[str, dict]:
 
 def validate(action: str, p: dict) -> dict:
     need = {"cancel": ["job"], "interactive": ["job"], "bucket": ["job", "op"], "status": ["stage"],
-            "external": ["file"], "answer": ["q", "a"]}.get(action, [])
+            "external": ["file"], "answer": ["q", "a"], "note": ["text"]}.get(action, [])
     for k in need:
         if k not in p:
             raise LinkError(f"{action} needs {k}")
     if action == "queue" and ("job" in p) == ("list" in p):
         raise LinkError("queue needs either job=<id> or list=bucket")
+    if action == "note" and ("job" in p) == ("app" in p):
+        raise LinkError("note needs either job=<id> or app=<application id>")
     if action == "answer" and p["a"] == "yes" and not (p.get("entry") and p.get("text")):
         raise LinkError("a yes needs entry (where you used it) and text (what you did)")
     if action == "status":
@@ -299,6 +304,25 @@ def do_external(conn, p: dict) -> str:
     return f"{out['note']}; {out['message']}" if out["note"] else out["message"]
 
 
+def do_note(conn, p: dict) -> str:
+    now = db.utcnow()
+    if "job" in p:
+        pk = _known_jobs(conn, p["job"])[0]
+        cur = conn.execute("SELECT user_status FROM jobs WHERE id=?", (pk,)).fetchone()
+        # the note rides on the job's status entry (as on the page): its time decides which copy is newer
+        conn.execute("UPDATE jobs SET user_notes=?, user_status=?, user_status_at=? WHERE id=?",
+                     (p["text"] or None, cur["user_status"], now, pk))
+        where = f"job {pk}"
+    else:
+        if not conn.execute("SELECT 1 FROM applications WHERE id=?", (p["app"],)).fetchone():
+            raise LinkError(f"no application {p['app']} in SQLite yet (Export statuses once)")
+        conn.execute("UPDATE applications SET notes=?, updated_at=? WHERE id=?", (p["text"] or None, now, p["app"]))
+        where = f"application {p['app']}"
+    conn.commit()
+    _after(conn, "note")
+    return f"notes saved for {where} ({len(p['text'])} characters)"
+
+
 def do_answer(conn, p: dict) -> str:
     from resume_builder import questions
     from resume_builder.config import InputError
@@ -312,7 +336,7 @@ def do_answer(conn, p: dict) -> str:
     return f"saved your answer ({out['answer']}) for {out['keyword']}; jobs that asked: {', '.join(map(str, out['jobs']))}"
 
 
-HANDLERS = {"answer": do_answer, "external": do_external, "queue": do_queue, "cancel": do_cancel, "interactive": do_interactive, "bucket": do_bucket,
+HANDLERS = {"note": do_note, "answer": do_answer, "external": do_external, "queue": do_queue, "cancel": do_cancel, "interactive": do_interactive, "bucket": do_bucket,
             "status": do_status}
 
 

@@ -88,6 +88,7 @@ def data_sandbox(tmp_path, monkeypatch):
     monkeypatch.setenv("JOBSEARCH_DOWNLOADS_DIR", str(tmp_path / "sandbox" / "Downloads"))
     monkeypatch.setenv("HIRESCOPE_NO_KICK", "1")
     monkeypatch.setenv("HIRESCOPE_NO_NOTIFY", "1")
+    monkeypatch.setenv("HIRESCOPE_NO_LSOF", "1")
 
 
 @pytest.fixture(autouse=True)

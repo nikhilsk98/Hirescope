@@ -161,6 +161,13 @@ class Applications(BaseModel):
     auto_mark_applied_external: bool = False
 
 
+class ExcelApplications(BaseModel):
+    """~/Desktop/Generated Resumes/HireScope Applications.xlsx, regenerated from SQLite after every change
+    (ops/applications_excel.py). JOBSEARCH_EXCEL_PATH overrides the path (tests)."""
+    enabled: bool = True
+    path: str = "~/Desktop/Generated Resumes/HireScope Applications.xlsx"
+
+
 class Scoring(BaseModel):
     """Component scores (0-100) and penalties used by match/score.py."""
     soft_rule_penalty: float = 5            # per failed soft rule
@@ -276,6 +283,7 @@ class Preferences(BaseModel):
     sponsorship_history: SponsorshipHistory = SponsorshipHistory()
     feedback: Feedback = Feedback()
     applications: Applications = Applications()
+    excel_applications: ExcelApplications = ExcelApplications()
     aggregator: Aggregator = Aggregator()
     backups: Backups = Backups()
     schedule: Schedule = Schedule()

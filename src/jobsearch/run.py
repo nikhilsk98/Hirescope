@@ -136,6 +136,12 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
     except Exception as e:  # noqa: BLE001
         log.warning("ready-to-apply applications not updated", extra={"error": str(e)[:200]})
     statuses.write_sync_js(paths.SYNC_JS, statuses.sync_payload(conn))   # after refresh_all: includes resume links
+    try:   # the applications Excel file on the Desktop
+        from .ops import applications_excel
+        if line := applications_excel.update(conn):
+            log.warning(line)
+    except Exception as e:  # noqa: BLE001
+        log.warning("applications Excel not updated", extra={"error": str(e)[:200]})
     try:   # live.js / launcher.js: the open dashboard's queue, worker and launcher state (zero-CLI resumes)
         from . import live
         live.ensure_files(conn)

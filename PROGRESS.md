@@ -925,7 +925,8 @@ commit and a push.
 - [x] 3 — launcher: every link type, strict validation, silent except interactive, one-time browser tip (2026-10-17)
 - [x] 4 — queue: statuses, concurrency, cancel, persistence, retry, --queue questions, notifications, panel, pause
       (2026-10-17)
-- [ ] 5 — Applications Excel on the Desktop (3 sheets, atomic write, open-in-Excel fallback, instant sync)
+- [x] 5 — Applications Excel on the Desktop (3 sheets, atomic write, open-in-Excel fallback, instant sync)
+      (2026-10-17)
 - [x] 6 — two projects on every resume (rules v4.6, commit eb37894; remaining: re-check READY resumes)
 - [ ] 7 — UI review (screenshots light/dark, 13" + narrow; fix high/medium; ask before big changes)
 - [ ] 8 — no "In Progress" anywhere (hard check on the rendered PDF; scan + regenerate)
@@ -1046,3 +1047,16 @@ Desktop folder, no Terminal.
 - Tests: answer link (sandboxed inputs), notifications / sync after builds, Ready (questions pending), retry on
   "database is locked", headless-Chrome questions + queue panel scenario (confirmation required, answer link,
   Regenerate, counts, elapsed time, keyboard Cancel, Esc returns focus).
+
+## Section 5 report (2026-10-17): applications Excel
+- `src/jobsearch/ops/applications_excel.py`: Applications / Applied Companies / Summary sheets from SQLite; links to
+  the job, the Desktop copy of the exact resume version (falls back to the data.nosync PDF), the saved JD; stage
+  colors; atomic replace; open in Excel ("~$" owner file or lsof shows Excel) → "(pending).xlsx" + dashboard notice,
+  applied and removed at the next sync; an unwritable Desktop is recorded as an error, never a crash.
+- Settings: preferences `excel_applications {enabled: true, path}` and `applications.auto_mark_applied_external:
+  false`, added to inputs/preferences.yaml (previous copy kept in the session scratchpad) and the example file.
+- Instant sync: stage changes (board drag, [ / ], drawer) → `status?app=…&stage=…`; drawer and job notes →
+  `hirescope://note` (validated text ≤ 4000). Also regenerated after each run, import_pending.sh, refresh, queue build.
+- Real check: a no-op status link through the installed launcher rewrote the real file in ~1 s (no permission prompt);
+  7 rows; every file link resolves. Two external jobs with READY resumes (LineVision, Tesla) now show as Ready to apply.
+- Tests: tests/test_applications_excel.py (7), headless-Chrome "excel" scenario (stage + note links, Excel notice).

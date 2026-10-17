@@ -230,6 +230,23 @@ const scenarios = {
     await p.eval(`document.querySelector("#queue-panel").focus()`); await p.key("Escape"); await p.sleep(100);
     check("Esc closes and returns focus", await p.eval(`document.querySelector("#queue-panel").hidden && document.activeElement.id === "queue-btn"`));
   },
+  async excel(p) {
+    await p.eval(CAPTURE + `; localStorage.setItem("jobsearch.launcherTip.v1", "true")`);
+    await p.key("1");
+    await p.eval(`[...document.querySelectorAll(".view-btn")].find((x) => /My Applications/.test(x.textContent)).click()`); await p.sleep(150);
+    await p.eval(`document.querySelector(".app-card").click()`); await p.sleep(200);
+    await p.eval(`[...document.querySelectorAll("#d-stages .stage-btn")].find((b) => b.textContent === "Interviewing").click()`); await p.sleep(150);
+    const st = await p.eval(`window.__links.slice(-1)[0] || ""`);
+    check("stage change → one status link", /^hirescope:\/\/status\?app=[A-Za-z0-9_-]+&stage=interviewing$/.test(st), st);
+    await p.eval(`(() => { const t = document.querySelector('#d-body textarea[aria-label="Notes"]'); t.value = "Recruiter: Dana"; t.dispatchEvent(new Event("change")); })()`); await p.sleep(150);
+    const nt = await p.eval(`window.__links.slice(-1)[0] || ""`);
+    check("note edit → one note link", /^hirescope:\/\/note\?app=[A-Za-z0-9_-]+&text=Recruiter%3A%20Dana$/.test(nt), nt);
+    await p.key("Escape");
+    await p.eval(`window.__hsLive({generated_at: "x1", queue: [], excel: {status: "pending", message: "HireScope Applications.xlsx is open in Excel: this update was saved as HireScope Applications (pending).xlsx"}})`); await p.sleep(150);
+    check("Excel open: dashboard notice", /open in Excel/.test(await p.eval(`(document.querySelector(".excel-banner") || {}).textContent || ""`)));
+    await p.eval(`window.__hsLive({generated_at: "x2", queue: [], excel: {status: "ok"}})`); await p.sleep(150);
+    check("notice goes away after the next sync", !(await p.eval(`!!document.querySelector(".excel-banner")`)));
+  },
   async setup_banner(p) {
     check("setup banner when the launcher isn't installed", await p.eval(`!!document.querySelector(".setup-banner")`));
     await p.eval(CAPTURE);

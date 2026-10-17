@@ -388,6 +388,9 @@
     const ha = META.health_alerts || [];
     if (ha.length) box.append(el("div", { class: "banner err" }, el("details", null, el("summary", { text: `Source health: ${ha.length} source${ha.length > 1 ? "s" : ""} returned far fewer jobs than usual (likely broken, not "no new jobs")` }),
       el("ul", null, ha.map((a) => el("li", { text: a.message }))))));
+    const xl = LIVE.excel || {};
+    if (xl.status === "pending" || xl.status === "error") box.append(el("div", { class: `banner ${xl.status === "error" ? "err" : "warn"} excel-banner` },
+      el("span", { text: `Applications Excel: ${xl.message || "not updated"}` })));
     if (!LAUNCHER.installed) {
       const cmd = `cd ${JSON.stringify(META.repo_root || ".")} && ./scripts/install_launcher.sh`;
       box.append(el("div", { class: "banner info setup-banner" }, el("div", null, el("b", { text: "One-time setup for one-click resumes. " }),
@@ -936,7 +939,9 @@
   }
   function moveTo(a, to) {
     if (!a || a.stage === to) return;
+    if (a.stage === "ready" && to === "applied") { const j = KEY_MAP.get(a.job_key); if (j) { applyReady(j, a); return; } }
     saveApp(C.moveStage(a, to), `${a.company}: ${STAGE_LABEL[a.stage]} → ${STAGE_LABEL[to]}`);
+    launch(`hirescope://status?app=${a.id}&stage=${to}`, "Save stage");     // SQLite + the Excel file, right away
   }
   const STAGE_ORDER = ["ready", ...OPEN_STAGES, ...CLOSED_STAGES];
   function shiftStage(a, dir) {
@@ -1425,6 +1430,7 @@
         if (key === "next_step" || key === "next_step_date") next = C.edit(next, { events: [...(next.events || []), { at: next.updated_at, kind: "note", from: null, to: null, note: `Next step: ${next.next_step || "—"}${next.next_step_date ? ` on ${next.next_step_date}` : ""}` }] });
         if (key === "applied_date" && !/^\d{4}-\d{2}-\d{2}$/.test(v)) { toast("Applied date is required"); input.value = cur[key] || ""; return; }
         saveApp(next, `Saved ${label.toLowerCase()}`);
+        if (key === "notes" && v.length <= 4000) launch(`hirescope://note?app=${encodeURIComponent(cur.id)}&text=${encodeURIComponent(v)}`, "Save notes");
       });
       return el("label", { class: type === "textarea" ? "full" : "" }, label, input);
     };
@@ -1748,7 +1754,10 @@
     const out = el("div"); const k = keyOf(j); const st = statuses[k] || {};
     const ta = el("textarea", { rows: 5, placeholder: "Your notes about this job (saved in this browser, exported with your statuses)", "aria-label": "Notes", maxlength: 20000, style: "width:100%" });
     ta.value = st.notes || "";
-    ta.addEventListener("change", () => { setStatus(j, { notes: ta.value }); toast("Notes saved"); });
+    ta.addEventListener("change", () => {
+      setStatus(j, { notes: ta.value }); toast("Notes saved");
+      if (ta.value.length <= 4000) launch(`hirescope://note?job=${j.id}&text=${encodeURIComponent(ta.value)}`, "Save notes");
+    });
     out.append(el("div", { class: "section" }, el("h3", { text: "Notes" }), ta));
     const app = appForJob(j);
     out.append(el("div", { class: "section" }, el("h3", { text: "Application" }), app ? el("div", null,

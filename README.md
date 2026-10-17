@@ -309,6 +309,17 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
 - **Stats** per track: applications per week, response / OA / interview rates, offers, median days to first
   response (inline SVG), plus response rates by source, company tier, score label and level.
 - CLI (SQLite copy, as of the last import): `python -m jobsearch.apps list | followups | stats | companies | csv [FILE] | import FILE | mark-applied JOB_ID`.
+- **Excel on your Desktop**: `~/Desktop/Generated Resumes/HireScope Applications.xlsx` (`preferences.yaml →
+  excel_applications: {enabled, path}`), rewritten from SQLite within seconds of Mark Applied, a stage change or a
+  note edit on the dashboard (those go through the launcher: `hirescope://status…`, `hirescope://note?app=…&text=…`),
+  and after every HireScope run, `import_pending.sh`, `resume_builder refresh` and queue build (Export statuses stays
+  as a fallback). Sheets: **Applications** (newest first: date applied, company, role, track, stage, source,
+  location, job ID, clickable job link, clickable **Resume PDF** — the Desktop copy of the exact version you sent —,
+  resume version, clickable saved JD, follow-up due, days since applied, notes, last updated), **Applied Companies**,
+  **Summary** (totals by stage and track, applications per week, response rate). Bold frozen headers, filters, stage
+  colors, formula-safe text. Writes are atomic (temporary file → replace). If the file is open in Excel, it is left
+  alone and the update is saved as `HireScope Applications (pending).xlsx`; the next sync after you close it
+  replaces the file (the dashboard shows a notice meanwhile).
 
 ### Statuses, sync and feedback learning
 - Statuses, notes, track overrides and applications save in the browser instantly. **Export statuses** downloads

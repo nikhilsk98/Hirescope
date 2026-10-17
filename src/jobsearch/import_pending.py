@@ -64,6 +64,10 @@ def main(argv=None) -> int:
         if changed:
             rescore_and_publish(conn, cfg, resume, log_file)
             print("dashboard updated: reload dashboard/index.html")
+        else:
+            from . import hooks
+            for line in hooks.after_change(conn, reason="import_pending"):   # applications Excel, sync.js, live.js
+                print(line)
     finally:
         conn.close()
         lock.release()
