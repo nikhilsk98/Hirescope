@@ -366,7 +366,7 @@ def do_answer(conn, p: dict) -> str:
 
 def do_sync(conn, p: dict) -> str:
     from . import hooks
-    lines = hooks.after_change(conn, reason="sync")
+    lines = hooks.after_change(conn, reason="sync", desktop=True)
     return "; ".join(x for x in lines if x)[:300] or "synced"
 
 

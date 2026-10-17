@@ -13,7 +13,7 @@ from .storage import db
 log = logging.getLogger(__name__)
 
 
-def after_change(conn=None, reason: str = "") -> list[str]:
+def after_change(conn=None, reason: str = "", desktop: bool = False) -> list[str]:
     own = conn is None
     conn = conn or db.connect(paths.DB)
     lines: list[str] = []
@@ -30,7 +30,7 @@ def after_change(conn=None, reason: str = "") -> list[str]:
             steps.append(("applications Excel", lambda: applications_excel.update(conn)))
         except ImportError:
             pass
-        steps.append(("Desktop resume copies", _desktop_catch_up))
+        steps.append(("Desktop resume copies", lambda: _desktop_catch_up(force=desktop)))
         from . import live
         steps.append(("live.js", lambda: live.write(conn)))
         for what, fn in steps:
@@ -54,11 +54,11 @@ def _sync(conn) -> None:
     conn.commit()
 
 
-def _desktop_catch_up() -> str:
+def _desktop_catch_up(force: bool = False) -> str:
     """Copies a background job had to skip (Desktop blocked for it): made now, if this process may write there."""
     from .ops.desktop_access import pending_marker, writable
     m = pending_marker()
-    if not m.exists():
+    if not (m.exists() or force):
         return ""
     from resume_builder import desktop
     enabled, folder = desktop.settings_of()

@@ -88,3 +88,19 @@ def test_blocked_desktop_hands_copies_to_the_launcher(tmp_path, monkeypatch):
     import pytest
     with pytest.raises(launcher.LinkError):
         launcher.parse("hirescope://sync?x=1")
+
+
+def test_probe_opens_an_existing_file(tmp_path):
+    """The probe reads a file that is already there (macOS asks for those, not for a program's own new files)."""
+    desktop_access.forget()
+    d = tmp_path / "D" / "Company"
+    d.mkdir(parents=True)
+    f = d / "resume.pdf"
+    f.write_bytes(b"%PDF")
+    f.chmod(0)                                  # unreadable: like a file this program may not open
+    try:
+        assert not desktop_access.writable(tmp_path / "D")[0]
+    finally:
+        f.chmod(0o644)
+    desktop_access.forget()
+    assert desktop_access.writable(tmp_path / "D")[0]

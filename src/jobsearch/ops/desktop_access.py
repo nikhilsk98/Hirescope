@@ -1,6 +1,6 @@
 """May this process write to / read from a folder macOS protects (Desktop, Downloads)? Asked without ever hanging.
 
-macOS asks once per program before it may write to ~/Desktop. A background job (a scheduled run, the resume worker)
+macOS asks once per program before it may open files in ~/Desktop that another program wrote. A background job (a scheduled run, the resume worker)
 has no window for that question, so a write can block forever inside a rename() (seen 2026-10-17: a quick check sat
 an hour on the applications Excel file). Every Desktop write first runs this probe in a child process with a timeout;
 a probe that fails or hangs is killed, and the caller skips the Desktop (everything stays in data.nosync) and says how
@@ -8,16 +8,23 @@ to allow it. The answer is cached for the life of the process.
 """
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
 from pathlib import Path
 
+# macOS lets a program touch files it created itself without asking, so the probe also opens a file that is already
+# there (one another program wrote): that is what asks, and what hung the Excel replace and the Desktop copies
 _PROBE = ("import os, pathlib, sys\n"
           "d = pathlib.Path(sys.argv[1]); d.mkdir(parents=True, exist_ok=True)\n"
+          "for root, dirs, files in os.walk(d):\n"
+          "    hit = next((f for f in files if not f.startswith('.')), None)\n"
+          "    if hit:\n        open(os.path.join(root, hit), 'rb').read(1); break\n"
           "p, t = d / '.hirescope-probe', d / '.hirescope-probe.tmp'\n"
           "p.write_text('x'); t.write_text('y'); os.replace(t, p); p.unlink()\n")
 _cache: dict[str, tuple[bool, str]] = {}
+log = logging.getLogger(__name__)
 
 
 def how_to_allow(folder: Path) -> str:
@@ -41,6 +48,8 @@ def writable(folder: Path, timeout: float = 8.0) -> tuple[bool, str]:
         res = (False, how_to_allow(folder) + " (the write was waiting for permission)")
     except OSError as e:
         res = (False, f"{folder}: {e}")
+    if not res[0]:
+        log.warning("protected folder not writable from this process", extra={"folder": key, "reason": res[1][-200:]})
     _cache[key] = res
     return res
 
@@ -73,6 +82,7 @@ def readable(folder: Path, name: str | None = None, timeout: float = 8.0) -> tup
     if not res[0]:
         res = (False, res[1] + ". To allow it: System Settings → Privacy & Security → Files and Folders → turn on "
                "Downloads Folder for Python (or answer the macOS prompt if one is showing).")
+        log.warning("protected folder not readable from this process", extra={"folder": str(folder)})
     _cache[key] = res
     return res
 
