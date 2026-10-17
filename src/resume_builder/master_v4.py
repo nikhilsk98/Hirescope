@@ -35,6 +35,18 @@ _VARIANT = re.compile(r"^(?:[A-Z][\w/ -]*?variant(?: of [^:]+)?|Combined variant
 _TRAIL_STATUS = re.compile(r"\s*[\[(_]\s*(unverified|pending|planned|estimated|verified)\s*[\])_]\s*$", re.I)
 
 
+def _display_context(ctx: str) -> str:
+    """Project line as printed: 'Redis (planned)' → 'Redis'; 'GCP (planned: Redis)' → 'GCP, Redis'. The planned
+    technology stays on the title line (the design bullets name it) but never reaches Technical Skills (rule 50)."""
+    parts = ctx.split(" | ")
+    def stack(t):
+        t = re.sub(r"\s*\(planned\)", "", t, flags=re.I)
+        extra = [x.strip() for m in re.finditer(r"\(planned:\s*([^)]*)\)", t, re.I) for x in m.group(1).split(",")]
+        t = re.sub(r"\s*\(planned:[^)]*\)", "", t, flags=re.I)
+        return ", ".join([t.strip()] + [x for x in extra if x]) if t.strip() else ", ".join(extra)
+    return " | ".join([stack(parts[0])] + parts[1:])
+
+
 def is_v4(text: str) -> bool:
     return bool(re.search(r"^##\s+Default one-page resume", text, re.M)) and "#### Bullet bank" in text
 
@@ -470,7 +482,7 @@ def parse(text: str, source: str = "master_resume.md"):
             eid = next((k for k, p in v4.projects.items() if p["name"].casefold().startswith(key)), None)
             if not eid:
                 raise InputError(f"{source}:{n}: default resume project '{name}' has no matching ### project")
-            cur = {"entry_id": eid, "name": name, "context": m.group(2).strip(), "bullets": []}
+            cur = {"entry_id": eid, "name": name, "context": _display_context(m.group(2).strip()), "bullets": []}
             snap["projects"].append(cur)
             v4.projects[eid]["display"] = name
             v4.projects[eid]["display_context"] = cur["context"]

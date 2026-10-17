@@ -37,7 +37,8 @@ scripts do everything deterministic. Run every command from the repo root with `
   (rules 75, 77). Planned technology (incl. Redis, PyTorch, Prometheus, Grafana) never goes in Technical Skills; a
   VibeSpace design bullet may name it (rule 50).
 - Never move a fact to another role. Team work stays "Contributed to" (Accenture), DASH keeps "Team of 3", VibeSpace
-  stays "In Progress" with design verbs only ("Designing", "Architecting"; never "Building") and no results (rules 11, 50).
+  carries no "In Progress" label (its line ends at "Northeastern University") but keeps design verbs only
+  ("Designing", "Architecting"; never "Building" or "Built") and no results (rules 11, 50, 51).
 - One metric of each kind per resume (rule 8). Oracle is skill-only; Node.js stays out of Accenture bullets (12). No
   compliance claims (13). No performance numbers at Rescho (14). Skills: core always; extended / self-reported only when
   the JD mentions them (self-reported ≤ 4, never in a bullet); planned never (53). Certifications are the last skills row:

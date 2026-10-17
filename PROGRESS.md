@@ -775,3 +775,15 @@ LineVision (job 124710) regenerated under v4.3: READY v3, one page. Tests: 569 p
   Skydio), "should the position require" as conditional (Kodiak). Rescore: 5,393 open jobs filtered for U.S. person /
   citizenship; 179 flagged (25 co-op, 154 full-time); vs the previous commit 20 jobs became visible (Fab2, Marvell,
   Commonwealth Fusion, Skydio) and 4 Amazon jobs hidden. Tests: 628 passed.
+
+## VibeSpace line without "In Progress" (2026-10-16)
+- resume_rules.md v4.5 (rules 50–51, layout spec): in-progress projects carry no status label; VibeSpace's line is
+  "Python, FastAPI, Redis, GCP | Northeastern University" (master, snapshot, builder note, template). Design verbs are
+  still enforced: in-progress comes from the project's `Context:` field, not the display line ("Built …" is flagged).
+- Project lines: "Redis (planned)" / "GCP (planned: Redis)" print as a plain stack; the "(planned: Redis)" note had
+  been printed literally (Nissan v3) and failed the default resume's template match. Redis stays out of Skills.
+- Regenerated: default v3 (matches the template, 1 page), Nissan v4 (1 page, unchanged bullets). Backups:
+  `inputs/resume/archive/*.before-in-progress-removal.*`.
+
+**Tests**: 629 passed (fixtures without the label; "Built" flagged on an unlabeled in-progress project; planned-note
+printing).

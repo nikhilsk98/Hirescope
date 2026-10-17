@@ -209,6 +209,11 @@ def test_v4_content_rules(v4env):
     c.projects[1].bullets[0].text = "Building a DEMO two-stage recommender that improved NDCG by 12%."
     p50 = [p for p in probs(c) if "rule 50" in p]
     assert len(p50) == 2
+    c = base()                                      # rule 50 without an "In Progress" label on the project line:
+    proj = rules_v4.v4(b)["projects"][c.projects[1].entry_id]
+    assert proj["in_progress"] and "In Progress" not in (FIX / "demo_master_v4.md").read_text().split("## Contact")[0]
+    c.projects[1].bullets[0].text = "Built a DEMO two-stage recommender with a ranking stage."
+    assert any("design verb" in p for p in probs(c))     # the master's Context still marks it in progress
     c = base()                                      # overlap note: A2 and B2
     c.experience[0].bullets[1] = Bullet(text=b.items["exp-freelance-a2"].text, evidence_ids=["exp-freelance-a2"])
     c.experience[0].bullets.append(Bullet(text=b.items["exp-freelance-b2"].text, evidence_ids=["exp-freelance-b2"]))
@@ -573,3 +578,13 @@ def test_v44_extended_cloud_platform_listed_for_a_cloud_jd(v4env):
     assert "GCP" not in [x.name for r in c2.skills for x in r.items]
     c2.skills[-2].items.append(SkillItem(name="GCP", evidence_ids=["skill-gcp"]))
     assert any("GCP" in p and "rule 53" in p for p in rules_v4.problems(c2, b, s, a2))
+
+
+def test_project_line_planned_annotations_print_as_plain_stack():
+    from resume_builder.master_v4 import _display_context
+    assert _display_context("Python, FastAPI, Redis (planned), GCP | Northeastern University") == \
+        "Python, FastAPI, Redis, GCP | Northeastern University"
+    assert _display_context("Python, FastAPI, GCP (planned: Redis) | Northeastern University") == \
+        "Python, FastAPI, GCP, Redis | Northeastern University"
+    assert _display_context("C++17, Python | CS5800 Algorithms, Northeastern University | Team of 3") == \
+        "C++17, Python | CS5800 Algorithms, Northeastern University | Team of 3"

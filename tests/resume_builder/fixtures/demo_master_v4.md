@@ -27,7 +27,7 @@ _Builder: this is the approved general-purpose version. Start from it and swap b
 - Designed and implemented Alpha, a DEMO A* variant with bounded local probes, empirically preserving optimal cost.
 - Validated optimality against BFS on 1,000 randomized grids and benchmarked against A* on DEMO maps.
 
-**Beta – Mood Recommender** (GitHub) — Python, FastAPI, Redis | Demo University | In Progress
+**Beta – Mood Recommender** (GitHub) — Python, FastAPI, Redis | Demo University
 - Designing a DEMO two-stage recommender: candidate retrieval over pgvector and a LightGBM ranker.
 - Architecting real-time personalization in which swipe events update a Redis session embedding for re-ranking.
 
