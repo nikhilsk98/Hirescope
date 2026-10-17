@@ -72,6 +72,12 @@ def greenhouse_payload():
 
 
 @pytest.fixture(autouse=True)
+def desktop_sandbox(tmp_path, monkeypatch):
+    """Resume Desktop copies (resume_builder.desktop) go to a temporary folder, never the real ~/Desktop."""
+    monkeypatch.setenv("JOBSEARCH_DESKTOP_DIR", str(tmp_path / "Desktop" / "Generated Resumes"))
+
+
+@pytest.fixture(autouse=True)
 def no_sleep(monkeypatch):
     monkeypatch.setattr("jobsearch.adapters.base.time.sleep", lambda s: None)
 

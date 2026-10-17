@@ -10,7 +10,7 @@ hirescope/
 ├── dashboard/       the static dashboard (index.html, app.js, …) + generated data.js, details/, sync.js, resumes.js,
 │                    search.js (every job, for the ⌘K palette)
 ├── docs/            notes; docs/prompts/ = the build prompts this project was built from
-├── scripts/         run.sh, setup.sh, schedule.sh (+ launchd/ templates), add_url.sh, add_job.sh, import_pending.sh, migrate_layout.py
+├── scripts/         run.sh, setup.sh, schedule.sh (+ launchd/ templates), add_url.sh, add_job.sh, import_pending.sh, sync_desktop_resumes.sh, migrate_layout.py
 ├── src/jobsearch/   HireScope (discovery → scoring → dashboard)
 ├── src/resume_builder/   the Resume Builder (/resume-builder)
 ├── tests/           DEMO data only
@@ -51,11 +51,18 @@ hirescope/
     ├── backups/     daily SQLite snapshots (last 14)
     ├── digests/  exports/  screenshots/
     └── state/       run.lock (while a run is active)
+
+~/Desktop/Generated Resumes/   COPIES of READY PDFs only (desktop_copy in config/resume_builder.yaml; outside the repo)
+    ├── <Company>/<Role>_<JobID>/  Nikhil_Shivakumar_Resume_<Company>.pdf (current), …_<Company>_v<N>.pdf (older READY)
+    └── Default/                   Nikhil_Shivakumar_Resume.pdf (+ _v<N> older)
 ```
 
 - Resume Builder code for the v4 master: `master_v4.py` (parser), `v4build.py` (snapshot baseline, template-macro
   rendering, layout checks), `rules_v4.py` (rules v4.3 checks). HireScope's matcher reads the same v4 master through
   `jobsearch/extract/resume.py` (usable bullets and inventory skills only).
+- Desktop copy: `src/resume_builder/desktop.py` mirrors each job's READY PDFs when a version becomes current
+  (`versions.set_current`) and on `./scripts/sync_desktop_resumes.sh` (`python -m resume_builder sync-desktop`);
+  tests point it at a temporary folder (`JOBSEARCH_DESKTOP_DIR`).
 - Resume Builder inputs can come from a copy: `JOBSEARCH_RESUME_INPUTS_DIR=/copy-of-inputs-resume` (with
   `JOBSEARCH_DATA_DIR` / `JOBSEARCH_DASHBOARD_DIR` for a full test run that touches nothing real).
 - External jobs (source `external`): `src/jobsearch/external.py` (reading, duplicates, import), `add_job.py` (CLI);

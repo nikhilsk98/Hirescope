@@ -72,7 +72,8 @@ class Settings:
     category_terms: dict[str, list[str]] = field(default_factory=dict)
 
     def hash(self) -> str:
-        return sha256_text(yaml.safe_dump(self.raw, sort_keys=True))
+        # desktop_copy only says where finished PDFs are copied; changing it never invalidates a built version
+        return sha256_text(yaml.safe_dump({k: v for k, v in self.raw.items() if k != "desktop_copy"}, sort_keys=True))
 
     def audience(self, track: str | None, level: str | None = None, yoe: float | None = None) -> str:
         """student (co-op / internship / new grad, rule 15) or experienced (mid-level and up, rule 16), from the

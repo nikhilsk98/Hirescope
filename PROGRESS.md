@@ -804,3 +804,13 @@ printing).
 
 **Tests**: 633 passed (MLOps match from responsibilities, role-type note applied / required / not applied for a plain
 JD, evaluation clause vs JD-irrelevant skills, approved self-reported skills).
+
+## Desktop copy of READY resumes (2026-10-17)
+- `desktop.py`: when a version becomes current (build, regenerate, `default`, rollback, mark-reviewed) its PDF goes to
+  `~/Desktop/Generated Resumes/<Company>/<Role>_<JobID>/` as `Nikhil_Shivakumar_Resume_<Company>.pdf`, other READY
+  versions as `_v<N>.pdf`; the default resume in `Default/`. PDFs only, never failed builds; only resume-named PDFs are
+  replaced or removed. `desktop_copy.enabled` / `.dir` in config (outside the settings hash). A blocked Desktop
+  (macOS privacy) prints how to allow it and never fails the build. `./scripts/sync_desktop_resumes.sh` re-syncs.
+- Backfill: 33 PDFs in 12 resume folders.
+
+**Tests**: 639 passed (6 new; every test's Desktop is a temporary folder via `JOBSEARCH_DESKTOP_DIR`).

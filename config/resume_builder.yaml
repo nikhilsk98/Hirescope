@@ -1,5 +1,5 @@
 # Resume Builder settings (see README → Resume Builder). Changing this file changes the settings hash, so the
-# next /resume-builder run for a job builds a new version instead of reusing the last one.
+# next /resume-builder run for a job builds a new version instead of reusing the last one (desktop_copy excepted).
 
 # Employer-facing PDF: <first>_<last>_Resume_<Company>.pdf (job IDs only in folder names and manifests).
 # Empty = taken from the "# First Last" heading of inputs/resume/master_resume.md (kept out of this public repo).
@@ -8,6 +8,14 @@ naming:
   last_name: ""
 
 page_count: 1
+
+# Desktop copy (src/resume_builder/desktop.py): each READY version's employer-facing PDF is copied to
+# <dir>/<Company>/<Role>_<JobID>/ (current as <First>_<Last>_Resume_<Company>.pdf, older READY versions as _v<N>.pdf;
+# the default resume in <dir>/Default/). Re-sync anytime: ./scripts/sync_desktop_resumes.sh. Not part of the
+# settings hash: changing it never forces a rebuild.
+desktop_copy:
+  enabled: true
+  dir: ~/Desktop/Generated Resumes
 
 # Section order (rules 24–25, v4.1): the same for every application and every level, never reordered. The audience
 # (student vs experienced, from HireScope's track and level) still decides the project count (rules 46–48).

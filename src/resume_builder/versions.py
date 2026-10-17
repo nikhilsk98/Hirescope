@@ -3,6 +3,7 @@
   reports/v<N>/  truth, coverage, changes, defense, review, validation reports for that version
   latest         symlink to the current version
   current.json   the last version that passed every required check (a failed build never replaces it)
+Each time a version becomes current, its PDF is also copied to the Desktop folder (desktop.py, desktop_copy setting).
 """
 from __future__ import annotations
 
@@ -118,6 +119,10 @@ def set_current(job_dir: Path, version: int, reason: str) -> dict:
     tmp.write_text(json.dumps(cur, indent=1), encoding="utf-8")
     tmp.replace(job_dir / "current.json")
     _link_latest(job_dir, version)
+    from . import desktop                   # never fails the build: a blocked Desktop only prints how to allow it
+    msg = desktop.after_current(job_dir)
+    if msg:
+        print(msg)
     return cur
 
 

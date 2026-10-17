@@ -575,6 +575,16 @@ the next request build a new version.
   files, an edit whose evidence changed since) are flagged and block "ready" instead of being overwritten;
   `prepare --discard-edits` drops them on purpose. The edited version itself is never touched.
 - One run per job at a time (job lock; a second run says another is in progress).
+- **Desktop copy**: every time a version becomes current (a READY build, `--regenerate`, `default`, `rollback`,
+  `mark-reviewed`), its employer-facing PDF is copied to `~/Desktop/Generated Resumes/<Company>/<Role>_<JobID>/`
+  (same folder names as `generated_resumes/`): the current version as `Nikhil_Shivakumar_Resume_<Company>.pdf`
+  (overwritten when a newer version becomes current), every other READY version beside it as `…_<Company>_v<N>.pdf`;
+  the default resume in `Default/Nikhil_Shivakumar_Resume.pdf`. Only PDFs, only versions that passed every check;
+  other files you put in those folders are left alone. Re-sync (or backfill) anytime: `./scripts/sync_desktop_resumes.sh`
+  (`--force` copies even when turned off). Settings: `desktop_copy.enabled` / `desktop_copy.dir` in
+  `config/resume_builder.yaml` (not part of the settings hash, so changing them never forces a rebuild). If macOS
+  blocks the Desktop (Privacy & Security → Files and Folders), the build still succeeds, the resume stays in
+  `data.nosync`, and a message explains how to allow it: run the script once in Terminal and click OK.
 - Each build saves a version, also within one generation (a rebuild after tightening a bullet is `v<N+1>`). A
   generation allows 3 builds; a 4th is refused without building anything (`prepare --regenerate` starts a new one).
 - Trying things against a copy of your data: `JOBSEARCH_DATA_DIR=/path/copy JOBSEARCH_DASHBOARD_DIR=/path/dash

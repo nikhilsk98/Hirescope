@@ -436,6 +436,14 @@ def _bridge_refresh(job) -> None:
     _bridge(job["id"])
 
 
+def cmd_sync_desktop(args) -> int:
+    from . import desktop
+    code, lines = desktop.sync_all(force=args.force)
+    for ln in lines:
+        print(ln)
+    return code
+
+
 def cmd_refresh(args) -> int:
     from .hirescope_bridge import refresh_all
     n = refresh_all()
@@ -538,6 +546,8 @@ def main(argv=None) -> int:
     p.add_argument("job")
     p.add_argument("version", nargs="?", type=int)
     sub.add_parser("schema")
+    p = sub.add_parser("sync-desktop", help="copy every READY resume PDF to the Desktop folder (desktop_copy)")
+    p.add_argument("--force", action="store_true", help="copy even when desktop_copy.enabled is false")
     args = ap.parse_args(argv)
     try:
         if args.cmd == "schema":
@@ -548,7 +558,7 @@ def main(argv=None) -> int:
                 "add-evidence": cmd_add_evidence, "add-tool": cmd_add_tool, "decline": cmd_decline, "tags": cmd_tags,
                 "gaps": cmd_gaps, "diff": cmd_diff, "rollback": cmd_rollback, "lock": cmd_lock,
                 "unlock": cmd_unlock, "mark-reviewed": cmd_mark_reviewed, "refresh": cmd_refresh,
-                "batch": cmd_batch}[args.cmd](args)
+                "batch": cmd_batch, "sync-desktop": cmd_sync_desktop}[args.cmd](args)
     except (InputError, ContentError, CompileError, versions.LockedError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 2
