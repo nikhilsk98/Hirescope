@@ -577,6 +577,9 @@ pending) / Failed**. Each finished build is saved by the build itself (version f
   run in order; it quits after two idle minutes. Each link starts nothing visible.
 
 ### What gets checked
+- **No status labels** (hard rule, rules 50–51 v4.7): the PDF's own text may not contain "In Progress" or a
+  variant ("in-progress", "(in progress)", "Ongoing", "WIP", "work in progress", "under development"); the build fails
+  with a message naming it. In-progress work (VibeSpace) shows only through design verbs ("Designing", "Architecting").
 - **Truth** (blocks "ready"): every bullet, skill, summary and talking point against the evidence ids it cites:
   numbers exactly as written (15+ may become 15, never 20), technologies (no AWS for GCP, no new tools), no ownership
   (led, managed, spearheaded…) or scale (large-scale, millions, enterprise…) or outcomes the evidence doesn't state.

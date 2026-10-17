@@ -19,6 +19,20 @@ logging.getLogger("pdfminer").setLevel(logging.WARNING)
 CM = 28.3465   # PDF points per cm
 LIGATURES = {"ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st"}
 BULLET_CHARS = "•∙●◦▪"
+# Hard rule (rules 50–51, v4.7): no project or entry on a resume carries a status label. Checked on the PDF's own text,
+# so it holds whatever produced the line (master, template, a hand edit, a lock).
+IN_PROGRESS = re.compile(r"\bin[\s\-‐‑–]*progress\b|\bon[\s\-‐‑]?going\b|\bwork[\s\-]+in[\s\-]+progress\b|\(\s*wip\s*\)|"
+                         r"\bWIP\b|\bunder\s+development\b|\bcurrently\s+in\s+development\b", re.I)
+
+
+def in_progress_labels(text: str) -> list[str]:
+    """Every "In Progress"-style status label in resume text (case-insensitive; "WIP" only in capitals or brackets)."""
+    out = []
+    for m in IN_PROGRESS.finditer(unicodedata.normalize("NFKC", text or "")):
+        if m.group(0).lower() == "wip" and m.group(0) != "WIP":
+            continue
+        out.append(m.group(0))
+    return out
 
 
 @dataclass
@@ -162,6 +176,11 @@ def validate_pdf(pdf: Path, expected: list[tuple[str, str]], expected_links: lis
                 words = page.crop((max(0, h["x0"] - 1), max(0, h["top"] - 1), min(W, h["x1"] + 1),
                                    min(H, h["bottom"] + 1))).extract_text() or ""
                 links.append({"uri": h.get("uri"), "text": norm(words), "page": pno})
+        labels = in_progress_labels("\n".join(texts))
+        r.add("no_in_progress_label", not labels,
+              f"the resume says {', '.join(repr(x) for x in dict.fromkeys(labels))}: no project or entry may carry an "
+              "\"In Progress\" / \"Ongoing\" / \"WIP\" label (rules 50–51); in-progress work shows only through design "
+              "verbs (\"Designing\", \"Architecting\")" if labels else "")
         r.add("min_font_size", not sizes or min(sizes) >= min_pt - 0.05,
               f"smallest text {min(sizes) if sizes else '-'}pt (minimum {min_pt}pt)")
         r.add("clipping", not edge, f"text outside the page: {', '.join(edge[:5])}")

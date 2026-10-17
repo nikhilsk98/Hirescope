@@ -1112,3 +1112,15 @@ Waiting for Nikhil's approval (larger changes, not made):
 4. "Shortlisted" overlaps the Bucket (both are "jobs I want"): fold Shortlist into the Bucket or keep both with
    clearer labels.
 Low (left as is): the native file input's look; the faint ⌘K hint.
+
+## Section 8 report (2026-10-17): no "In Progress"
+- Inputs: VibeSpace's line was already cleaned in de892e4 (master project line, Default snapshot, builder notes,
+  template; backups in inputs/resume/archive/*.before-in-progress-removal.*). Rules v4.7 (backup:
+  inputs/resume/archive/resume_rules.before-v4.7.md): rule 51 adds the hard rule + changelog entry.
+- Validation: `validate.in_progress_labels` + check `no_in_progress_label` on the rendered PDF text of every build
+  (variants: in progress / in-progress / en-dash, (in progress), ongoing / on-going, work in progress, (WIP), WIP in
+  capitals, under development); fails with a clear message. SKILL.md, README.
+- Scan of the 20 current READY PDFs: 3 still printed "In Progress" — Amazon SDE Early Career (19540, v4), J&J Software
+  Test Engineering Co-op (62484, v1), LineVision (124710, v3) → regenerated through the queue (results below).
+- Tests: tests/resume_builder/test_in_progress.py (17: every variant caught, ordinary text passes, the in-progress DEMO
+  project renders without a label, a label anywhere fails the build with the message).
