@@ -29,7 +29,7 @@ INTERN_OWN = re.compile(r"\b(owned|led|architected|spearheaded|designed the syst
 TEAM_OWN = re.compile(r"\b(designed the (?:architecture|system)|architected the|owned the kubernetes|"
                       r"ran production releases?|led the (?:migration|team|modernization))\b", re.I)       # rule 11
 DESIGN_VERB = re.compile(r"^(Designing|Architecting|Planning|Prototyping|Specifying|Modeling|Researching)\b")
-RESULT = re.compile(r"\b(reduc\w*|improv\w*|increas\w*|cut|achiev\w*|outperform\w*|boost\w*)\b[^.]*\d", re.I)
+RESULT = re.compile(r"\b(reduc\w*|improv\w*|increas\w*|cut\w*|achiev\w*|outperform\w*|boost\w*)\b[^.]*\d", re.I)
 TDD = re.compile(r"\btest[- ]driven\b|\bTDD\b", re.I)                                                  # rule 82
 # rule 81: the areas a resume should show with distinct evidence (bullet text or JD text → areas)
 AREAS = {
@@ -588,7 +588,11 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
             # the bullet's own source (first cited bullet); later ids may be cited for a single fact (a sector, a
             # platform name), not as the accomplishment being shortened
             ev = next((e for e in b.evidence_ids if I.get(e) and I[e].kind in ("bullet", "snapshot")), None)
-            if ev and (lost := dropped_clauses(b.text, I[ev].text)):
+            # rule 8 wins: a figure dropped because another bullet already shows that metric kind is not a loss
+            others = {k for _s2, _e2, o in bullets if o is not b for k in metric_kinds(o.text)}
+            lost = [x for x in dropped_clauses(b.text, I[ev].text)
+                    if not (set(metric_kinds(x)) & others)] if ev else []
+            if lost:
                 out.append(f"{b.id}: drops the evaluation / result clause of {ev} (\"{lost[0]}\") while Technical "
                            f"Skills still lists JD-irrelevant {', '.join(spare[:4])}: cut those first (rule 67)")
     # rule 31: relocation line

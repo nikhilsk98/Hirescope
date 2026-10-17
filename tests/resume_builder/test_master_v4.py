@@ -703,3 +703,20 @@ def test_rule67_clause_check_reads_the_main_source_and_keeps_reworded_results(v4
     # main source kept whole; a second id cited for one fact (its "Validated … benchmarked" clause isn't this bullet's)
     alpha.bullets[0] = Bullet(text=b.items["proj-alpha-b1"].text, evidence_ids=["proj-alpha-b1", "proj-alpha-b2"])
     assert not [p for p in rules_v4.problems(c, b, s, a) if "evaluation / result clause" in p]
+
+
+def test_rule8_figure_dropped_for_another_bullets_metric_is_not_a_lost_result(v4env):
+    """Two CI/CD bullets with a pipeline-duration figure: rule 8 keeps one, and the other may drop its figure without
+    the rule-67 clause check calling it a lost result; with no other such figure on the page it is a real loss."""
+    b, s = build_bank(), load_settings()
+    a = _job(v4env, "Requirements\n- Java\n- Jenkins and GitHub Actions continuous integration", job_id="v4-r8")
+    c = pipeline.assign_ids(v4build.baseline(a, b, s))
+    assert rules_v4.irrelevant_skills(c, a)
+    dc = next(e for e in c.experience if e.entry_id == "exp-democorp")
+    dc.bullets[-1] = Bullet(text="Optimized Jenkins pipelines for assigned services.", evidence_ids=["exp-democorp-c1"])
+    fl = next(e for e in c.experience if e.entry_id == "exp-freelance")
+    k = next(n for n, x in enumerate(fl.bullets) if rules_v4.metric_kinds(x.text) == ["deployment / pipeline duration"])
+    lost = lambda: [p for p in rules_v4.problems(c, b, s, a) if "evaluation / result clause" in p and "democorp-c1" in p]
+    assert not lost()                                   # the freelance bullet shows the pipeline-duration figure
+    fl.bullets[k] = Bullet(text=b.items["exp-freelance-a2"].text, evidence_ids=["exp-freelance-a2"])
+    assert lost()                                       # no other such figure: dropping it is a lost result

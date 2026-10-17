@@ -845,3 +845,11 @@ reuse, web-sockets → Socket.IO).
   of its figures is ("by 68%" for "68%, from 25 to 8 minutes", as the master allows).
 
 **Tests**: 644 passed.
+
+## HPE Systems Software Engineer Intern v4 + rule 8 / rule 67 interplay (2026-10-17)
+- Job 34880 v4 (ready, 1 page, coverage 90.5%): CI/CD and automation first (GitHub Actions, Terraform, Jenkins,
+  Kubernetes releases, QA-monitoring tool); Jenkins figure left out (rule 8); Postman bullet out for page fit.
+- Rule 67 clause check: a figure dropped because another bullet already shows that metric kind (rule 8) is not a
+  lost result; the result pattern now matches "cutting" as well as "cut".
+
+**Tests**: 645 passed.
