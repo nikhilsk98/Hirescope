@@ -54,9 +54,11 @@ hirescope/
     │                queue/ (one log per queued build attempt)
     ├── backups/     daily SQLite snapshots (last 14)
     ├── digests/  exports/  screenshots/
-    └── state/       run.lock (while a run is active), queue_worker.lock, queue.trigger (starts the launchd worker)
+    └── state/       run.lock (while a run is active), queue_worker.lock, queue.trigger (starts the launchd worker),
+                     launcher_spool/ (links that met a busy database), external_requests/, desktop_pending
 
 ~/Desktop/Generated Resumes/   COPIES of READY PDFs only (desktop_copy in config/resume_builder.yaml; outside the repo)
+    ├── HireScope Applications.xlsx   My Applications as Excel (preferences excel_applications), rebuilt after each change
     ├── <Company>/<Role>_<JobID>/  Nikhil_Shivakumar_Resume_<Company>.pdf (current), …_<Company>_v<N>.pdf (older READY)
     └── Default/                   Nikhil_Shivakumar_Resume.pdf (+ _v<N> older)
 ```
@@ -69,7 +71,11 @@ hirescope/
   `com.nikhil.hirescope.worker`); `src/resume_builder/questions.py` (Questions for you: `resume_questions`);
   `src/jobsearch/bucket.py` (the Bucket: `bucket`); `src/jobsearch/hooks.py` (what every change refreshes: sync.js,
   applications, Excel, live.js); `src/jobsearch/live.py` (dashboard/live.js, launcher.js);
-  `src/jobsearch/ops/launcher_install.py` (install / uninstall).
+  `src/jobsearch/ops/launcher_install.py` (install / uninstall); `src/jobsearch/external_resume.py` (Resume Builder
+  submissions: the launcher leaves a request in data.nosync/state/external_requests/, the worker imports it);
+  `src/jobsearch/ops/desktop_access.py` (Desktop / Downloads access checked in a child process with a timeout, so a
+  background job never hangs on a macOS permission prompt); `src/jobsearch/ops/applications_excel.py` (the Desktop
+  Excel file); `src/jobsearch/tracker/ready_apps.py` ("Ready to apply").
 - Desktop copy: `src/resume_builder/desktop.py` mirrors each job's READY PDFs when a version becomes current
   (`versions.set_current`) and on `./scripts/sync_desktop_resumes.sh` (`python -m resume_builder sync-desktop`);
   tests point it at a temporary folder (`JOBSEARCH_DESKTOP_DIR`).

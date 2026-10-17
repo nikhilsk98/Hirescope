@@ -566,13 +566,23 @@ pending) / Failed**. Each finished build is saved by the build itself (version f
 - From the terminal: `python -m resume_builder queue list | add <job…> [--regenerate] | cancel <job…> | worker`.
 - Links (validated strictly in `src/jobsearch/launcher.py`; anything else is rejected with a short notification and
   logged): `hirescope://queue?job=<id>[,<id>…][&regenerate=1]`, `queue?list=bucket[&regenerate=1]`,
-  `external?file=<saved file>`, `cancel?job=<id>`, `status?job=<id>&stage=<stage>[&app=<id>&date=YYYY-MM-DD&v=<n>]`
+  `external?file=<saved file>` or `external?data=<the job, base64url>` (a pasted JD, up to 120 KB),
+  `cancel?job=<id>`, `sync` (refresh sync.js, the Excel file and the Desktop copies), `status?job=<id>&stage=<stage>[&app=<id>&date=YYYY-MM-DD&v=<n>]`
   (or `status?app=<id>&stage=<stage>`; stages ready, applied, oa, interviewing, offer, rejected, ghosted, withdrawn, and
   undo for the Mark Applied toast), `bucket?job=<id>[,<id>…]&op=add|remove`, and `interactive?job=<id>` (the only one
   that opens a window: Terminal with `cd ~/Projects/hirescope && claude "/resume-builder <id>"`, for a live session
   where you answer the keyword questions). Job IDs must be numbers of jobs that exist, every option a known value,
   files only directly inside ~/Downloads or `inputs/external_jobs/` (symlinks resolved first); no part of a link is
   ever handed to a shell.
+- **One-time macOS permission (recommended)**: macOS asks once per program before it may open files in your Desktop
+  and Downloads folders that another program wrote, and a background job has no window for that question. HireScope
+  never waits on it (`src/jobsearch/ops/desktop_access.py` checks in a child process with a timeout and skips that
+  folder with a notice), but until you allow it, background runs and builds skip the Desktop copies and the Excel file,
+  and an uploaded JD file can't be read from Downloads. Allow it once: System Settings → Privacy & Security → Files and
+  Folders → **Python** → Desktop Folder and Downloads Folder (and the same for **HireScope Launcher** if listed), or
+  answer the prompts when they appear. Meanwhile `./scripts/sync_desktop_resumes.sh` and
+  `python -m resume_builder refresh` (run in Terminal) bring the Desktop up to date. A pasted JD needs no permission:
+  it travels inside the link (`hirescope://external?data=…`).
 - The launcher is a stay-open applet: links that arrive together (ticking several Bucket boxes quickly) queue up and
   run in order; it quits after two idle minutes. Each link starts nothing visible.
 
