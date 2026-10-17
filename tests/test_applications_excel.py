@@ -166,3 +166,50 @@ def test_disabled_and_unwritable(xconn, monkeypatch, tmp_path):
     finally:
         os.chmod(ro, 0o700)
     assert "macOS did not let" in msg and json.loads(db.get_meta(conn, "excel_applications"))["status"] == "error"
+
+
+def test_unreadable_preferences_fall_back_to_defaults(xconn, monkeypatch):
+    from datetime import date
+    from jobsearch import config
+    conn, a, b = xconn
+
+    def broken(*a, **k):
+        raise ValueError("DEMO preferences.yaml is broken")
+    monkeypatch.setattr(config, "load_preferences", broken)
+    monkeypatch.delenv("JOBSEARCH_EXCEL_PATH")
+    enabled, path = X.settings()
+    assert enabled and path.name == "HireScope Applications.xlsx" and "Generated Resumes" in str(path)
+    launcher.handle(f"hirescope://status?job={a}&stage=applied&app=aA&date=2026-10-15")
+    ws = X.build(conn, today=date(2026, 10, 18))["Applications"]
+    assert ws["M2"].value == "2026-10-22"                                  # the default 7–10 day follow-up window
+
+
+def test_resume_link_falls_back_when_the_desktop_lookup_fails(xconn, monkeypatch, tmp_path):
+    from resume_builder import desktop
+    conn, a, b = xconn
+    pdf = tmp_path / "R.pdf"
+    pdf.write_bytes(b"%PDF-1.4 DEMO")
+    monkeypatch.setattr(desktop, "settings_of", lambda: (_ for _ in ()).throw(OSError("DEMO Desktop blocked")))
+    app = {"job": {"resume": {"job_pk": a, "version": 2, "pdf": str(pdf)}}}
+    assert X.desktop_pdf(conn, app) == pdf.as_uri()                        # the data.nosync PDF instead
+    assert X.desktop_pdf(conn, {"job": {"resume": {"job_pk": a}}}) is None  # no version recorded: no link
+
+
+def test_open_in_excel_asks_lsof(monkeypatch, tmp_path):
+    f = tmp_path / "A.xlsx"
+    assert X.open_in_excel(f) is False                                     # no file yet
+    f.write_bytes(b"DEMO")
+    monkeypatch.delenv("HIRESCOPE_NO_LSOF")
+    seen = []
+
+    def lsof(out):
+        return lambda cmd, **k: seen.append(cmd) or type("R", (), {"stdout": out})()
+    monkeypatch.setattr(X.subprocess, "run", lsof("p123\ncMicrosoft Excel\n"))
+    assert X.open_in_excel(f) is True and seen[0] == ["lsof", "-Fc", "--", str(f)]
+    monkeypatch.setattr(X.subprocess, "run", lsof("p99\ncQuick Look\n"))
+    assert X.open_in_excel(f) is False
+
+    def missing(*a, **k):
+        raise FileNotFoundError("DEMO no lsof")
+    monkeypatch.setattr(X.subprocess, "run", missing)
+    assert X.open_in_excel(f) is False

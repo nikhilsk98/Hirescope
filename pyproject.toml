@@ -14,3 +14,8 @@ where = ["src"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = ["slow: loads the embedding model"]
+
+[tool.coverage.run]
+# Measure this repo's src/ only. tests/test_layout.py runs the migration script on a copy of src/ in a temp folder;
+# measuring by package name ("--cov=jobsearch") counted that copy as a second, mostly unexecuted tree (58% vs ~90%).
+source = ["src"]

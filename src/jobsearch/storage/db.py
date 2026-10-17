@@ -629,7 +629,7 @@ def save_scores(conn: sqlite3.Connection, pk: int, **fields) -> None:
 
 def set_source_status(conn, company: str, source: str, status: str, error: str | None, job_count: int | None,
                       now: str | None = None, **extra) -> None:
-    """status: ok | failed | manual | skipped. extra: origin, tier, url, partial, detected_via."""
+    """status: ok | failed | manual | skipped | unavailable. extra: origin, tier, url, partial, detected_via."""
     now = now or utcnow()
     cols = {"company_key": company_key(company), "company": company, "source": source, "last_checked": now,
             "status": status, "error": error, "job_count": job_count, **extra}

@@ -463,6 +463,63 @@ def apply_locks(content, locks: dict) -> tuple[object, list[str]]:
     return c, notes
 
 
+def untruthful_lock_reasons(text: str, evidence_ids: list[str], bank) -> list[str]:
+    """Why a locked claim may not be used any more, or []: it cites evidence the master marks unusable (Legacy "do not
+    use", unverified / pending / planned, Excluded) or no longer has, states a figure only such evidence gives, or fails
+    the same truth check every build runs."""
+    from .evidence import metrics_in
+    from .verify import TruthReport, check_claim
+    out = []
+    excluded = {x["id"]: x for x in bank.excluded}
+    for i in evidence_ids:
+        if i in excluded:
+            out.append(f"cites {i}, which the master marks {excluded[i].get('status') or 'excluded'}")
+    cited = " ".join(bank.items[i].text for i in evidence_ids if i in bank.items)
+    barred = {m.lstrip("+") for x in bank.excluded for m in metrics_in(x.get("text") or "")}
+    barred |= {m.lstrip("+") for m in (bank.v4 or {}).get("unusable_metrics") or []}
+    for m in metrics_in(text):
+        if m.lstrip("+") in barred and m.lstrip("+") not in {c.lstrip("+") for c in metrics_in(cited)}:
+            where = next((x for x in bank.excluded if m.lstrip("+") in {k.lstrip("+") for k in metrics_in(x.get("text") or "")}), None)
+            out.append(f"{m} is a figure the master marks {(where or {}).get('status') or 'unverified'} (do not use)")
+    rep = TruthReport()
+    check_claim("lock", text, evidence_ids, bank, rep)
+    out += [f.detail for f in rep.findings if f.detail not in out]
+    return list(dict.fromkeys(out))
+
+
+def enforce_truth(job_dir: Path, locks: dict, bank) -> tuple[dict, list[str]]:
+    """Locks never override truthfulness. A locked bullet (alone, or inside a locked entry) or a locked summary whose
+    claim the master no longer supports is dropped from locks.json with a notice (the history keeps its text);
+    everything else stays locked. Returns (locks, notices)."""
+    notices, dropped = [], []
+    for bid, val in list(locks.get("bullets", {}).items()):
+        if why := untruthful_lock_reasons(val.get("text", ""), val.get("evidence_ids") or [], bank):
+            locks["bullets"].pop(bid)
+            dropped.append({"target": bid, "text": val.get("text", ""), "why": why})
+    for eid, ent in list(locks.get("entries", {}).items()):
+        keep = []
+        for b in ent.get("bullets") or []:
+            if why := untruthful_lock_reasons(b.get("text", ""), b.get("evidence_ids") or [], bank):
+                dropped.append({"target": b.get("id") or eid, "text": b.get("text", ""), "why": why})
+            else:
+                keep.append(b)
+        if keep:
+            ent["bullets"] = keep
+        elif ent.get("bullets"):
+            locks["entries"].pop(eid)
+    summ = locks.get("sections", {}).get("summary")
+    if summ and (why := untruthful_lock_reasons(summ.get("text", ""), summ.get("evidence_ids") or [], bank)):
+        locks["sections"].pop("summary")
+        dropped.append({"target": "section:summary", "text": summ.get("text", ""), "why": why})
+    if dropped:
+        save_locks(job_dir, locks)
+        for d in dropped:
+            _history(job_dir, {"at": _now(), "action": "lock dropped (truth)", **d})
+            notices.append(f"locked {d['target']} dropped: the master no longer supports it ({'; '.join(d['why'])}). "
+                           f"Locks never override truthfulness; it was: \"{d['text']}\"")
+    return locks, notices
+
+
 def locked_ids(locks: dict) -> set[str]:
     ids = set(locks.get("bullets", {}))
     for val in locks.get("entries", {}).values():

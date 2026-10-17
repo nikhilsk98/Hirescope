@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import paths
-from .adapters.base import FetchContext, FetchResult, HttpClient, RawJob
+from .adapters.base import FetchContext, FetchResult, HttpClient, RawJob, SourceUnavailable
 from .adapters.detect import Detector
 from .adapters.registry import ADAPTERS, get_adapter
 from .config import Company, Config
@@ -58,7 +58,7 @@ class SourceOutcome:
     company: str
     source: str
     ok: bool
-    status: str = "failed"          # ok | failed | manual | skipped
+    status: str = "failed"          # ok | failed | manual | skipped | unavailable (provider maintenance page)
     origin: str = "seed"            # seed | my_companies | feed
     tier: int | None = None
     jobs: int = 0
@@ -90,17 +90,20 @@ class RunSummary:
         ok = [o for o in self.outcomes if o.ok]
         failed = [o for o in self.outcomes if o.status == "failed"]
         manual = [o for o in self.outcomes if o.status == "manual"]
+        unavailable = [o for o in self.outcomes if o.status == "unavailable"]
         partial = [o for o in ok if o.partial]
         return {
             "sources_checked": len(self.outcomes),
             "sources_ok": len(ok),
             "sources_failed": len(failed),
             "sources_manual": len(manual),
+            "sources_unavailable": len(unavailable),
             "sources_partial": len(partial),
             "sources_skipped": len(self.skipped),
             "failures": [{"company": o.company, "source": o.source, "error": o.error, "origin": o.origin,
                           "transient": o.transient, "repeated": o.repeated} for o in failed],
             "manual": [{"company": o.company, "url": o.url, "error": o.error} for o in manual],
+            "unavailable": [{"company": o.company, "source": o.source, "error": o.error} for o in unavailable],
             "partial": [{"company": o.company, "source": o.source, "why": o.partial} for o in partial],
             "jobs_found": sum(o.jobs for o in ok),
             "new": sum(o.new for o in ok),
@@ -332,6 +335,19 @@ class Fetched:
     label: str | None = None
     official: bool = True
     multi: bool = False
+    refused: str | None = None      # SourceUnavailable.kind: maintenance | blocked | paused
+
+
+UNAVAILABLE_GRACE = timedelta(hours=48)   # a source down this long without an OK check counts as failed again
+
+
+def _refusal(e: BaseException | None) -> str | None:
+    """The SourceUnavailable kind in an exception chain (adapters may wrap it)."""
+    while e is not None:
+        if isinstance(e, SourceUnavailable):
+            return e.kind
+        e = e.__cause__
+    return None
 
 
 def _context(conn, cfg: Config, company: Company, label: str, multi: bool, tier: int, pages_cache: dict,
@@ -428,7 +444,7 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
                                        a2.capabilities.multi_company)
                     except Exception as e2:  # noqa: BLE001
                         e = e2
-            return Fetched(p, company, via, None, f"{type(e).__name__}: {e}", label, True, multi)
+            return Fetched(p, company, via, None, f"{type(e).__name__}: {e}", label, True, multi, _refusal(e))
 
     contexts: dict[tuple[str, str], FetchContext] = {}
     validators = {r[0]: {"etag": r[1], "last_modified": r[2]}
@@ -524,10 +540,20 @@ def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
     extra = {"origin": origin, "tier": tier, "url": out.url, "detected_via": f.detected_via}
     if f.result is None:
         out.error = f.error
-        prev = conn.execute("SELECT status FROM source_status WHERE company_key=? AND source=?",
+        prev = conn.execute("SELECT status, last_ok FROM source_status WHERE company_key=? AND source=?",
                             (db.company_key(name), label)).fetchone()
-        out.repeated = bool(prev and prev["status"] == "failed")        # also failed on its previous check
-        out.transient = bool(re.search(r"non-JSON response|JSONDecodeError", out.error or ""))
+        if f.refused == "maintenance":
+            since = prev and prev["last_ok"]
+            if not since or datetime.fromisoformat(since) > datetime.now(timezone.utc) - UNAVAILABLE_GRACE:
+                # the provider's own outage page: listings kept, retried next run, not a failure of this source
+                out.status = "unavailable"
+                log.warning("source unavailable: %s/%s: %s", label, name, out.error)
+                db.set_source_status(conn, name, label, "unavailable", out.error, None, **extra)
+                return out
+            out.error = f"{out.error} (no successful check since {since[:10]})"
+        out.repeated = bool(prev and prev["status"] in ("failed", "unavailable"))   # also failed on its previous check
+        out.transient = f.refused in (None, "paused") and bool(re.search(r"non-JSON response|JSONDecodeError|"
+                                                                          r"paused for the rest", out.error or ""))
         (log.warning if out.transient and not out.repeated else log.error)(
             "source failed: %s/%s: %s%s", label, name, out.error,
             " (one-off non-JSON response; fails the run only if it repeats)" if out.transient and not out.repeated else "")

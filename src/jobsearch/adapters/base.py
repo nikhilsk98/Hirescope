@@ -54,6 +54,18 @@ class NonJSONResponse(ValueError):
     """A JSON API answered 200 with a body that isn't JSON, even after retries (usually a one-off)."""
 
 
+class SourceUnavailable(SourceError):
+    """The provider is down for everyone, or refuses us, so retrying now is pointless. `kind`:
+    "maintenance" - redirected to the provider's maintenance / outage page (Workday sends every tenant of a data
+                    center to community.workday.com/maintenance-page during an interruption);
+    "blocked"     - a bot challenge (Cloudflare "cf-mitigated: challenge"); never bypassed, reported as blocked;
+    "paused"      - a host group already failed this way, or repeatedly with non-JSON bodies, earlier this run."""
+
+    def __init__(self, kind: str, message: str):
+        super().__init__(message)
+        self.kind = kind
+
+
 @dataclass(frozen=True)
 class Capabilities:
     full_description: bool        # list endpoint returns full JD text
@@ -212,10 +224,23 @@ def safe_url(text: str) -> str:
     return _SECRET_PARAM.sub(r"\1***", text)
 
 
+_MAINTENANCE_URL = re.compile(r"maintenance|service-?unavailable|outage", re.I)
+
+
+def pause_key(host: str) -> str:
+    """Hosts that fail together: a Workday data center (acme.wd5.myworkdayjobs.com -> wd5.myworkdayjobs.com) serves
+    all its tenants and goes into maintenance as one; any other host stands alone."""
+    parts = host.lower().split(".")
+    return ".".join(parts[-3:]) if host.lower().endswith("myworkdayjobs.com") and len(parts) > 3 else host.lower()
+
+
 class HttpClient:
-    """httpx wrapper: timeouts, exponential backoff with jitter, per-host spacing (thread-safe), robots.txt."""
+    """httpx wrapper: timeouts, exponential backoff with jitter, per-host spacing (thread-safe), robots.txt, and a
+    per-run pause for host groups that are down (maintenance page), blocking us (bot challenge) or keep answering
+    with non-JSON bodies."""
 
     RETRY_STATUS = {429, 500, 502, 503, 504, 520, 521, 522, 523, 524}   # 52x: Cloudflare-fronted origins (Workday)
+    PAUSE_AFTER_NON_JSON = 3     # this many requests in a row to one host group end non-JSON -> pause it for the run
 
     def __init__(self, timeout: float = 30.0, retries: int = 3, min_interval: float = 1.0,
                  transport: httpx.BaseTransport | None = None, host_intervals: dict[str, float] | None = None):
@@ -225,6 +250,8 @@ class HttpClient:
         self._next: dict[str, float] = {}
         self._lock = threading.Lock()
         self._robots: dict[str, Robots | None] = {}
+        self._paused: dict[str, tuple[str, str]] = {}    # pause key -> (kind, why)
+        self._non_json: dict[str, int] = {}              # pause key -> consecutive non-JSON failures
         self.client = httpx.Client(
             timeout=httpx.Timeout(timeout, connect=10.0),
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
@@ -247,10 +274,44 @@ class HttpClient:
         if slot > now:
             time.sleep(slot - now)
 
+    def paused(self) -> dict[str, tuple[str, str]]:
+        """Host groups paused this run: pause key -> (kind, why)."""
+        with self._lock:
+            return dict(self._paused)
+
+    def _pause(self, key: str, kind: str, why: str) -> None:
+        with self._lock:
+            if key not in self._paused:
+                self._paused[key] = (kind, why)
+                log.warning("pausing %s for the rest of this run: %s", key, why)
+
+    def _check_paused(self, host: str) -> None:
+        key = pause_key(host)
+        with self._lock:
+            hit = self._paused.get(key)
+        if hit:
+            kind = hit[0] if hit[0] in ("maintenance", "blocked") else "paused"
+            raise SourceUnavailable(kind, f"{key} paused for the rest of this run: {hit[1]}")
+
+    def _refused(self, host: str, resp: httpx.Response) -> SourceUnavailable | None:
+        """A maintenance redirect or a bot challenge: the host group is paused and the request is not retried."""
+        key = pause_key(host)
+        final = resp.url
+        if resp.history and final.host != host and _MAINTENANCE_URL.search(str(final.path)):
+            why = f"{final.host}{final.path} (the provider's maintenance / outage page, HTTP {resp.history[0].status_code} redirect)"
+            self._pause(key, "maintenance", why)
+            return SourceUnavailable("maintenance", f"service unavailable: redirected to {why}")
+        if resp.headers.get("cf-mitigated", "").lower() == "challenge":
+            why = f"bot challenge (HTTP {resp.status_code}, cf-mitigated: challenge); not bypassed"
+            self._pause(key, "blocked", why)
+            return SourceUnavailable("blocked", f"blocked by {why}")
+        return None
+
     def request(self, method: str, url: str, **kw) -> httpx.Response:
         host = httpx.URL(url).host
         err: Exception | None = None
         for attempt in range(self.retries + 1):
+            self._check_paused(host)
             self._wait_for_host(host)
             try:
                 resp = self.client.request(method, url, **kw)
@@ -259,6 +320,8 @@ class HttpClient:
             else:
                 if resp.status_code == 304:
                     raise NotModified(url)
+                if refused := self._refused(host, resp):
+                    raise refused
                 if resp.status_code not in self.RETRY_STATUS:
                     resp.raise_for_status()
                     return resp
@@ -284,19 +347,30 @@ class HttpClient:
 
     def _json(self, method: str, url: str, **kw):
         """A JSON API call. A 200 whose body isn't JSON (an HTML error or bot-check page an API sometimes returns,
-        e.g. Workday's "Expecting value: line 1 column 1") is retried with backoff like a 5xx."""
+        e.g. Workday's "Expecting value: line 1 column 1") is retried with backoff like a 5xx. After
+        PAUSE_AFTER_NON_JSON such calls in a row to one host group fail, the group is paused for the run."""
+        key = pause_key(httpx.URL(url).host)
         for attempt in range(self.retries + 1):
             resp = self.request(method, url, **kw)
             try:
-                return resp.json()
+                data = resp.json()
             except ValueError as e:
                 if attempt >= self.retries:
+                    with self._lock:
+                        self._non_json[key] = n = self._non_json.get(key, 0) + 1
+                    if n >= self.PAUSE_AFTER_NON_JSON:
+                        self._pause(key, "non-json", f"{n} requests in a row answered with non-JSON bodies "
+                                                     f"(last: HTTP {resp.status_code}, {resp.headers.get('content-type')})")
                     raise NonJSONResponse(f"{method} {safe_url(url)}: non-JSON response after {attempt + 1} "
                                           f"tries ({type(e).__name__}: {str(e)[:80]})") from e
                 backoff = (2 ** attempt) + random.uniform(0, 0.5)
-                log.warning("%s %s returned a non-JSON body; retry %d in %.1fs", method, safe_url(url), attempt + 1,
-                            backoff)
+                log.warning("%s %s returned a non-JSON body (HTTP %s, %s); retry %d in %.1fs", method, safe_url(url),
+                            resp.status_code, resp.headers.get("content-type"), attempt + 1, backoff)
                 time.sleep(backoff)
+            else:
+                with self._lock:
+                    self._non_json.pop(key, None)
+                return data
 
     def get_conditional(self, url: str, validators: dict | None, **kw) -> httpx.Response:
         """GET with If-None-Match / If-Modified-Since. Raises NotModified on 304."""

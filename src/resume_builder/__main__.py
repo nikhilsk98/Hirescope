@@ -231,6 +231,8 @@ def cmd_prepare(args) -> int:
     a = out["analysis"]
     # reused: back to the current version's status (it may have been "queued" by a batch)
     _bridge(a["job"]["pk"], out["reused"]["status"] if out.get("reused") else "generating")
+    for w in a.get("lock_dropped") or []:
+        print(f"NOTICE: {w}")
     if out.get("reused"):
         r = out["reused"]
         print(f"REUSED: v{r['version']} ({r['status']}) was built from the same job, inputs, settings and locks; "

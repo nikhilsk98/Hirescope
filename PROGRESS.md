@@ -1223,15 +1223,39 @@ history, never the current file.
   resumes.js, sync.js and the Excel file (back to your 7 applications). Kept: the 3 regenerated resumes (real), logs,
   screenshots (data.nosync/screenshots/e2e, ui-review), the long-bullet memory.
 
+## Follow-ups (2026-10-17): Workday outages, locks vs. truth, coverage
+- **Workday "non-JSON response after 4 tries" (67 sources in run 99, 03:51 Saturday)**: not a changed API, not rate
+  limiting, not a bot check. A saved raw response: HTTP 303 → `community.workday.com/maintenance-page`, 200 text/html,
+  "Workday is currently unavailable … service interruption" (Apache, not Cloudflare). Run 99 hit every data center
+  (wd1, wd5, wd12, wd108, wd501–504) in the same second; wd504 (Symbotic, Quickbase) was still on that page at noon
+  while NVIDIA / FNB answered JSON to the same request. Fix (`adapters/base.py`, `pipeline.py`): the maintenance
+  redirect is recognised on the first request (no retries) and pauses that data center for the rest of the run; such
+  sources get the new status **unavailable** ("Provider down" on Coverage; listings kept, not a failure, the run exits
+  0) and count as failed again after 48 h without an OK check. A Cloudflare bot challenge (`cf-mitigated: challenge`)
+  is never bypassed: reported as "blocked by bot challenge", the host group paused. 3 non-JSON failures in a row on
+  one host group also pause it. Per-host pacing was not changed (no 429s or challenges seen; the 0.5 s per-tenant
+  spacing stays). Tested: Symbotic → unavailable after one request; FNB, NVIDIA OK; then a full run (`--all`): 414 of
+  467 sources OK, 0 failed, **all 164 Workday sources OK**.
+- **Locks never override truthfulness** (`versions.enforce_truth`, run by prepare and build): a locked bullet (alone
+  or in a locked entry) or a locked summary that cites evidence the master marks Legacy / unverified / pending /
+  planned / Excluded or no longer has, states a figure only such evidence gives, or fails the truth check is dropped
+  from locks.json with a notice (prepare output, brief, build log; history.jsonl keeps the text). Unlocked
+  exp-accenture:cbbee0 (Centric 46867) and exp-accenture:006984 (DoorDash 16070) and regenerated both through the
+  queue: Centric v5 and DoorDash v3 are READY, 1 page, 2 projects, truth 0 unsupported, no 70% / 20+.
+- **Coverage 92% → 58% was a measurement change, not lost tests**: `--cov=jobsearch` measures by package name, and
+  `tests/test_layout.py` runs the migration script on a copy of src/ in a temp folder, so the copy (85 files, 8,836
+  statements, almost all unexecuted) was counted too. The real tree was 89.6%. `pyproject.toml` now sets
+  `[tool.coverage.run] source = ["src"]` (use plain `--cov`). New tests for the queue worker, launcher, installer,
+  Excel sync, Bucket and hooks: queue 74 → 100%, launcher 92 → 99%, installer 81 → 99%, Excel 94 → 100%, Bucket
+  94 → 100%, hooks 84 → 100%. Suite: 880 passed, line coverage 92%.
+
 ## Needs Nikhil (this work)
 1. **macOS folder access for background jobs** (recommended): System Settings → Privacy & Security → Files and Folders →
    allow **Python** and **HireScope Launcher** the Desktop and Downloads folders (or answer the prompts when shown).
    Until then background builds/runs skip Desktop copies they can't replace and uploaded JD files; run
    `./scripts/sync_desktop_resumes.sh` / `python -m resume_builder refresh` in Terminal to catch up. Pasted JDs need
    nothing.
-2. **Centric Software (46867) and DoorDash (16070)**: unlock the pre-v4 Accenture bullets
-   (`python -m resume_builder unlock 46867 exp-accenture:cbbee0`, `… unlock 16070 exp-accenture:006984`), then
-   Regenerate; they still show 1 project.
+2. ~~Centric Software (46867) and DoorDash (16070) unlock~~ — done 2026-10-17 (see Follow-ups above).
 3. **UI changes waiting for your OK** (section 7): hide the sidebar on the Bucket / Resume Builder pages; replace the
    "Add job by URL" Terminal command; remove the "External Jobs" view; fold Shortlist into the Bucket.
 4. First click on a link in Chrome: tick "Always allow" for HireScope Launcher.

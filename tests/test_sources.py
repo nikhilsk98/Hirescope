@@ -928,3 +928,96 @@ def test_one_off_non_json_failure_does_not_fail_a_quick_check_but_a_repeat_does(
     assert exit_code({**s2, "scope": "full"}) == 1
     for scope in ("quick", "full"):                                                                    # other errors
         assert exit_code({"scope": scope, "failures": [{"transient": False, "repeated": False}]}) == 1
+
+
+# --- Workday maintenance page, bot challenges, per-run pauses ---------------------------------------------------------
+MAINT = "https://community.workday.com/maintenance-page"
+
+
+def _maintenance(request):
+    """What a Workday data center answers during a service interruption: 303 to the outage page (HTML)."""
+    if request.url.host == "community.workday.com":
+        return httpx.Response(200, text="<title>Workday is currently unavailable.</title>",
+                              headers={"content-type": "text/html; charset=UTF-8"})
+    return httpx.Response(303, headers={"location": MAINT})
+
+
+def test_workday_maintenance_redirect_pauses_the_data_center_without_retries():
+    from jobsearch.adapters.base import SourceUnavailable, pause_key
+    calls = []
+    c = mock_client(lambda r: calls.append(r.url.host) or _maintenance(r))
+    with pytest.raises(SourceUnavailable, match="maintenance") as e:
+        c.post_json("https://democo.wd5.myworkdayjobs.com/wday/cxs/democo/Site/jobs", {})
+    assert e.value.kind == "maintenance" and len(calls) == 2          # one request + its redirect, no retries
+    with pytest.raises(SourceUnavailable) as e2:                       # another tenant of wd5: no request at all
+        c.post_json("https://otherco.wd5.myworkdayjobs.com/wday/cxs/otherco/Site/jobs", {})
+    assert e2.value.kind == "maintenance" and len(calls) == 2
+    assert set(c.paused()) == {"wd5.myworkdayjobs.com"}
+    assert pause_key("acme.wd1.myworkdayjobs.com") == "wd1.myworkdayjobs.com" and pause_key("api.demo.io") == "api.demo.io"
+
+
+def test_bot_challenge_is_reported_as_blocked_and_never_retried():
+    from jobsearch.adapters.base import SourceUnavailable
+    calls = []
+
+    def challenge(request):
+        calls.append(1)
+        return httpx.Response(403, text="<title>Just a moment...</title>", headers={"cf-mitigated": "challenge"})
+    c = mock_client(challenge)
+    with pytest.raises(SourceUnavailable, match="blocked by bot challenge.*not bypassed") as e:
+        c.get_json("https://democo.wd1.myworkdayjobs.com/wday/cxs/democo/Site/jobs")
+    assert e.value.kind == "blocked" and len(calls) == 1
+    with pytest.raises(SourceUnavailable) as e2:
+        c.get_json("https://otherco.wd1.myworkdayjobs.com/wday/cxs/otherco/Site/jobs")
+    assert e2.value.kind == "blocked" and len(calls) == 1
+
+
+def test_repeated_non_json_pauses_a_host_group_and_success_resets_the_count(monkeypatch):
+    from jobsearch.adapters import base
+    monkeypatch.setattr(base.time, "sleep", lambda s: None)
+    state = {"json": False}
+    c = mock_client(lambda r: httpx.Response(200, json={"ok": 1}) if state["json"] else httpx.Response(200, text="<html>"))
+    url = "https://t{}.wd3.myworkdayjobs.com/wday/cxs/t/S/jobs"
+    for i in range(2):
+        with pytest.raises(base.NonJSONResponse):
+            c.post_json(url.format(i), {})
+    state["json"] = True
+    assert c.post_json(url.format(9), {}) == {"ok": 1}                # a success resets the streak
+    state["json"] = False
+    for i in range(base.HttpClient.PAUSE_AFTER_NON_JSON):
+        with pytest.raises(base.NonJSONResponse):
+            c.post_json(url.format(i), {})
+    with pytest.raises(base.SourceUnavailable) as e:
+        c.post_json(url.format(5), {})
+    assert e.value.kind == "paused" and "wd3.myworkdayjobs.com" in c.paused()
+
+
+def test_workday_maintenance_marks_sources_unavailable_keeps_jobs_and_does_not_fail_the_run(
+        conn, cfg, resume, embedder, tmp_path):
+    from jobsearch.run import exit_code
+    from jobsearch.ops.alerts import summary_text
+    cos = [Company(name=f"Demo{i}", source="workday", host=f"demo{i}.wd5.myworkdayjobs.com", board=f"demo{i}",
+                   site="Ext") for i in range(3)]
+    cfg2 = cfg.model_copy(update={"companies": cos})
+    s = run(conn, cfg2, resume, None, mock_client(_maintenance), embedder, tmp_path, workers=1).as_dict()
+    assert s["sources_unavailable"] == 3 and s["sources_failed"] == 0 and s["failures"] == []
+    assert exit_code(s) == 0
+    rows = {r["company"]: r for r in db.source_statuses(conn)}
+    assert {r["status"] for r in rows.values()} == {"unavailable"}
+    assert "maintenance" in rows["Demo0"]["error"]
+    assert "3 unavailable (provider maintenance)" in summary_text(s) and "Demo0 (workday)" in summary_text(s)
+    # down for more than two days without an OK check: a real failure again
+    old = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat(timespec="seconds")
+    conn.execute("UPDATE source_status SET last_ok=?", (old,))
+    s2 = run(conn, cfg2, resume, None, mock_client(_maintenance), embedder, tmp_path, workers=1, force_all=True).as_dict()
+    assert s2["sources_failed"] == 3 and "no successful check since" in s2["failures"][0]["error"]
+    assert exit_code(s2) == 1
+
+
+def test_workday_blocked_source_is_a_failure_with_a_clear_reason(conn, cfg, resume, embedder, tmp_path):
+    co = Company(name="DemoBlocked", source="workday", host="demob.wd1.myworkdayjobs.com", board="demob", site="Ext")
+    cfg2 = cfg.model_copy(update={"companies": [co]})
+    c = mock_client(lambda r: httpx.Response(403, text="challenge", headers={"cf-mitigated": "challenge"}))
+    s = run(conn, cfg2, resume, None, c, embedder, tmp_path, workers=1).as_dict()
+    f = s["failures"][0]
+    assert "blocked by bot challenge" in f["error"] and f["transient"] is False

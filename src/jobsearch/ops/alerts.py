@@ -94,7 +94,9 @@ def summary_text(s: dict) -> str:
     """Human-readable run summary (also written to data.nosync/logs/last_run_summary.txt)."""
     lines = [f"HireScope run ({s.get('scope', 'full')}) finished {datetime.now().astimezone():%Y-%m-%d %H:%M}",
              f"  coverage: {s.get('sources_ok', 0)} of {s.get('sources_checked', 0)} sources OK · "
-             f"{s.get('sources_failed', 0)} failed · {s.get('sources_manual', 0)} manual · "
+             f"{s.get('sources_failed', 0)} failed · "
+             + (f"{s['sources_unavailable']} unavailable (provider maintenance) · " if s.get("sources_unavailable") else "")
+             + f"{s.get('sources_manual', 0)} manual · "
              f"{s.get('sources_partial', 0)} partial · {s.get('sources_skipped', 0)} not due/off",
              f"  jobs: {s.get('jobs_found', 0):,} listed · {s.get('new', 0)} new · {s.get('updated', 0)} updated · "
              f"{s.get('closed', 0)} closed · {s.get('scored', 0):,} visible · {s.get('strong', 0):,} Strong"]
@@ -117,6 +119,9 @@ def summary_text(s: dict) -> str:
         one_off = f.get("transient") and not f.get("repeated")
         lines.append(f"  failed: {f['company']} ({f['source']})" + (" — one-off non-JSON response (warning; fails the "
                                                                      "run only if it repeats)" if one_off else ""))
+    if u := s.get("unavailable"):
+        lines.append(f"  unavailable (provider maintenance page; listings kept, retried next run): "
+                     + ", ".join(f"{x['company']} ({x['source']})" for x in u[:10]) + (" …" if len(u) > 10 else ""))
     if s.get("backup"):
         lines.append(f"  backup: {s['backup']}")
     if s.get("digest"):

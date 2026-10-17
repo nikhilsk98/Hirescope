@@ -20,7 +20,7 @@ import httpx
 
 from ..config import Company
 from ..extract.text import html_to_text
-from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, SourceError
+from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, SourceError, SourceUnavailable
 from .util import join_locations, parse_dt
 
 PAGE = 20
@@ -115,6 +115,8 @@ class WorkdayAdapter(Adapter):
         now = datetime.now(timezone.utc)
         try:
             first = self.http.post_json(url, {"appliedFacets": {}, "limit": 1, "offset": 0, "searchText": ""})
+        except SourceUnavailable as e:
+            raise SourceUnavailable(e.kind, f"{company.name}: {e}") from e
         except Exception as e:  # noqa: BLE001
             raise SourceError(f"{company.name}: {url}: {e}") from e
         facet = _find_us_facet(first.get("facets") or [])

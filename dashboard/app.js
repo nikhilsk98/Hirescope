@@ -316,11 +316,11 @@
     const s = META.summary || {};
     if (META.last_run) {
       // red only for real failures; manual checks and partial listings are amber
-      $("#run-dot").className = "dot " + (s.sources_failed ? "red" : s.sources_partial || s.sources_manual ? "amber" : "green");
+      $("#run-dot").className = "dot " + (s.sources_failed ? "red" : s.sources_partial || s.sources_manual || s.sources_unavailable ? "amber" : "green");
       $("#run-text").textContent = `Last run ${fmtTime(META.last_run)} · ${s.sources_ok ?? 0}/${s.sources_checked ?? 0} OK · ` +
         `${(s.new || 0).toLocaleString()} new · ${(s.updated || 0).toLocaleString()} updated · ${(s.closed || 0).toLocaleString()} closed`;
       $("#run-dot").parentElement.title = `${s.sources_ok} of ${s.sources_checked} companies/sources checked successfully this run; ` +
-        `${s.sources_failed || 0} failed, ${s.sources_manual || 0} manual, ${s.sources_partial || 0} partial, ${s.sources_skipped || 0} not due. ` +
+        `${s.sources_failed || 0} failed, ${s.sources_unavailable ? `${s.sources_unavailable} unavailable (provider maintenance), ` : ""}${s.sources_manual || 0} manual, ${s.sources_partial || 0} partial, ${s.sources_skipped || 0} not due. ` +
         `Jobs found ${s.jobs_found}, new ${s.new}, updated ${s.updated}, closed ${s.closed}.`;
     }
     const log = $("#log-link");
@@ -840,12 +840,12 @@
   }
   function renderCoverage(box) {
     const rows = META.coverage || [];
-    const c = { ok: 0, failed: 0, manual: 0, skipped: 0 }; for (const r of rows) c[r.status] = (c[r.status] || 0) + 1;
+    const c = { ok: 0, failed: 0, unavailable: 0, manual: 0, skipped: 0 }; for (const r of rows) c[r.status] = (c[r.status] || 0) + 1;
     const s = META.summary || {};
     box.append(el("p", { style: "margin-top:0" }, el("b", { text: `${s.sources_ok ?? c.ok} of ${s.sources_checked ?? rows.length} companies/sources checked successfully in the last run.` }),
-      ` ${c.failed} failed · ${c.manual} manual check · ${c.skipped} not due (checked on their tier schedule).`));
-    const order = { failed: 0, manual: 1, ok: 2, skipped: 3 };
-    const label = { ok: ["OK", "good"], failed: ["Failed", "flag"], manual: ["Manual check", "warn"], skipped: ["Not due", ""] };
+      ` ${c.failed} failed · ${c.unavailable ? `${c.unavailable} unavailable (the provider showed its maintenance page; listings kept, retried next run) · ` : ""}${c.manual} manual check · ${c.skipped} not due (checked on their tier schedule).`));
+    const order = { failed: 0, unavailable: 1, manual: 2, ok: 3, skipped: 4 };
+    const label = { ok: ["OK", "good"], failed: ["Failed", "flag"], unavailable: ["Provider down", "warn"], manual: ["Manual check", "warn"], skipped: ["Not due", ""] };
     const tb = el("tbody");
     for (const r of [...rows].sort((a, b) => order[a.status] - order[b.status] || a.company.localeCompare(b.company))) {
       const [lt, lc] = r.status === "skipped" && r.error ? ["Not set up / off", "warn"] : label[r.status] || [r.status, ""];

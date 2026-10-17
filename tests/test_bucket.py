@@ -150,3 +150,11 @@ def test_load_export_accepts_format_6(tmp_path):
     f.write_text(json.dumps({"format": 7, "statuses": {}}))
     with pytest.raises(ValueError, match="unknown export format"):
         statuses.load_export(f)
+
+
+def test_merge_rejects_a_bucket_that_is_not_an_object_and_touch_records_the_time(bconn):
+    assert bucket.merge(bconn, ["not", "an", "object"], "2026-10-17T12:00:00Z", lambda *a: a[0]) == \
+        (0, ["bucket: not an object"])
+    assert bucket.jobs_in(bconn) == []
+    at = bucket.touch(bconn)
+    assert db.get_meta(bconn, "bucket_at") <= at and at.endswith("+00:00")
