@@ -590,6 +590,50 @@ def _prepare_work(job, pkg, analysis, bank, settings, hashes, jd_dir, work, lock
             "bank_warnings": bank.warnings, "state": state, "carried": carried, "locks": locks}
 
 
+LONG_BULLETS = "long_bullets.json"
+
+
+def _norm_text(t: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", unicodedata.normalize("NFKC", t or "").casefold()).strip()
+
+
+def remember_long_bullets(c: Content, rep, job_pk: int) -> None:
+    """A bullet that rendered past 2 lines (rule 43) is remembered by its evidence id, so every later brief asks the
+    drafter to shorten it before the first build (the build's repair can trim, never reword; a queue build is a fresh
+    session that can't remember an earlier one). Found 2026-10-17: VibeSpace b3 at master length wraps to 3 lines."""
+    if not getattr(rep, "long_bullets", None):
+        return
+    store_p = rc.resumes_dir() / "_cache" / LONG_BULLETS
+    try:
+        store = json.loads(store_p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        store = {}
+    changed = False
+    for entry in rep.long_bullets:
+        m = re.match(r"(\d+) lines: (.*)", entry)
+        if not m:
+            continue
+        head = _norm_text(m.group(2))[:40]
+        for _sec, _e, b in c.all_bullets():
+            if head and _norm_text(b.text).startswith(head) and b.evidence_ids:
+                store[b.evidence_ids[0]] = {"text": b.text, "words": len(b.text.split()), "lines": int(m.group(1)),
+                                            "job": int(job_pk), "at": utcnow()[:10]}
+                changed = True
+                break
+    if changed:
+        store_p.parent.mkdir(parents=True, exist_ok=True)
+        store_p.write_text(json.dumps(store, indent=1, ensure_ascii=False), encoding="utf-8")
+
+
+def long_bullet_notes(ids: set[str]) -> list[str]:
+    try:
+        store = json.loads((rc.resumes_dir() / "_cache" / LONG_BULLETS).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [f"- {eid}: ran to {x['lines']} lines at {x['words']} words (job {x['job']}, {x['at']}): \"{x['text']}\""
+            for eid, x in sorted(store.items()) if eid in ids]
+
+
 def brief(analysis: dict, bank: Bank, settings: Settings, locks: dict | None = None, carried: dict | None = None) -> str:
     j = analysis["job"]
     L = [f"# Brief: {j['company']} — {j['title']} (HireScope job {j['pk']})", "",
@@ -605,6 +649,11 @@ def brief(analysis: dict, bank: Bank, settings: Settings, locks: dict | None = N
     if bank.metric_flags:
         L += ["## ⚠ Metrics to check (rule 3: flagged, never changed; tell Nikhil, don't fix them yourself)",
               *[f"- {f['detail']}" for f in bank.metric_flags], ""]
+    long = long_bullet_notes(set(bank.items))
+    if long:
+        L += ["## ⚠ Bullets that ran past 2 lines in an earlier build (rule 43): if you use one, shorten it before you "
+              "build — at least 3–4 words shorter, every fact and number kept (the build can trim but never reword)",
+              *long, ""]
     kp = analysis.get("keyword_plan") or {}
     if kp.get("questions"):
         L += ["## ❓ Ask Nikhil before using these JD keywords (rule 61 / 63) — never add them unconfirmed",
@@ -807,6 +856,7 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
             state.update(attempts=used, status="failed")
             (jd / WORK / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
             raise
+        remember_long_bullets(c, rep, job["id"])
         attempts.append({"attempt": used, "ok": rep.ok, "pages": rep.pages,
                          "errors": [f"{x.name}: {x.detail}" for x in rep.errors()]})
         if rep.ok or not res.ok:

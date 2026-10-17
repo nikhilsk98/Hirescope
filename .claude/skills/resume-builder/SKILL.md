@@ -125,9 +125,11 @@ The dashboard's Generate Resume / Bucket / Resume Builder tab queue builds; the 
   pipes or other programs: queue mode allows only those). Use the Read / Write / Edit tools for `_work/` files.
 - Steps 1 → 5 as usual (prepare, draft, review, truth pass, build). Skip step 6 (interview). If prepare prints
   **REUSED**, stop: that version stands.
-- Before building, keep the draft at the baseline's bullet count and keep required bullets (the master's notes) at
-  their master length: the build's automatic repair can trim and drop optional content, but it can't reword, so a
-  required bullet that runs to 3 lines fails the build. A build that fails after its 3 attempts stays failed (the
+- Before building, keep the draft at the baseline's bullet count, and shorten every bullet the brief lists under
+  "Bullets that ran past 2 lines" (at least 3–4 words, every fact and number kept) — including required ones such as
+  VibeSpace's MLOps bullet, which wraps to 3 lines at master length. Don't lengthen bullets during review (a sector
+  label or a longer verb pushes a 2-line bullet to 3). The build's automatic repair can trim and drop optional content,
+  but it can't reword, so a bullet that runs to 3 lines fails the build. A build that fails after its 3 attempts stays failed (the
   worker retries the whole generation once, telling that run what failed — fix exactly that in the new draft), then
   it's marked Failed with the reason; don't loop beyond that.
 - End with a short plain-text report (status, version, PDF path, open questions). The worker saves nothing extra:

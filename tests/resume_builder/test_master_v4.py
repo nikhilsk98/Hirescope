@@ -2,6 +2,7 @@
 import shutil
 import subprocess
 import unicodedata
+from pathlib import Path
 
 import pytest
 
@@ -732,3 +733,17 @@ def test_skills_row_capped_at_the_schema_limit():
     v4build.cap_rows(rows, {"Backend & Testing": 11, "Cloud": 1}, lambda x: x.upper(), removed)
     assert len(rows[0][1]) == 12 and rows[0][1][-2:] == ["jd1", "jd2"] and "d10" not in rows[0][1]
     assert rows[1][1] == ["c1"] and "left out D10" in removed[0]
+
+
+def test_long_bullets_are_remembered_and_listed_in_the_next_brief(v4env):
+    """Queue builds are fresh sessions: a bullet that wrapped to 3 lines once is listed in every later brief."""
+    from types import SimpleNamespace
+    s = load_settings()
+    a = _job(v4env, "Requirements\n- Python and AWS", title="Cloud Engineer Intern", job_id="v4-long")
+    c = pipeline.assign_ids(v4build.baseline(a, build_bank(), s))
+    _sec, _e, b = next(iter(c.all_bullets()))
+    pipeline.remember_long_bullets(c, SimpleNamespace(long_bullets=[f"3 lines: {b.text[:60]}"]), a["job"]["pk"])
+    notes = pipeline.long_bullet_notes({b.evidence_ids[0]})
+    assert notes and "ran to 3 lines" in notes[0] and b.evidence_ids[0] in notes[0]
+    out = pipeline.prepare(str(a["job"]["pk"]))
+    assert "Bullets that ran past 2 lines" in (Path(out["work"]) / "brief.md").read_text()
