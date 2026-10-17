@@ -115,7 +115,8 @@ def expected_order(c: Content, settings: Settings | None, analysis: dict | None)
     return settings.order_for(analysis.get("track"), analysis.get("seniority"), yoe)
 
 
-def structure_problems(c: Content, bank: Bank, settings: Settings | None = None, analysis: dict | None = None) -> list[str]:
+def structure_problems(c: Content, bank: Bank, settings: Settings | None = None, analysis: dict | None = None,
+                       after_repair: bool = False) -> list[str]:
     out = []
     E, I = bank.entries, bank.items
     for sec, entries, prefix in (("experience", c.experience, "exp-"), ("projects", c.projects, "proj-")):
@@ -174,7 +175,7 @@ def structure_problems(c: Content, bank: Bank, settings: Settings | None = None,
         out += [f"summary cites {_unknown(ev, bank)}" for ev in c.summary.evidence_ids if ev not in I]
     if bank.v4:                                   # master v4 + rules v4.1 (rules_v4.py)
         from . import rules_v4
-        return out + rules_v4.problems(c, bank, settings, analysis)
+        return out + rules_v4.problems(c, bank, settings, analysis, after_repair)
     want = expected_order(c, settings, analysis)
     if want:
         got = [x for x in c.section_order if x != "summary"]
@@ -192,21 +193,8 @@ def structure_problems(c: Content, bank: Bank, settings: Settings | None = None,
         total = sum(len(ex.bullets) for ex in c.experience)
         if total > int(budget["total"]["max"]):
             out.append(f"experience: {total} bullets (rule 22: {budget['total']['min']}–{budget['total']['max']})")
-        pc = budget["projects"][aud]
-        pmax = int(pc["max"]) if (aud == "student" and analysis.get("track") == "coop_intern") else int(pc["count"])
-        if len(c.projects) > pmax:
-            out.append(f"projects: {len(c.projects)} ({aud} applications: {pc['count']}"
-                       + (f", up to {pc['max']} for co-op roles" if aud == "student" else "") + "; rules 36–38)")
-        elif len(c.projects) > int(pc["count"]):
-            jd = {k["canonical"] for k in analysis.get("keywords", [])} | {
-                t for r in analysis.get("requirements", []) for t in r.get("terms", [])}
-            for pr in c.projects[int(pc["count"]):]:
-                rest = {t for _s, eid, b in c.all_bullets() if eid != pr.entry_id for ev in b.evidence_ids
-                        if ev in I for t in I[ev].technologies}
-                mine = {t for b in pr.bullets for ev in b.evidence_ids if ev in I for t in I[ev].technologies}
-                if not (jd & mine) - rest:
-                    out.append(f"projects: '{pr.entry_id}' is a project beyond {pc['count']} that fills no JD gap "
-                               "(rule 37: a 3rd project only when it covers a JD need nothing else shows)")
+        from . import rules_v4
+        out += rules_v4.project_problems(c, bank, settings, analysis)       # rules 46–47 (v4.6), a hard check
     most_recent = max((e for e in E.values() if e.section == "experience"),
                       key=lambda e: e.end if e.end != "present" else "9999", default=None)
     if most_recent and c.experience is not None and most_recent.id not in {e.entry_id for e in c.experience}:
@@ -285,16 +273,59 @@ class Repair:
     actions: list[str] = field(default_factory=list)
 
 
+def trim_extra_skills(c: Content, need: float, locked: set[str], analysis: dict | None, actions: list[str]) -> float:
+    """Rule 67 step 2 (v4.6): optional skill rows (a 5th row, besides Certifications, with nothing the JD asks for),
+    then extra skills (not named by the JD, even if a bullet shows them) from the end of a wrapped row, where that
+    saves a rendered line. Certifications are never trimmed. Returns the lines saved."""
+    if not analysis or "section:skills" in locked:
+        return 0.0
+    from . import rules_v4
+    saved = 0.0
+    rows = [r for r in c.skills if r.category.casefold() != "certifications"]
+    for row in reversed(rows[4:]):                                 # optional rows (rule 52: keep 4–5 plus Certifications)
+        if saved >= need:
+            break
+        if not any(rules_v4.jd_relevant_skill(analysis, s.name) for s in row.items):
+            c.skills.remove(row)
+            saved += _row_lines(row.category, [s.name for s in row.items])
+            actions.append(f"removed optional skill row {row.category}")
+    for row in c.skills:
+        if saved >= need:
+            break
+        if row.category.casefold() == "certifications":
+            continue
+        before = _row_lines(row.category, [s.name for s in row.items])
+        if before < 2:
+            continue
+        keep, gone = list(row.items), []
+        for s in reversed(row.items):
+            if len(keep) <= 1:
+                break
+            if rules_v4.jd_relevant_skill(analysis, s.name):
+                continue
+            keep.remove(s)
+            gone.append(s.name)
+            if _row_lines(row.category, [x.name for x in keep]) < before:
+                break
+        after = _row_lines(row.category, [x.name for x in keep])
+        if gone and after < before:
+            row.items = keep
+            saved += before - after
+            actions.append(f"removed extra skills from {row.category}: {', '.join(reversed(gone))}")
+    return saved
+
+
 def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, gaps: dict,
            locked: set[str] | None = None, floors: dict[str, int] | None = None, bank: Bank | None = None,
            analysis: dict | None = None) -> Repair | None:
-    """One repair step for an over-long PDF, in rule 67's order: (attempt 1) remove duplicate and weak content, then
-    JD-irrelevant skills (with a bank and an analysis), then optional coursework and extras (summary); (attempt 2)
-    reduce bullets, then projects, then an irrelevant old role (never a bullet that introduces a client a later
-    bullet refers back to, rule 84);
-    (attempt 3) small spacing adjustments within layout.min_entry_gap_pt. Shortening wording is the drafter's step
-    (it can't be done safely by a script): when a build overflows, the drafter may tighten bullets and build again.
-    Never fonts below 10 pt or margins. None when nothing safe is left to change."""
+    """One repair step for an over-long PDF, in rule 67's order (v4.6): (attempt 1) JD-irrelevant skills, then
+    optional skill rows and extra skills (with a bank and an analysis), then the coursework line and extras (summary);
+    (attempt 2) Experience bullets toward the overflow minimums in `floors` (repeated, then weak, then lower-priority
+    bullets; an old role with no minimum may go), then project bullets down to limits.bullets_per_project.overflow_min
+    (1) each; never a bullet that introduces a client a later bullet refers back to (rule 84); (attempt 3, or when
+    nothing else is left) spacing within the layout limits. Projects are never removed: every resume keeps 2
+    (rule 46). Shortening wording is the drafter's step (it can't be done safely by a script). Never fonts below
+    10 pt or margins. None when nothing safe is left to change."""
     locked = locked or set()
     if rep.pages <= settings.page_count:
         return None
@@ -302,7 +333,7 @@ def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, g
     c = c.model_copy(deep=True)
     actions: list[str] = []
     bmin = rc.limit(settings, "bullets_per_role", "min", 1)
-    pbmin = rc.limit(settings, "bullets_per_project", "min", 2)
+    pbmin = rc.limit(settings, "bullets_per_project", "overflow_min", 1)
     recent = c.experience[0].entry_id if c.experience else None
 
     def breaks_ref(ent, b) -> bool:                                # rule 84: keep a client's introduction
@@ -316,43 +347,26 @@ def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, g
         ent.bullets.insert(i, b)
         return after > before
 
-    def removable(min_priority: int):
+    def floor_of(ex) -> int:
+        f = (floors or {}).get(ex.entry_id)
+        if f is not None:
+            return max(f, 1)                                       # rule 67's overflow minimum for this role
+        return max(bmin, 2) if ex.entry_id == recent else bmin
+
+    def removable(entries, floor):
         cands = []
-        for ex in c.experience:
-            floor = max(bmin, 2) if ex.entry_id == recent else bmin
-            floor = max(floor, (floors or {}).get(ex.entry_id, 0))     # the master's pick range (v4) is a floor
-            if len(ex.bullets) > floor:
-                cands += [(b.priority, ex.priority, ex, b) for b in ex.bullets if b.id not in locked]
-        for pr in c.projects:
-            if len(pr.bullets) > pbmin:
-                cands += [(b.priority, pr.priority, pr, b) for b in pr.bullets if b.id not in locked]
-        cands = [x for x in cands if x[0] >= min_priority and not breaks_ref(x[2], x[3])]
+        for ent in entries:
+            if len(ent.bullets) > floor(ent):
+                cands += [(b.priority, ent.priority, ent, b) for b in ent.bullets if b.id not in locked]
+        cands = [x for x in cands if not breaks_ref(x[2], x[3])]
         return sorted(cands, key=lambda t: (-t[0], -t[1], _est_lines(t[3].text)))
 
     saved = 0.0
     if attempt == 1:
-        texts = [(eid, b) for _s, eid, b in c.all_bullets()]
-        for i, (eid, b) in enumerate(texts):                       # 1. duplicates
-            for eid2, b2 in texts[:i]:
-                if b.id not in locked and fuzz.token_set_ratio(b.text, b2.text) >= 85:
-                    for ent in [*c.experience, *c.projects]:
-                        if ent.entry_id == eid and b in ent.bullets and len(ent.bullets) > 1:
-                            ent.bullets.remove(b)
-                            saved += _est_lines(b.text)
-                            actions.append(f"removed repeated bullet: {b.text[:60]}")
-                            break
-                    break
-        while saved < need:                                        # 1. weak content (priority 4–5)
-            cands = removable(4)
-            if not cands:
-                break
-            _p, _ep, ent, b = cands[0]
-            ent.bullets.remove(b)
-            saved += _est_lines(b.text)
-            actions.append(f"removed weak bullet (priority {b.priority}): {b.text[:60]}")
-        if saved < need:                                           # 2. JD-irrelevant skills (rule 67, v4.3)
-            saved += trim_skills(c, need - saved, locked, bank, analysis, actions, settings)
-        if saved < need:                                           # 3. optional coursework and extras
+        saved += trim_skills(c, need - saved, locked, bank, analysis, actions, settings)     # 1. JD-irrelevant skills
+        if saved < need:                                           # 2. optional skill rows and extra skills
+            saved += trim_extra_skills(c, need - saved, locked, analysis, actions)
+        if saved < need:                                           # 3. coursework line and extras
             for ed in c.education:
                 if ed.course_ids:
                     ed.course_ids = []
@@ -362,29 +376,41 @@ def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, g
                 c.summary = None
                 saved += 2
                 actions.append("removed the summary")
-    if attempt == 2:
-        while saved < need:                                        # 4. reduce bullets …
-            cands = removable(1)
+    if attempt == 2:                                               # (4. shorter wording: the drafter's step)
+        texts = [(eid, b) for _s, eid, b in c.all_bullets() if eid.startswith("exp-")]
+        for i, (eid, b) in enumerate(texts):                       # 5. Experience bullets: repeats first …
+            ex = next(x for x in c.experience if x.entry_id == eid)
+            for _eid2, b2 in texts[:i]:
+                if (b.id not in locked and b in ex.bullets and len(ex.bullets) > floor_of(ex)
+                        and fuzz.token_set_ratio(b.text, b2.text) >= 85):
+                    ex.bullets.remove(b)
+                    saved += _est_lines(b.text)
+                    actions.append(f"removed repeated bullet: {b.text[:60]}")
+                    break
+        while saved < need:                                        # … then weak / lower-priority, to the minimums
+            cands = removable(c.experience, floor_of)
             if not cands:
                 break
             _p, _ep, ent, b = cands[0]
             ent.bullets.remove(b)
             saved += _est_lines(b.text)
-            actions.append(f"removed lower-priority bullet (priority {b.priority}): {b.text[:60]}")
-        pmin = rc.limit(settings, "projects", "min", 1)
-        while saved < need and len(c.projects) > pmin:             # … or projects
-            pr = max(c.projects, key=lambda p: p.priority)
-            if any(b.id in locked for b in pr.bullets):
-                break
-            c.projects.remove(pr)
-            saved += 1 + sum(_est_lines(b.text) for b in pr.bullets)
-            actions.append(f"removed project {pr.entry_id}")
-        old = [ex for ex in c.experience[1:] if ex.priority >= 4 and not any(b.id in locked for b in ex.bullets)]
-        if saved < need and old:
+            kind = "weak bullet" if b.priority >= 4 else "lower-priority bullet"
+            actions.append(f"removed {kind} (priority {b.priority}): {b.text[:60]}")
+        old = [ex for ex in c.experience[1:] if ex.priority >= 4 and (floors or {}).get(ex.entry_id) is None
+               and not any(b.id in locked for b in ex.bullets)]
+        if saved < need and old:                                   # an irrelevant old role with no minimum
             ex = old[-1]
             c.experience.remove(ex)
             saved += 1.5 + sum(_est_lines(b.text) for b in ex.bullets)
             actions.append(f"removed least relevant role {ex.entry_id}")
+        while saved < need:                                        # 6. project bullets, minimum 1 each
+            cands = removable(c.projects, lambda _p: pbmin)
+            if not cands:
+                break
+            _p, _ep, ent, b = cands[0]
+            ent.bullets.remove(b)
+            saved += _est_lines(b.text)
+            actions.append(f"shortened project {ent.entry_id} to {len(ent.bullets)} bullet(s): {b.text[:60]}")
     new_gaps = dict(gaps)
     if "leading" in gaps and (attempt >= 3 or (attempt == 2 and not actions)):
         # rule 67 (v4): \entrygap 3 → 2 pt, then body leading 12.0 → 11.8 pt; never below 10 pt / 0.5 in
@@ -394,14 +420,14 @@ def repair(c: Content, rep: validate.Report, attempt: int, settings: Settings, g
         elif float(gaps["leading"]) > 11.8:
             new_gaps["leading"] = 11.8
             actions.append("body leading 12.0pt → 11.8pt (rule 67)")
-    elif attempt >= 3 or (attempt == 2 and not actions):                # 5. small spacing adjustments
+    elif attempt >= 3 or (attempt == 2 and not actions):                # spacing within the layout limits
         floor = float(settings.layout.get("min_entry_gap_pt", 2))
         if gaps.get("entry", 6) > floor:
             new_gaps = {"entry": floor, "education": min(gaps.get("education", 4), floor)}
             actions.append(f"entry spacing {gaps.get('entry', 6)}pt → {floor}pt (layout.min_entry_gap_pt)")
     if not actions:
         return None
-    c.notes.removed += [a for a in actions if a.startswith("removed")]
+    c.notes.removed += [a for a in actions if a.startswith(("removed", "shortened"))]
     return Repair(c, new_gaps, actions)
 
 
@@ -648,9 +674,10 @@ def _budget_line(analysis: dict, settings: Settings) -> str:
             + (f"; starting allocation for {analysis['profile']['picked']}: "
                + " / ".join(f"{k} {v}" for k, v in alloc.items()) if alloc else "")
             + f" (rules 23–24). Projects: {b['projects'][aud]['count']}"
-            + (f" (3rd only for co-op roles when it fills a JD gap)" if aud == "student" else "")
-            + ", 2 bullets each (rules 36–38). Overflow: duplicates/weak → coursework/extras → shorten wording → "
-            "fewer bullets/projects → spacing; never below 10 pt (rule 53).")
+            + (" (3rd only for co-op roles when it fills a JD gap)" if analysis["track"] == "coop_intern" else "")
+            + ", 2 bullets each; never fewer than 2 projects (rules 46–47). Overflow (rule 67): JD-irrelevant skills → "
+            "optional skill rows / extra skills → coursework → shorten wording → Experience bullets down to the "
+            "minimums → project bullets (min 1 each) → spacing; never below 10 pt, never a project removed.")
 
 
 class LimitReached(ContentError):
@@ -780,7 +807,8 @@ def build(ref: str, content_path: Path | None = None, db_path: Path | None = Non
             log.append("contact line wrapped: dropped '+1' from the phone (rule 31)")
             if rep.pages <= settings.page_count:
                 continue
-        floors = {k: (r.get("pick") or [0])[0] for k, r in (bank.v4 or {}).get("roles", {}).items()}
+        from . import rules_v4
+        floors = rules_v4.overflow_minimums(bank, settings) if bank.v4 else {}     # rule 67 (v4.6)
         fix = repair(c, rep, n, settings, gaps, held, floors, bank, analysis)
         if not fix:
             log.append("no automatic repair left for: " + "; ".join(x.name for x in rep.errors()))
@@ -841,7 +869,7 @@ def finalize(result: dict, extra_checks: list[dict] | None = None, extra_reports
         reasons.append("manual_edit_conflicts: " + "; ".join(state["conflicts"])[:400] +
                        " (fix them in the edited version's content.json and run --regenerate, or --discard-edits)")
     # the content after automatic repairs must still pass every structure / rules check
-    post = structure_problems(c, bank, settings, result.get("analysis"))
+    post = structure_problems(c, bank, settings, result.get("analysis"), after_repair=True)
     if post:
         reasons.append("rules_after_repair: " + "; ".join(post)[:600])
     q = quality(result)

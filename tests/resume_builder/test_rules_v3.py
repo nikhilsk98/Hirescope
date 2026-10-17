@@ -155,7 +155,9 @@ def test_rules_budget_is_read_from_the_rules_file(rb_env):
     assert b["roles"]["primary"] == {"start": 4, "max": 5} and b["roles"]["other"]["max"] == 1
     assert b["allocations"]["backend"] == {"Demo Systems": 3, "Example Labs": 2, "Tiny Startup": 1}
     assert b["allocations"]["fullstack"]["Example Labs"] == 3
-    assert b["projects"] == {"student": {"count": 2, "max": 3}, "experienced": {"count": 1, "max": 1}}
+    # rule 46 (v4.6): an old "1 project for mid-level" line can't go below the 2-project minimum
+    assert b["projects"] == {"student": {"count": 2, "max": 3}, "experienced": {"count": 2, "max": 2}}
+    assert b["projects_min"] == 2
     rc.RULES.write_text("# no numbers here\n")
     assert rules_budget(load_settings())["allocations"] == {}                    # config defaults, no names
 
@@ -173,9 +175,9 @@ def test_bullet_allocation_projects_and_caps(rb_env):
     mid = _job(rb_env, company="Mid Co", title="Software Engineer II", track="full_time", job_id="demo-mid", level="mid")
     am = _analysis(mid)
     cm = pipeline.assign_ids(draft.baseline(am, build_bank(), s))
-    assert len(cm.projects) == 1                                                     # rule 38
-    cm.projects = c.projects
-    assert any("projects: 2" in p for p in pipeline.structure_problems(cm, build_bank(), s, am))
+    assert len(cm.projects) == 2                                     # rule 46 (v4.6): mid-level shows 2 too
+    cm.projects = cm.projects[:1]
+    assert any("must show exactly 2 projects" in p for p in pipeline.structure_problems(cm, build_bank(), s, am))
     c.experience[0].bullets = [Bullet(text=f"Built DEMO item {i} with Java and Spring Boot", evidence_ids=["exp-demo-b1"])
                                for i in range(6)]
     probs = pipeline.structure_problems(c, build_bank(), s, a)
@@ -195,8 +197,8 @@ def test_third_project_only_for_coop_when_it_fills_a_gap(rb_env):
     ml = ProjectEntry(entry_id="proj-demo-ml-notebook", bullets=[Bullet(text=b.items["proj-demo-ml-notebook-b1"].text,
                                                                         evidence_ids=["proj-demo-ml-notebook-b1"])])
     c3 = c.model_copy(deep=True)
-    c3.projects.append(ml)                           # a 3rd that adds no JD need: refused (rule 37)
-    assert any("rule 37" in p for p in pipeline.structure_problems(c3, b, s, a))
+    c3.projects.append(ml)                           # a 3rd that adds no JD need: refused (rule 47)
+    assert any("fills no JD gap" in p for p in pipeline.structure_problems(c3, b, s, a))
     c4 = c.model_copy(deep=True)
     infra = next(p for p in c4.projects if p.entry_id == "proj-demo-infra-lab")
     c4.projects = [p for p in c4.projects if p is not infra] + [ml.model_copy(), infra]   # infra 3rd: fills the GCP gap

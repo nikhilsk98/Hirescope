@@ -286,7 +286,8 @@ def test_garbled_extraction_flags_cid_glyphs(rb_env, monkeypatch):
 
 @needs_tex()
 def test_overflow_triggers_trimming_in_priority_order(rb_env):
-    """DEMO content two pages long: the build loop removes priority-5 bullets first and ends on one page."""
+    """DEMO content two pages long: the build loop trims skills / coursework first (rule 67, v4.6), then repeated and
+    priority-5 bullets, keeps both projects, and ends on one page."""
     m = rc.MASTER_RESUME
     text = m.read_text()
     for anchor, tag in (("- Deployed services to AWS with Docker and Jenkins pipelines.\n", "A"),
@@ -326,17 +327,23 @@ def test_overflow_triggers_trimming_in_priority_order(rb_env):
     res = pipeline.build(str(rb_env.job), require_review=False)
     assert res["attempts"][0]["pages"] >= 2 and res["report"].pages == 1, res["attempts"]
     kinds = ["repeated" if "repeated" in r else "priority 5" if "priority 5" in r else r for r in res["repairs"]]
-    assert kinds and set(kinds) <= {"repeated", "priority 5"}
-    assert kinds == sorted(kinds, key=lambda k: k != "repeated")      # repetition first, then lowest priority
+    early = [k for k in kinds if k.startswith(("removed JD-irrelevant", "removed optional skill row",
+                                               "removed extra skills", "removed optional coursework"))]
+    bullets = [k for k in kinds if k not in early]
+    assert bullets and set(bullets) <= {"repeated", "priority 5"}
+    assert kinds == early + bullets                                   # skills / coursework before any bullet
+    assert bullets == sorted(bullets, key=lambda k: k != "repeated")  # repetition first, then lowest priority
+    assert len(res["content"].projects) == 2                          # rule 46: projects are never cut
     left = [b for _s, _e, b in res["content"].all_bullets()]
     assert all(b.priority < 5 for b in left if not b.text.startswith("Filler")) and len(res["attempts"]) <= 3
     assert all(len(ex.bullets) >= 1 for ex in res["content"].experience)
 
 
 def test_repair_order_without_compiling(rb_env):
-    """Rule 53: attempt 1 drops repetition, weak (priority 4–5) bullets, then optional coursework and the summary;
-    attempt 2 reduces bullets, then projects, then an irrelevant old role; attempt 3 only shrinks entry spacing (never
-    fonts/margins)."""
+    """Rule 67 (v4.6): attempt 1 trims skills (needs a bank and an analysis), then the coursework line and the summary,
+    never a bullet; attempt 2 drops repeated, then weak (priority 4–5), then lower-priority Experience bullets down to
+    the minimums, then shortens project bullets to 1 each and never removes a project; attempt 3 only shrinks entry
+    spacing (never fonts/margins)."""
     _a, c = _baseline(rb_env)
     s = load_settings()
     from resume_builder.content_schema import Bullet, Summary
@@ -345,20 +352,23 @@ def test_repair_order_without_compiling(rb_env):
     c.experience[0].bullets[1].priority = 5
     c.summary = Summary(text="DEMO software engineer with 3+ years building web services.",
                         evidence_ids=["summary-1"])
-    pipeline.assign_ids(c)
-    rep = validate.Report(pages=2, overflow_lines=2)
-    f1 = pipeline.repair(c, rep, 1, s, {"entry": 6, "education": 4})
-    assert f1.actions[0].startswith("removed repeated bullet")
-    assert any("priority 5" in a for a in f1.actions)
-    assert f1.gaps["entry"] == 6 and not any("lower-priority" in a or "project" in a for a in f1.actions)
     c.education[0].course_ids = [i.id for i in build_bank().items.values() if i.section == "coursework"][:2]
-    big = pipeline.repair(c, validate.Report(pages=2, overflow_lines=40), 1, s, {"entry": 6, "education": 4})
-    i_course, i_summary = big.actions.index("removed optional coursework"), big.actions.index("removed the summary")
-    assert max(i for i, a in enumerate(big.actions) if "weak bullet" in a) < i_course < i_summary   # rule 53 order
-    assert big.content.summary is None and not any(e.course_ids for e in big.content.education)
-    rep2 = validate.Report(pages=2, overflow_lines=40)
-    f2 = pipeline.repair(big.content, rep2, 2, s, big.gaps)
-    assert any("lower-priority bullet" in a for a in f2.actions)
+    pipeline.assign_ids(c)
+    n_proj = len(c.projects)
+    f1 = pipeline.repair(c, validate.Report(pages=2, overflow_lines=2), 1, s, {"entry": 6, "education": 4})
+    assert f1.actions == ["removed optional coursework", "removed the summary"]
+    assert f1.gaps["entry"] == 6 and f1.content.summary is None and not any(e.course_ids for e in f1.content.education)
+    assert [len(x.bullets) for x in f1.content.experience] == [len(x.bullets) for x in c.experience]
+    f2 = pipeline.repair(f1.content, validate.Report(pages=2, overflow_lines=40), 2, s, f1.gaps)
+    kinds = [a.split(":")[0] for a in f2.actions]
+    assert kinds[0] == "removed repeated bullet" and "removed weak bullet (priority 5)" in kinds
+    assert kinds.index("removed weak bullet (priority 5)") < min(
+        (i for i, k in enumerate(kinds) if k.startswith("removed lower-priority")), default=len(kinds))
+    shortened = [i for i, a in enumerate(f2.actions) if a.startswith("shortened project")]
+    trimmed = [i for i, a in enumerate(f2.actions) if a.startswith("removed")]
+    assert shortened and max(trimmed) < min(shortened)            # project bullets only after Experience bullets
+    assert len(f2.content.projects) == n_proj and all(len(p.bullets) >= 1 for p in f2.content.projects)
+    assert not any("removed project" in a for a in f2.actions)
     f3 = pipeline.repair(f2.content, validate.Report(pages=2, overflow_lines=1), 3, s, f2.gaps)
     assert f3.actions == ["entry spacing 6pt → 2.0pt (layout.min_entry_gap_pt)"] and f3.gaps["entry"] == 2.0
     assert pipeline.repair(f3.content, validate.Report(pages=2, overflow_lines=1), 3, s, f3.gaps) is None

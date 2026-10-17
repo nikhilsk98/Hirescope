@@ -18,7 +18,7 @@ desktop_copy:
   dir: ~/Desktop/Generated Resumes
 
 # Section order (rules 24–25, v4.1): the same for every application and every level, never reordered. The audience
-# (student vs experienced, from HireScope's track and level) still decides the project count (rules 46–48).
+# (student vs experienced, from HireScope's track and level) decides only whether a 3rd project is allowed (rule 47).
 section_order:
   student: [education, skills, experience, projects]
   experienced: [education, skills, experience, projects]
@@ -35,11 +35,12 @@ experience_bullets:
   internship: {start: 2, max: 3}   # a relevant internship
   other: {start: 1, max: 1}        # older or less relevant roles: 0–1
 
-# Projects (rules 36–38): 2 for student applications (a 3rd only for co-op roles, when it fills a JD gap), 1 for
-# mid-level. Bullets per project: limits.bullets_per_project.
+# Projects (rules 46–47, v4.6): exactly 2 on every resume, for every track and level (a 3rd only for co-op roles,
+# when it fills a JD gap). Fewer than limits.projects.min fails validation. Bullets per project:
+# limits.bullets_per_project.
 projects_by_audience:
   student: {count: 2, max: 3}
-  experienced: {count: 1, max: 1}
+  experienced: {count: 2, max: 2}
 
 summary:
   enabled: false          # rules: no summary by default; the drafter may add one only for a clear specialization
@@ -47,8 +48,8 @@ summary:
   max_words: 45
 
 limits:
-  projects: {min: 1, max: 3}
-  bullets_per_project: {min: 2, max: 2}     # rule 36: 2 bullets each
+  projects: {min: 2, max: 3}                # rule 46: never fewer than 2; overflow trimming never removes a project
+  bullets_per_project: {min: 2, max: 2, overflow_min: 1}   # 2 bullets each; rule 67's last step may go down to 1
   bullets_per_role: {min: 1, max: 4}
   bullet_max_words: 34          # a review hint; the real limit is 2 rendered lines (rule 43)
   bullet_max_lines: 2

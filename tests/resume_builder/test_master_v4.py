@@ -126,7 +126,7 @@ def test_v4_section_order_for_every_level(v4env):
     a = _job(v4env, "Requirements\n- 5+ years of Java\n- Kafka", title="Senior Software Engineer", level="mid")
     c = pipeline.assign_ids(v4build.baseline(a, build_bank(), s))
     assert c.section_order == ["education", "skills", "experience", "projects"]
-    assert len(c.projects) == 1                                              # rule 48: mid-level → 1 project
+    assert len(c.projects) == 2                                              # rule 46 (v4.6): 2 at every level
     c.section_order = ["education", "skills", "projects", "experience"]
     assert any("rules 24–25" in p for p in rules_v4.problems(c, build_bank(), s, a))
 
@@ -265,19 +265,22 @@ def test_v4_layout_spec_regexes(v4env):
 
 # --- found in the real runs ---------------------------------------------------------------------------------------
 def test_v4_repair_respects_master_minimums_and_snapshot_is_not_weak(v4env):
-    """Overflow trimming (rule 67) never cuts a role below the master's pick range, and the approved snapshot bullets
-    are never treated as 'weak' (they got position-based priorities 3–4 and the GitHub Actions bullet was cut)."""
+    """Overflow trimming (rule 67, v4.6) never cuts a role below its overflow minimum (the master's pick range when
+    the rules name none), never removes a project, and the approved snapshot bullets are never treated as 'weak'
+    (they got position-based priorities 3–4 and the GitHub Actions bullet was cut)."""
     from resume_builder import validate
     b, s = build_bank(), load_settings()
     c = pipeline.assign_ids(v4build.baseline(None, b, s))
     assert all(x.priority <= 2 for _s, _e, x in c.all_bullets())
-    floors = {k: (r.get("pick") or [0])[0] for k, r in b.v4["roles"].items()}
+    floors = rules_v4.overflow_minimums(b, s)                        # demo rules name none → the master's picks
+    assert floors == {k: (r.get("pick") or [0])[0] for k, r in b.v4["roles"].items()}
     gaps = {"entry": 3.0, "template_entry": 3.0, "leading": 12.0}
     f1 = pipeline.repair(c, validate.Report(pages=2, overflow_lines=40), 1, s, gaps, set(), floors)
     f2 = pipeline.repair(f1.content, validate.Report(pages=2, overflow_lines=40), 2, s, f1.gaps, set(), floors)
     per = {e.entry_id: len(e.bullets) for e in f2.content.experience}
-    assert per["exp-freelance"] >= 4 and per["exp-democorp"] >= 3 and per["exp-tiny"] >= 2
-    assert any("removed project" in a for a in f2.actions)          # projects go before the role minimums
+    assert all(per[k] >= max(n, 1) for k, n in floors.items() if k in per)
+    assert len(f2.content.projects) == 2 and not any("removed project" in a for a in f2.actions)   # rule 46
+    assert all(len(p.bullets) >= 1 for p in f2.content.projects)
     f3 = pipeline.repair(f2.content, validate.Report(pages=2, overflow_lines=1), 3, s, f2.gaps, set(), floors)
     assert f3.gaps["entry"] == 2.0 and any("entrygap" in a for a in f3.actions)            # rule 67 spacing
     f4 = pipeline.repair(f3.content, validate.Report(pages=2, overflow_lines=1), 3, s, f3.gaps, set(), floors)
@@ -440,10 +443,10 @@ def test_v43_client_is_introduced_before_a_back_reference(v4env):
     intro = c.experience[0].bullets[0]
     intro.priority = 5                                                # the only "weak" bullet is the introduction
     gaps = {"entry": 3.0, "template_entry": 3.0, "leading": 12.0}
-    f = pipeline.repair(c, validate.Report(pages=2, overflow_lines=3), 1, s, gaps, set(), {}, b, None)
+    f = pipeline.repair(c, validate.Report(pages=2, overflow_lines=3), 2, s, gaps, set(), {}, b, None)
     kept = f.content.experience[0].bullets if f else c.experience[0].bullets
     assert intro.id in {x.id for x in kept} and rules_v4.backref_problems(f.content if f else c, b) == []
-    f2 = pipeline.repair(c, validate.Report(pages=2, overflow_lines=3), 1, s, gaps, set(), {})   # no bank: no guard
+    f2 = pipeline.repair(c, validate.Report(pages=2, overflow_lines=3), 2, s, gaps, set(), {})   # no bank: no guard
     assert intro.id not in {x.id for x in f2.content.experience[0].bullets}
 
 

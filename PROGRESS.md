@@ -884,3 +884,26 @@ reuse, web-sockets → Socket.IO).
   written.
 
 **Tests**: 663 passed.
+
+## Resume Builder: two projects on every resume (2026-10-17)
+- Rules v4.6 (`inputs/resume/resume_rules.md`, previous copy in `inputs/resume/archive/resume_rules.before-two-projects.md`):
+  rule 46 — exactly 2 projects on every resume, every track and level; rule 48 (1 project for mid-level) retired; the
+  3rd-project option stays for co-op roles with a real JD gap. Rule 67's overflow order rewritten: JD-irrelevant skills
+  → optional skill rows / extra skills → coursework → shorter wording (drafter) → Experience bullets down to the
+  "Overflow minimums" (Freelance 3 / Accenture 2 / Rescho 1, parsed from the rules file) → project bullets down to 1
+  each; projects are never removed; spacing only within the layout limits.
+- Builder: `rules_v4.project_problems` is a hard check for both master formats (fewer than 2 projects fails at
+  prepare/build and in finalize's post-repair check, with the projects available listed); the 3rd-project JD-gap check
+  now also runs for v4 masters. `pipeline.repair` follows the new order (`trim_extra_skills` added; duplicates and weak
+  bullets now go in the Experience-bullet step); the build loop's floors come from `rules_v4.overflow_minimums`
+  (master pick ranges as the fallback). Post-repair rules accept bullet counts down to those minimums.
+  `config/resume_builder.yaml`: `projects.min: 2`, `experienced` audience 2 projects,
+  `bullets_per_project.overflow_min: 1`.
+- Regenerated the READY resumes that had 1 project: Axos Bank (v2), Bose (v4), Copart (v4), HPE Cloud Engineer Intern
+  (v3), Wikimedia (v3) — all READY, one page, 2 projects. VibeSpace's b3 bullet (required by the master for
+  cloud/data roles) renders 3 lines by one word; those builds use a two-word-tighter wording.
+- Not regenerated: Centric Software (46867) and DoorDash (16070) carry locked bullets from the pre-v4 master
+  ("20+ client deployments", "processing reliability by 70%") that the current master doesn't support; they need an
+  unlock decision first. Their generations are prepared but not built.
+
+**Tests**: 7 new (tests/resume_builder/test_two_projects.py); repair-order tests updated for rule 67 v4.6.

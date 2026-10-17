@@ -525,9 +525,12 @@ checks, reports, versions, HireScope statuses). It never submits applications an
   results, no planned tech in Skills (50); no student phrasing (78); the master's overlap pairs (A3/C2, B3/Material UI)
   at most one each. Skills (53): core always; extended when the JD mentions them; self-reported only when the JD asks,
   at most 4, never in a bullet; planned never; the master's Excluded list beats the tool checklist; a ticked checklist
-  tool with no evidence in the master counts as self-reported. Overflow: rule 67's order — duplicates and weak bullets,
-  then JD-irrelevant skills (not named by the JD, not in a bullet, only where a row loses a line), then coursework, then
-  bullets and projects — spacing last (`\entrygap` 3 → 2 pt, then leading 12.0 → 11.8 pt), never below 10 pt or 0.5 in.
+  tool with no evidence in the master counts as self-reported. Projects (46–47, v4.6): exactly 2 on every resume, every
+  track and level (fewer fails validation); a 3rd only for co-op roles where it fills a JD gap. Overflow: rule 67's
+  order (v4.6) — JD-irrelevant skills (not named by the JD, not in a bullet, only where a row loses a line), then
+  optional skill rows and extra skills, then coursework, then (drafter) shorter wording, then Experience bullets down to
+  the rules file's "Overflow minimums" (repeated and weak first), then project bullets down to 1 each — projects are
+  never removed; spacing last (`\entrygap` 3 → 2 pt, then leading 12.0 → 11.8 pt), never below 10 pt or 0.5 in.
   **v4.3 selection quality (79–84)**: relevance counts the JD's responsibilities as well as its technologies (79);
   the reviewer is told when a JD skill sits only in Skills while an unused bullet on the page shows it (80) and when a
   JD area (frontend, backend/database, Python/data pipelines, testing, delivery) has no bullet or 3+ bullets show only
@@ -556,9 +559,9 @@ checks, reports, versions, HireScope statuses). It never submits applications an
 
 ### Configuration (`config/resume_builder.yaml`)
 `page_count` (1), `section_order` (the same for every audience since v4.1) and `audience` (which levels are mid-level;
-years that make an unlevelled role mid-level — it decides the project count), `experience_bullets` and `projects_by_audience` (defaults;
+years that make an unlevelled role mid-level), `experience_bullets` and `projects_by_audience` (2 for every audience, a 3rd for co-op; defaults;
 the numbers in your rules file win), `category_terms` (rule 63, specific → general), `summary` (off), `limits`
-(bullets per project, words per bullet, keyword repeats, 0–3 courses), `layout` (minimum font size 10 pt and margins
+(`projects.min` 2 — fewer fails validation; bullets per project, with `overflow_min` 1 for trimming; words per bullet, keyword repeats, 0–3 courses), `layout` (minimum font size 10 pt and margins
 the repair loop may never cross, entry gaps), `fonts` (preferred +
 fallback), `compile` (timeout, image DPI), `repair.max_attempts` (≤ 3), `profiles` (signals + what to lead with),
 `related_groups` (what counts as transferable, never equivalent), `batch.max_jobs`. Changing it (or any input) makes

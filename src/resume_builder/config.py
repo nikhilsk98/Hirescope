@@ -171,16 +171,18 @@ def name_from_master(first: str = "", last: str = "") -> tuple[str, str]:
 def rules_budget(settings: Settings, rules_text: str | None = None) -> dict:
     """Experience-bullet and project budgets: config defaults (rules 22–23, 36–38) overridden by what
     resume_rules.md says — rule 22's total, rule 23's per-role starts and caps, rule 24's per-employer starting
-    allocations ("Starting allocations (A / B / C):" then "- Java/backend: 4 / 3 / 2"), rules 36–38's project
-    counts. Employer names stay in your (gitignored) rules file. Returns {total, roles, allocations, projects,
-    source}."""
+    allocations ("Starting allocations (A / B / C):" then "- Java/backend: 4 / 3 / 2"), rule 67's overflow minimums
+    ("Overflow minimums (A / B / C): 3 / 2 / 1"), rule 46's project count. Employer names stay in your (gitignored)
+    rules file. Returns {total, roles, allocations, minimums, projects, projects_min, source}."""
     eb = settings.experience_bullets
     tot = eb.get("total") or {"min": 8, "max": 11}
     roles = {k: dict(eb.get(k) or d) for k, d in (("primary", {"start": 4, "max": 5}), ("second", {"start": 3, "max": 4}),
                                                  ("internship", {"start": 2, "max": 3}), ("other", {"start": 1, "max": 1}))}
     projects = {k: dict(settings.projects_by_audience.get(k) or d)
                 for k, d in (("student", {"count": 2, "max": 3}), ("experienced", {"count": 1, "max": 1}))}
-    out = {"total": dict(tot), "roles": roles, "allocations": {}, "projects": projects, "source": ["config"]}
+    pmin = limit(settings, "projects", "min", 2)
+    out = {"total": dict(tot), "roles": roles, "allocations": {}, "minimums": {}, "projects": projects,
+           "projects_min": pmin, "source": ["config"]}
     if rules_text is None:
         rules_text = RULES.read_text(encoding="utf-8") if RULES.exists() else ""
     t = re.sub(r"\*\*", "", rules_text)
@@ -210,13 +212,25 @@ def rules_budget(settings: Settings, rules_text: str | None = None) -> dict:
                 out["allocations"][prof] = dict(zip(names, nums))
         if out["allocations"]:
             out["source"].append("rule 24")
+    if m := re.search(r"Overflow minimums\s*\(([^)]+)\):[ \t]*([\d \t/]+)", t, re.I):
+        names = [x.strip() for x in m.group(1).split("/")]
+        nums = [int(x) for x in re.findall(r"\d+", m.group(2))]
+        if len(nums) == len(names):
+            out["minimums"] = dict(zip(names, nums))
+            out["source"].append("rule 67")
     if m := re.search(r"Default:\s*(\d+)\s*projects?", t, re.I):
         projects["student"]["count"] = int(m.group(1))
+    if m := re.search(r"Exactly\s*(\d+)\s*projects?", t, re.I):
+        out["projects_min"] = pmin = int(m.group(1))
+        out["source"].append("rule 46")
     if m := re.search(r"(\d+)\s*projects?\s*only for co-op", t, re.I):
         projects["student"]["max"] = int(m.group(1))
     if m := re.search(r"(\d+)\s*projects?\s*for mid-level", t, re.I):
         projects["experienced"] = {"count": int(m.group(1)), "max": int(m.group(1))}
         out["source"].append("rules 36–38")
+    for pc in projects.values():                  # rule 46 (v4.6): every resume shows at least projects_min projects
+        pc["count"] = max(int(pc["count"]), pmin)
+        pc["max"] = max(int(pc["max"]), pc["count"])
     return out
 
 

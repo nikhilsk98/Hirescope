@@ -382,17 +382,57 @@ def _intern(bank: Bank, eid: str) -> bool:
 
 
 def audience_projects(bank: Bank, settings, analysis: dict | None) -> tuple[int, int]:
-    """(default, max) projects: rules 46–48 — 2; 3 only for co-op roles that need it; 1 for mid-level."""
-    if not analysis:
-        return 2, 2
-    aud = settings.audience(analysis.get("track"), analysis.get("seniority"),
-                            (analysis.get("eligibility") or {}).get("yoe_required"))
-    if aud == "experienced":
-        return 1, 1
-    return 2, 3 if analysis.get("track") == "coop_intern" else 2
+    """(default, max) projects: rules 46–47 (v4.6) — exactly 2 for every track and level; a 3rd only for co-op roles
+    whose JD it fills a gap for."""
+    from .config import limit
+    n = limit(settings, "projects", "min", 2) if settings else 2
+    return n, n + 1 if (analysis or {}).get("track") == "coop_intern" else n
 
 
-def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
+def project_problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
+    """Rules 46–47 (v4.6), a hard check: every resume shows at least 2 projects; more only for co-op roles, and each
+    project beyond 2 must cover a JD need that nothing else on the page shows."""
+    dflt, mx = audience_projects(bank, settings, analysis)
+    n = len(c.projects)
+    if n < dflt:
+        have = sorted(e.id for e in bank.entries.values() if e.section == "project")
+        return [f"projects: {n} on the page; every resume must show exactly {dflt} projects (rule 46), whatever the "
+                f"track or level. Projects in your evidence: {', '.join(have) or 'none'}"]
+    if n > mx:
+        return [f"projects: {n} (rule 46: exactly {dflt}" + (f"; a {mx}rd only for co-op roles where it fills a JD gap"
+                                                            if mx > dflt else "; a 3rd only for co-op roles") + ")"]
+    out = []
+    if n > dflt and analysis:
+        I = bank.items
+        jd = {k["canonical"] for k in analysis.get("keywords", [])} | {
+            t for r in analysis.get("requirements", []) for t in r.get("terms", [])}
+        for pr in c.projects[dflt:]:
+            rest = {t for _s, eid, b in c.all_bullets() if eid != pr.entry_id for ev in b.evidence_ids
+                    if ev in I for t in I[ev].technologies}
+            mine = {t for b in pr.bullets for ev in b.evidence_ids if ev in I for t in I[ev].technologies}
+            if not (jd & mine) - rest:
+                out.append(f"projects: '{pr.entry_id}' is a project beyond {dflt} that fills no JD gap "
+                           "(rule 47: a 3rd project only when it covers a JD need nothing else shows)")
+    return out
+
+
+def overflow_minimums(bank: Bank, settings) -> dict[str, int]:
+    """Rule 67 (v4.6): entry id → the fewest Experience bullets overflow trimming may leave, from "Overflow minimums
+    (A / B / C): 3 / 2 / 1" in resume_rules.md (employer names live there); the master's pick range when the rules
+    name none."""
+    from .config import rules_budget
+    from .evidence import where_entries
+    exps = {e.id: e for e in bank.entries.values() if e.section == "experience"}
+    out = {}
+    for name, n in (rules_budget(settings)["minimums"] if settings else {}).items():
+        for eid in where_entries(name, exps)[:1]:
+            out[eid] = n
+    if not out:
+        out = {k: (r.get("pick") or [0])[0] for k, r in (v4(bank) or {}).get("roles", {}).items()}
+    return out
+
+
+def problems(c, bank: Bank, settings, analysis: dict | None, after_repair: bool = False) -> list[str]:
     X = v4(bank)
     if not X:
         return []
@@ -469,11 +509,14 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
         if len(hit) > 1:
             out.append(f"overlapping bullets {', '.join(hit)}: use at most one per resume (master note)")
     # bullets per role (the master's pick ranges win over rules 33–34; rule 32's total range stays)
+    floors = overflow_minimums(bank, settings) if after_repair else {}
     total = 0
     for ex in c.experience:
         n = len(ex.bullets)
         total += n
         pick = (roles.get(ex.entry_id) or {}).get("pick")
+        if pick and after_repair:                # rule 67 (v4.6): overflow trimming may go down to the minimums
+            pick = [min(pick[0], floors.get(ex.entry_id, pick[0])), pick[1]]
         if pick and not (pick[0] <= n <= pick[1]):
             out.append(f"{ex.entry_id}: {n} bullets; the master says {pick[0]}–{pick[1]} for this role")
         r = roles.get(ex.entry_id) or {}
@@ -482,13 +525,11 @@ def problems(c, bank: Bank, settings, analysis: dict | None) -> list[str]:
                        "(rules 10, 37)")
         if ex.title and re.search(r"self[- ]employed|\|", ex.title, re.I) and ex.title != r.get("display_title"):
             out.append(f"{ex.entry_id}: never 'Self-Employed' or keyword tags in the title (rule 37)")
-    if not (8 <= total <= 11):
-        out.append(f"experience: {total} bullets (rule 32: 8–11)")
-    # projects (rules 46–48)
-    dflt, mx = audience_projects(bank, settings, analysis)
-    if len(c.projects) > mx:
-        out.append(f"projects: {len(c.projects)} (rules 46–48: {dflt}" + (f", up to {mx} for co-op roles that need it"
-                                                                          if mx > dflt else "") + ")")
+    lo = min(8, sum(floors.get(ex.entry_id, 1) for ex in c.experience)) if after_repair else 8
+    if not (lo <= total <= 11):
+        out.append(f"experience: {total} bullets (rule 32: 8–11" + (f"; overflow trimming may go down to {lo}"
+                                                                    if lo < 8 else "") + ")")
+    out += project_problems(c, bank, settings, analysis)              # rules 46–47 (v4.6)
     # education (rules 58–59): MS first, 0–3 courses, only completed / in-progress (only "Yes" rows are in the bank)
     if c.education and c.education[0].entry_id != next(iter(X.get("education", {})), c.education[0].entry_id):
         out.append("education: the MS degree comes first (rule 58)")

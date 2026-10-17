@@ -73,15 +73,17 @@ scripts do everything deterministic. Run every command from the repo root with `
      preset from the track and level (co-op / intern / new grad: Education → Skills → Experience → Projects;
      mid-level: Skills → Experience → Projects → Education); only Projects and Experience may swap, when projects are
      clearly the strongest evidence (rule 17). Bullet budget: 8–11 experience bullets, rule 24's starting allocation
-     per role (in the brief), 0–1 for older roles; projects: 2 × 2 bullets (a 3rd only for co-op roles when it fills a
-     JD gap; 1 for mid-level). The build refuses content outside these limits;
+     per role (in the brief), 0–1 for older roles; projects: exactly 2 × 2 bullets on every resume, every track and
+     level (a 3rd only for co-op roles when it fills a JD gap; fewer than 2 fails). The build refuses content outside
+     these limits;
    - bullets: action → technical work → verified outcome; ≤ 25 words, ≤ 2 lines; JD wording only where the cited
      evidence supports it; every number exactly as written; no ownership or scale the evidence doesn't state;
    - each bullet cites the evidence ids it uses (same role/project only); `priority` 1 = keep … 5 = cut first;
    - fill the page: keep about as many bullets as `baseline.json` has (it is sized for one page) and drop only what
-     is irrelevant; the build warns above 30% empty space and, if you overshoot, trims in rule 67's order (duplicates
-     and weak bullets → JD-irrelevant skills → optional coursework and extras → fewer bullets / projects → spacing;
-     never below 10 pt). Make room by dropping JD-irrelevant skills yourself before cutting coursework or a project.
+     is irrelevant; the build warns above 30% empty space and, if you overshoot, trims in rule 67's order (JD-irrelevant
+     skills → optional skill rows and extra skills → coursework → [you: shorter wording] → Experience bullets down to
+     the overflow minimums → project bullets, minimum 1 each → spacing within layout limits; never below 10 pt; never
+     fewer than 2 projects). Make room by dropping JD-irrelevant skills yourself before cutting coursework.
    - rules 79–84 (v4.3): rank by the JD's responsibilities as well as its technologies; show a required skill in a
      bullet rather than only in Skills; distinct evidence across areas (brief → "Selection quality"); never claim or
      map TDD from test-writing bullets (TDD only as the self-reported skill); every Skills item cites its master

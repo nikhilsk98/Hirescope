@@ -124,7 +124,7 @@ def test_locked_bullets_are_never_trimmed():
                     Bullet(id="exp-a:keep", text="A locked low-priority bullet text", evidence_ids=["a"], priority=5),
                     Bullet(id="exp-a:one", text="Another bullet with priority five", evidence_ids=["b"], priority=5),
                     Bullet(id="exp-a:two", text="A third bullet that may be trimmed", evidence_ids=["c"], priority=5)])])
-    fix = pipeline.repair(c, validate.Report(pages=2, overflow_lines=30), 1, s, {"entry": 6}, {"exp-a:keep"})
+    fix = pipeline.repair(c, validate.Report(pages=2, overflow_lines=30), 2, s, {"entry": 6}, {"exp-a:keep"})
     assert "exp-a:keep" in [b.id for b in fix.content.experience[0].bullets]
 
 

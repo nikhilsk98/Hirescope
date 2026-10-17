@@ -409,7 +409,9 @@ def brief_lines(analysis: dict, bank: Bank, settings) -> list[str]:
               "- Introduce a client / sector before a bullet refers back to it (\"the distributor\") (rule 84).",
               "- JD asks for ML: an extended ML skill a bullet names goes in Skills too; an extended cloud platform "
               "(GCP) may be listed when the JD asks for cloud (rule 85).",
-              "- Overflow: JD-irrelevant skills go before coursework or a project (rule 67), and before shortening a "
+              "- Overflow (rule 67, v4.6): JD-irrelevant skills → optional skill rows / extra skills → coursework → "
+              "shorter wording → Experience bullets down to the overflow minimums → project bullets (min 1 each); "
+              "projects are never cut (always 2). JD-irrelevant skills also go before shortening a "
               "bullet's evaluation / result clause (\"evaluated on held-out …\", \"integrated … into\"); the build "
               "refuses a shortened bullet that lost it while JD-irrelevant skills remain.",
               "- A self-reported skill the JD doesn't name only with Nikhil's approval for this resume: list it in "
@@ -426,7 +428,7 @@ def brief_lines(analysis: dict, bank: Bank, settings) -> list[str]:
     L.append("- Certifications row (last, rule 29): " + "; ".join(certs))
     dflt, mx = rules_v4.audience_projects(bank, settings, analysis)
     L += [f"- Projects: {dflt}" + (f" (a 3rd only if it fills a real JD gap; up to {mx})" if mx > dflt else "")
-          + " (rules 46–48).",
+          + " (rules 46–47: never fewer than 2, for every track and level).",
           f"- Contact line: {'relocation — ' + X['contact'].get('relocation', '') if rules_v4.wants_relocation(analysis) else 'default — ' + X['contact'].get('location', '')} (rule 31).",
           "- One metric of each kind per resume (rule 8): latency/p95, throughput, deployment/pipeline duration, "
           "query time.", ""]
