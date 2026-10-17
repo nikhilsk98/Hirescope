@@ -278,6 +278,10 @@ def _cli_env(monkeypatch, tmp_path, cfg):
     _tmp_paths(monkeypatch, tmp_path)
     (tmp_path / "inputs" / "companies").mkdir(parents=True)
     (tmp_path / "inputs" / "companies" / "my_companies.csv").write_text("company,careers_url,notes\n")
+    # --pending also reads the dashboard's saved files from statuses_import_dir (~/Downloads in the DEMO prefs): a
+    # temporary folder, so a real saved job in your Downloads is never imported (or archived away) by the test
+    (tmp_path / "saved-files").mkdir()
+    cfg = cfg.model_copy(update={"prefs": cfg.prefs.model_copy(update={"statuses_import_dir": str(tmp_path / "saved-files")})})
     for m in (add_job, add_url):
         monkeypatch.setattr(m, "load_config", lambda *a, **k: cfg)
     monkeypatch.setattr(add_url, "Embedder", FakeEmbedder)

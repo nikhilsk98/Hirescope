@@ -526,9 +526,13 @@
     return out;
   }
   const postedText = (j) => (j.posted ? `Posted ${fmtDate(j.posted)}` : j.discovered ? `Discovered ${fmtTime(j.first_seen)} (posting date unknown)` : "Posting date unknown");
-  function card(j) {
+  // nav: a card inside the detail panel (Similar tab). Clicking it opens that job like ⌘K does, remembering the job
+  // you came from for "← Back"; only the checkbox toggles bulk selection, and nothing selects, skips or hides a job.
+  function card(j, nav) {
+    const open = () => (nav ? openJob(j.id, { from: true }) : openPanel(j.id));
     const c = el("article", { class: `card ${trackOf(j)}`, tabindex: "0", "data-id": j.id, "aria-label": `${j.title} at ${j.company}, score ${j.score == null ? "none" : Math.round(j.score)}`,
-      onclick: () => openPanel(j.id), onkeydown: (e) => { if (e.key === "Enter") { e.stopPropagation(); openPanel(j.id); } } },
+      onclick: (e) => { if (e.target.closest("input, button, a")) return; open(); },
+      onkeydown: (e) => { if (e.key === "Enter" && e.target === c) { e.stopPropagation(); open(); } } },
       el("div", { class: "avatar-wrap" },
         el("div", { class: "avatar", style: `background:${avatarColor(j.company)}`, "aria-hidden": "true", text: (j.company.match(/[A-Za-z0-9]/) || ["?"])[0].toUpperCase() }),
         selBox(j)),
@@ -543,7 +547,7 @@
           j.salary ? el("span", { text: `${j.salary.currency || ""} ${j.salary.min.toLocaleString()}–${j.salary.max.toLocaleString()}` }) : null,
           j.filtered ? el("span", { class: "err", text: (j.reasons || []).join("; ") }) : atsMeter(j),
           !j.filtered && (j.similar || []).length ? el("button", { class: "link-btn", type: "button", title: "Open the nearest similar open roles",
-            onclick: (e) => { e.stopPropagation(); openPanel(j.id, "Similar"); }, onkeydown: (e) => e.stopPropagation() }, `More like this (${j.similar.length})`) : null)),
+            onclick: (e) => { e.stopPropagation(); openJob(j.id, { tab: "Similar", from: nav }); }, onkeydown: (e) => e.stopPropagation() }, `More like this (${j.similar.length})`) : null)),
       el("div", { class: "card-side" }, j.filtered ? el("span", { class: "chip", text: "Filtered" }) : ring(j.score, j.label), moveButtons(j)));
     if (selectedId === j.id) c.classList.add("selected");
     if (picked.has(j.id)) c.classList.add("picked");
@@ -1278,15 +1282,21 @@
   // ---------- detail panel ----------
   const TABS = ["Overview", "Requirements", "Keywords", "Score", "Full JD", "Similar", "Notes & History"];
   let pTab = "Overview"; let pJob = null; let pDetail = null; let jdHighlight = null; let jdKw = null; let kwFilter = null; let lastFocus = null;
+  // jobs you navigated from inside the panel (Similar / More like this), newest last: {id, tab} for "← Back"
+  let navStack = []; let navOpening = false;
   function openPanel(id, tab) {
     const j = BY_ID.get(id); if (!j) return;
+    if (!navOpening) navStack = [];          // opened from the list, j/k, a link or the URL: a fresh trail
     if (dApp) closeDrawer();
     if (!pJob) lastFocus = document.activeElement;
     selectedId = id; pJob = j; pDetail = null; jdHighlight = null; jdKw = null; kwFilter = null;
     if (tab) pTab = tab;
     setInert(true);
     for (const n of document.querySelectorAll(".card.selected, tr.selected")) n.classList.remove("selected");
-    const n = document.querySelector(`[data-id="${id}"]`); if (n) n.classList.add("selected");
+    const n = document.querySelector(`#list [data-id="${id}"]`); if (n) { n.classList.add("selected"); n.scrollIntoView({ block: "nearest" }); }
+    const prev = navStack.length ? BY_ID.get(navStack[navStack.length - 1].id) : null;
+    $("#p-back").hidden = !prev;
+    $("#p-back").textContent = prev ? `← Back to ${prev.title} · ${prev.company}` : "";
     $("#panel").classList.add("open"); $("#panel").setAttribute("aria-hidden", "false"); $("#scrim").classList.add("open");
     $("#p-title").textContent = j.title;
     $("#p-sub").textContent = `${j.company}${j.tier ? ` · tier ${j.tier}` : ""} · ${j.location} · ${j.work_mode} · ${postedText(j)}`;
@@ -1300,7 +1310,7 @@
     setTimeout(() => $("#panel").focus({ preventScroll: true }), 0);
   }
   function closePanel() {
-    $("#panel").classList.remove("open"); $("#panel").setAttribute("aria-hidden", "true"); $("#scrim").classList.remove("open"); pJob = null;
+    $("#panel").classList.remove("open"); $("#panel").setAttribute("aria-hidden", "true"); $("#scrim").classList.remove("open"); pJob = null; navStack = [];
     setInert(false); writeHash();
     // focus goes back to the job's card (scrolled into view if virtualization had unmounted it), else where it was
     const i = current.findIndex((x) => x.id === selectedId);
@@ -1309,7 +1319,8 @@
     const target = node || (lastFocus && document.contains(lastFocus) ? lastFocus : null);
     if (target && target.focus) target.focus({ preventScroll: true });
   }
-  $("#p-close").addEventListener("click", closePanel); $("#scrim").addEventListener("click", () => { if (dApp) closeDrawer(); if (pJob) closePanel(); });
+  $("#p-close").addEventListener("click", closePanel);
+  $("#p-back").addEventListener("click", () => { const b = navStack.pop(); if (b) openJob(b.id, { back: true, tab: b.tab }); }); $("#scrim").addEventListener("click", () => { if (dApp) closeDrawer(); if (pJob) closePanel(); });
   function renderPanelBody(node) { const b = $("#p-body"); b.textContent = ""; b.append(node); b.scrollTop = 0; }
   function renderPanel() {
     const tabs = $("#p-tabs"); tabs.textContent = "";
@@ -1496,10 +1507,14 @@
   }
   function similarTab(j) {
     const out = el("div");
-    const sims = (j.similar || []).map((id) => BY_ID.get(id)).filter(Boolean);
+    const sims = j.similar || [];
     if (!sims.length) { out.append(el("div", { class: "empty", text: "No similar open roles found." })); return out; }
-    out.append(el("p", { class: "muted", style: "margin-top:0", text: "More like this — the nearest open roles in the same track (local embedding similarity)." }));
-    out.append(el("div", { class: "list" }, sims.map(card)));
+    out.append(el("p", { class: "muted", style: "margin-top:0", text: "More like this — the nearest open roles in the same track (local embedding similarity). Click one to open it; ← Back returns here." }));
+    out.append(el("div", { class: "list" }, sims.map((id) => {
+      const s = BY_ID.get(id);
+      return s ? card(s, true) : el("button", { class: "card", type: "button", "data-id": id, onclick: () => openJob(id, { from: true }) },
+        el("div", { class: "card-body" }, el("div", { class: "card-title", text: `Job ${id}` }), el("div", { class: "card-sub", text: "Details aren't loaded in this dashboard: click for what HireScope knows" })));
+    })));
     return out;
   }
   function notesTab(j) {
@@ -1831,13 +1846,14 @@
   }
   // every job (search.js, written by each run; loaded the first time the palette opens): both tracks, every view,
   // Filtered Out, beyond the top N, closed. Until it loads (or if it is missing) the palette searches the loaded jobs.
-  let SEARCH = null; let searchState = "idle";
+  let SEARCH = null; let searchState = "idle"; const searchWaiters = [];
+  const flushWaiters = () => { for (const f of searchWaiters.splice(0)) f(); };
   function loadSearch() {
     if (searchState !== "idle") return;
     searchState = "loading";
-    window.__search = (d) => { SEARCH = d; searchState = "ready"; if ($("#palette").open) drawPalette($("#palette-q").value); };
+    window.__search = (d) => { SEARCH = d; searchState = "ready"; flushWaiters(); if ($("#palette").open) drawPalette($("#palette-q").value); };
     const s = el("script", { src: "search.js" });
-    s.onerror = () => { searchState = "missing"; };
+    s.onerror = () => { searchState = "missing"; flushWaiters(); };
     document.head.append(s);
   }
   let JOBS_INDEX = null;
@@ -1852,9 +1868,31 @@
     return JOBS_INDEX;
   }
   function openFromPalette(res) {
-    const j = BY_ID.get(res.id);
-    if (!j) { showJobInfo(res); return; }
-    const tgt = V.openTarget({ ...res, track: trackOf(j) }, ui.track);
+    if (!BY_ID.get(res.id)) { showJobInfo(res); return; }
+    openJob(res.id);
+  }
+  // Open any job the way ⌘K does: its track tab and view, filters / search cleared (with a notice) when they would hide
+  // it, its card focused in the list, the detail panel on `tab` (Overview by default). `from`: opened from inside the
+  // panel (the current job goes on the Back trail); `back`: returning along it. A job the dashboard holds no details
+  // for (closed, below the top N, unlisted) shows the ⌘K info card instead.
+  function openJob(id, o = {}) {
+    const j = BY_ID.get(id);
+    if (!j) { showMissingJob(id); return; }
+    if (o.from && pJob && pJob.id !== id) navStack.push({ id: pJob.id, tab: pTab });
+    else if (!o.from && !o.back) navStack = [];
+    revealJob(j);
+    navOpening = true;
+    try { openPanel(j.id, o.tab || "Overview"); } finally { navOpening = false; }
+  }
+  function showMissingJob(id) {
+    const show = () => showJobInfo(V.resultById(SEARCH, id) || { id, title: `Job ${id}`, company: "Not in this dashboard", trackLabel: "", state: "",
+      view: "Not in the loaded jobs or the search index" });
+    if (SEARCH || searchState === "missing") { show(); return; }
+    searchWaiters.push(show); loadSearch();
+  }
+  function revealJob(j) {
+    const res = { track: trackOf(j) };
+    const tgt = V.openTarget(res, ui.track);
     if (tgt.track !== ui.track) switchTrack(tgt.track);
     const want = j.filtered ? "filtered" : (["all", "last24", "apply", "mine", "external", "closing", "missed", "tracker",
       "shortlisted", "resumes"].includes(tstate().view) ? tstate().view : "all");
@@ -1868,7 +1906,6 @@
     saveUI(); renderBanners(); renderAll();
     const i = current.findIndex((x) => x.id === j.id);
     if (vlist && i >= 0) vlist.ensureVisible(i);
-    openPanel(j.id);
   }
   function showJobInfo(res) {            // closed / unlisted jobs: the dashboard holds no details for them
     const d = $("#job-info");

@@ -408,6 +408,8 @@ table.vgrid td { overflow: hidden; }
 .move-btns { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
 .link-btn { border: 0; background: none; padding: 0; color: var(--accent); font-size: var(--fs-sm); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 .link-btn:hover { color: var(--text); }
+.p-back { display: block; margin-bottom: var(--sp-2); text-decoration: none; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p-back:hover { text-decoration: underline; }
 
 /* ---------- Apply Today, pinned above the list ---------- */
 .pinned { margin-bottom: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-1); }

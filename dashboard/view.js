@@ -156,11 +156,17 @@
       trackLabel: TRACK_NAMES[r[3]] || "Full-time", state: r[4], view: STATE_VIEW[r[4]] || "",
       viewId: r[4] === "v" ? "all" : r[4] === "f" ? "filtered" : null, reason: r[5] >= 0 ? idx.reasons[r[5]] : null, date: r[6] || null };
   }
+  /** One job from the search index (search.js) by its HireScope ID, as searchJobs returns it; null when absent. */
+  function resultById(idx, id) {
+    if (!idx) return null;
+    const r = idx.rows.find((x) => x[0] === id);
+    return r ? resultOf(idx, r) : null;
+  }
   /** Where to open a job: the tab (track) and view. Unclear jobs show in both tabs: stay on the current one. */
   function openTarget(res, currentTrack) {
     return { track: res.track === "unclear" ? currentTrack : res.track, view: res.viewId };
   }
 
-  return { searchJobs, openTarget, STATE_VIEW, Heights, visibleRange, jdBlocks, jdSections, salaryMatch, salaryLabel, snapshot, saveView, applyView,
+  return { searchJobs, resultById, openTarget, STATE_VIEW, Heights, visibleRange, jdBlocks, jdSections, salaryMatch, salaryLabel, snapshot, saveView, applyView,
            deleteView, reasonForKey, keyForIndex, dayTabs, manualState, markChecked, REQ_HEAD };
 });

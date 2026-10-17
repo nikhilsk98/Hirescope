@@ -216,3 +216,43 @@ def test_j1_only_statement_is_not_general_no_sponsorship():
     from jobsearch.extract.flags import extract_flags as ef
     assert ef("DoorDash does not support students on J-1 visas at this time.")["sponsorship"]["value"] == "Not stated"
     assert ef("We do not sponsor H-1B or J-1 visas.")["sponsorship"]["value"] == "No sponsorship"
+
+
+# --- past or mismatched seasons (co-op track) -------------------------------------------------------------------------
+@pytest.mark.parametrize("terms,past", [
+    (["Summer 2026"], ["Summer 2026"]),
+    (["Fall 2026"], ["Fall 2026"]),
+    (["Winter 2026"], ["Winter 2026"]),                       # Dec 2025 – Feb 2026: over
+    (["Summer 2026", "Fall 2026"], ["Summer 2026", "Fall 2026"]),
+    (["Nov 2026 start"], ["Nov 2026 start"]),                 # starts before the co-op window
+    (["Spring 2027"], []), (["Winter 2027"], []), (["January 2027"], []), (["Jan 2027 start"], []),
+    (["Fall 2026", "Spring 2027"], []),                       # one current term keeps the job
+    (["Class of 2027"], []), ([], []),                        # no season stated: never hidden
+])
+def test_season_passed(terms, past):
+    from jobsearch.extract.dates import season_passed
+    assert season_passed(terms, "2026-12", "2026-10") == past
+
+
+def test_season_passed_without_a_window_uses_today_only():
+    from jobsearch.extract.dates import season_passed
+    assert season_passed(["Fall 2026"], None, "2026-10") == []           # not over yet
+    assert season_passed(["Summer 2026"], None, "2026-10") == ["Summer 2026"]
+
+
+def test_past_season_filtered_on_coop_track(cfg):
+    r = rules(cfg, track="coop_intern", normalized_title="software engineer co op", level="intern", terms=["Fall 2026"])
+    assert r.hidden and any(x.startswith("Season has passed: Fall 2026") for x in r.reasons)
+    r = rules(cfg, track="coop_intern", normalized_title="software engineer co op", level="intern", terms=["Winter 2026"])
+    assert r.hidden and any("Season has passed: Winter 2026" in x for x in r.reasons)
+    for ok in (["Spring 2027"], ["January 2027"], ["Fall 2026", "Spring 2027"], []):
+        r = rules(cfg, track="coop_intern", normalized_title="software engineer co op", level="intern", terms=ok)
+        assert not any("Season has passed" in x for x in r.reasons), ok
+    # full-time track: never this rule
+    r = rules(cfg, track="full_time", normalized_title="software engineer", terms=["Fall 2026"])
+    assert not any("Season has passed" in x for x in r.reasons)
+    # soft mode: kept, recorded as a soft issue
+    p = cfg.prefs.model_copy(deep=True); p.rules.season_passed = "soft"
+    r = apply_rules(job(track="coop_intern", normalized_title="software engineer co op", level="intern",
+                        terms=["Fall 2026"]), p, cfg.title_rules, NOW)
+    assert not r.hidden and any("Season has passed" in x for x in r.soft_issues)

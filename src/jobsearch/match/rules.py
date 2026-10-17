@@ -15,7 +15,7 @@ from rapidfuzz import fuzz
 
 from ..config import Preferences, TitleRules
 from ..extract.normalize import has_word, normalize_title
-from ..extract.dates import Window
+from ..extract.dates import Window, season_passed
 from ..extract.track import COOP, FULL_TIME, UNCLEAR
 
 
@@ -157,7 +157,7 @@ def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime 
         elif prefs.max_posting_age_days and age > prefs.max_posting_age_days:
             fail("posting_age", f"Posted {age} days ago (max {prefs.max_posting_age_days})")
 
-    _two_track(job, prefs, rules, res, fail)
+    _two_track(job, prefs, rules, res, fail, now)
     _work_authorization(job, prefs, res, fail)
 
     s = prefs.salary
@@ -178,7 +178,7 @@ def _fmt_window(w: dict) -> str:
     return a if a == b else f"{a} – {b}"
 
 
-def _two_track(job: dict, prefs: Preferences, rules: TitleRules, res: RuleResult, fail) -> None:
+def _two_track(job: dict, prefs: Preferences, rules: TitleRules, res: RuleResult, fail, now: datetime) -> None:
     """Co-op/intern and full-time track rules from preferences.tracks (start windows, preferred terms), plus the
     summer-only filter, graduation windows, New Grad and eligibility signals. Unstated dates are uncertain,
     never a rejection."""
@@ -208,6 +208,9 @@ def _two_track(job: dict, prefs: Preferences, rules: TitleRules, res: RuleResult
         if t.coop_intern.filter_summer_only and job.get("summer_only"):
             fail("summer_only", "Summer-only internship (filtered: tracks.coop_intern.filter_summer_only)")
         lo, hi = t.coop_intern.start_window or ("", "")
+        if past := season_passed(terms, lo or None, f"{now.year:04d}-{now.month:02d}"):
+            fail("season_passed", f"Season has passed: {', '.join(past)} (over, or starts before your co-op window"
+                                  f"{f' from {lo}' if lo else ''})")
         if sws and t.coop_intern.start_window:
             ok = [w for w in sws if lo <= w["start"][:7] <= hi]
             if ok:

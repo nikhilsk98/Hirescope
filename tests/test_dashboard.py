@@ -220,3 +220,16 @@ console.log(JSON.stringify({{coop: V.searchJobs(idx, "data engineer", "coop_inte
     assert js["ft"] == [12, 13, 11, 10]                          # the current track first within each view
     assert js["company"] == [13, 15, 11]          # in the lists, then beyond the top N, then unlisted filtered and js["none"] == [] and js["reason"] == "Not in the US"
     assert js["target"] == [{"track": "full_time"}, {"track": "coop_intern", "view": "all"}]
+
+
+@needs_node
+def test_result_by_id_for_similar_jobs_without_details():
+    """A Similar-tab job the dashboard holds no details for is looked up in search.js by its ID (the ⌘K info card)."""
+    idx = {"companies": ["DemoCo"], "reasons": ["Season has passed: Fall 2026"],
+           "rows": [[7, 0, "Software Co-op (DEMO)", 0, "u", 0, ""], [8, 0, "Engineer (DEMO)", 1, "c", -1, "2026-10-01"]]}
+    js = _node(f"const idx = {json.dumps(idx)};"
+               "console.log(JSON.stringify([V.resultById(idx, 7), V.resultById(idx, 8), V.resultById(idx, 9), V.resultById(null, 7)]));")
+    a, b, c, d = js
+    assert a["company"] == "DemoCo" and a["trackLabel"] and a["reason"] == "Season has passed: Fall 2026" and a["state"] == "u"
+    assert b["state"] == "c" and b["date"] == "2026-10-01" and b["track"] == "full_time"
+    assert c is None and d is None

@@ -242,7 +242,10 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
   in the URL hash (`#fulltime/all?label=Strong&sort=newest&job=123&tab=Keywords`), so a view is bookmarkable.
 - Detail panel: Overview (incl. "You know N people here"), Requirements (✓ / ✗ / ? per line), Keywords, Score
   breakdown (incl. learned adjustments), Full JD (collapsible sections, keywords highlighted, Jump to requirements;
-  one click on a keyword chip highlights it there with its evidence), Similar jobs, Notes & History; actions Generate
+  one click on a keyword chip highlights it there with its evidence), Similar jobs (click a card — or its "More like
+  this" — to open that job the way ⌘K does: its track and view, filters cleared with a notice if they'd hide it, its
+  card focused; "← Back to …" returns to the job you came from; only the checkbox bulk-selects; a job with no loaded
+  details shows the ⌘K info card), Notes & History; actions Generate
   Resume, Open Application, Shortlist, **Mark Applied**, Skip with reason, status, LinkedIn search, Levels.fyi /
   Glassdoor / engineering blog (`config/eng_blogs.yaml`, verified URLs; a search link otherwise). The panel keeps
   keyboard focus inside while open; `Esc` closes it and focus returns to the job's card.
@@ -318,6 +321,7 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
 | Titles | intern/co-op titles with a software word (`coop_role_words`) | core + related titles (`title_rules.yaml`), plus meaning-based rescues |
 | Start | stated start must fall in Dec 2026 – Mar 2027 (`tracks.coop_intern.start_window`), else a soft penalty; unknown = uncertain | stated start before May 2027 is a soft penalty |
 | Filtered | summer-only internships (`filter_summer_only`) | — |
+| Filtered | "Season has passed": every stated term is over or starts before your co-op window (Summer / Fall / Winter 2026 with a window from Dec 2026; Spring 2027, Winter 2027, Jan 2027 and later stay) — `rules.season_passed` | — |
 | Boosts | Spring 2027 / Jan 2027 terms; extra freshness urgency (×1.5) | New Grad / University Grad / Class of 2027 (badge + boost), 2027-start terms |
 | Both | graduation windows ("graduating between…", "Class of 2026") must include your date (±2 months) or the job is filtered with the quote; "no more than 1 year of experience" lines are kept with a **Check eligibility** flag; levels: entry and mid match, senior ≤ 5 years is Stretch, 7+ years / staff+ / managers filtered |
 

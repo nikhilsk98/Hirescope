@@ -866,3 +866,21 @@ reuse, web-sockets → Socket.IO).
   not joined at exit.
 
 **Tests**: 3 new (source timeout, quick deadline, extraction_stale).
+
+## Dashboard Similar navigation + "Season has passed" (2026-10-17)
+- Similar tab: clicking a card (anywhere but its checkbox) opens that job like ⌘K — its track and view, filters /
+  search cleared with a notice when they'd hide it, its list card focused, the panel on Overview — instead of
+  re-showing the Similar tab of a job with the same title (it looked like the job disappeared). "← Back to …"
+  returns along the trail (to the tab you left); "More like this (N)" works the same way; a similar job with no loaded
+  details shows the ⌘K info card (`HSView.resultById` over search.js). Only the checkbox bulk-selects.
+- Co-op track rule `season_passed` (hard by default): every stated term over or starting before the co-op window
+  (Summer / Fall / Winter 2026, "Nov 2026 start") → filtered "Season has passed: …"; Winter / Spring / Jan 2027 and
+  later kept, and one current term keeps the job. On a copy of the data a rescore filtered 1,053 open jobs; no
+  visible co-op job or Similar entry kept a past-only season. The real dashboard picks it up at the next run.
+- tests/test_external.py: the CLI tests read the real ~/Downloads for dashboard-saved external jobs (a saved file
+  there failed the test and could be imported / archived away); they now use a temporary folder.
+- Headless Chrome (DevTools protocol from Node): each similar job opens, Back returns, two-hop Back, checkbox only
+  selects, More like this, info card for a missing job, filters cleared with a notice; no job removed, no status
+  written.
+
+**Tests**: 663 passed.

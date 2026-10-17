@@ -86,6 +86,7 @@ rules:
   summer_only: hard       # co-op track: summer-only internships (see tracks.coop_intern.filter_summer_only)
   grad_window: hard       # a stated graduation window ("Class of 2026") that excludes your graduation date
   start_window: soft      # a stated start date outside the track's window
+  season_passed: hard     # co-op track: every stated term is over or starts before the co-op window ("Season has passed")
   stale_posting: hard     # posted more than ghost.stale_days ago (likely a stale or evergreen listing)
   work_authorization: hard  # explicit no-sponsorship (full-time) / citizens-only / clearance-required postings
 

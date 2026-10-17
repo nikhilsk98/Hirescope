@@ -165,6 +165,31 @@ def parse_start_windows(text: str, terms: list[str] | None = None) -> list[Windo
                                      w.end <= o.end and (o.start, o.end) != (w.start, w.end) for o in ws)]
 
 
+def term_window(term: str) -> Window | None:
+    """A stated term as a window: "Summer 2026" → 2026-05..2026-08, "Winter 2026" → 2025-12..2026-02 (a winter term
+    spans the new year), "Jan 2027 start" → 2027-01. Anything else (e.g. "Class of 2027") → None."""
+    if m := re.match(r"(Spring|Summer|Fall|Autumn|Winter)\s+(20\d\d)$", term or "", re.I):
+        return Window(_point(None, m.group(1), m.group(2), "start"), _point(None, m.group(1), m.group(2), "end"), term)
+    m = re.match(r"([A-Za-z]{3,9})\.?\s+(20\d\d)(?: start)?$", term or "")
+    if m and m.group(1).lower() in _MONTHS:
+        ym = _point(m.group(1), None, m.group(2), "start")
+        return Window(ym, ym, term)
+    return None
+
+
+def season_passed(terms: list[str], window_start: str | None, today: str | None = None) -> list[str]:
+    """Co-op track: the stated season terms when every one of them is already over (ends before this month) or starts
+    before your co-op window ("Summer 2026", "Fall 2026", "Winter 2026" with a window from 2026-12). Empty when no term
+    is stated or any term still fits (Winter 2027, Spring 2027, Jan 2027 and later) — a job is never hidden for one
+    past term among current ones."""
+    today = today or _ym(date.today().year, date.today().month)
+    wins = [w for w in (term_window(t) for t in terms or []) if w]
+    if not wins:
+        return []
+    bad = [w for w in wins if w.end < today or (window_start and w.start < window_start)]
+    return [w.evidence for w in bad] if len(bad) == len(wins) else []
+
+
 def summer_only(terms: list[str], title: str, text: str) -> bool:
     """True when every stated term is a Summer term (and nothing says spring/winter/fall/off-cycle/co-op)."""
     seasons = {t.split()[0] for t in terms if re.match(r"(Spring|Summer|Fall|Winter) 20\d\d$", t)}

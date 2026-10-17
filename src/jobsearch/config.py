@@ -60,6 +60,7 @@ class Rules(BaseModel):
     summer_only: RuleMode = "hard"  # co-op track: summer-only internships (tracks.coop_intern.filter_summer_only)
     grad_window: RuleMode = "hard"  # a stated graduation window that excludes your graduation date
     start_window: RuleMode = "soft" # a stated start date outside the track's window
+    season_passed: RuleMode = "hard"  # co-op track: every stated term is over or starts before your co-op window
     stale_posting: RuleMode = "hard"  # posted more than ghost.stale_days ago
     work_authorization: RuleMode = "hard"  # explicit no-sponsorship / citizens-only / clearance (see rules.py)
 
