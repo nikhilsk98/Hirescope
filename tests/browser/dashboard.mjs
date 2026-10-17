@@ -171,12 +171,13 @@ const scenarios = {
     await p.eval(`(() => { const f = document.querySelector(".builder-form"); f.elements.company.value = "DemoNew"; f.elements.role.value = "Backend Co-op (DEMO)";
       f.elements.location.value = "Remote"; f.elements.jd.value = "DemoNew builds payments. Requirements: Python, SQL."; f.elements.track.value = "coop_intern"; })()`);
     await p.eval(`document.querySelector(".builder-form button[type=submit]").click()`); await p.sleep(400);
-    const dl = await p.eval(`window.__dl[0]`);
     const sent = await p.eval(`window.__links[0] || ""`);
-    check("saves the job file", dl && /^hirescope-external-job-DemoNew-\d{8}T\d{6}-[a-z0-9]+\.json$/.test(dl.name) && JSON.parse(dl.text).origin === "resume_builder" && JSON.parse(dl.text).jd_text.includes("payments"), dl && dl.name);
-    check("opens hirescope://external for that file", dl && sent === `hirescope://external?file=${encodeURIComponent(dl.name)}`, sent);
+    check("pasted JD: no download", (await p.eval(`window.__dl.length`)) === 0);
+    const m = /^hirescope:\/\/external\?data=([A-Za-z0-9_-]+)$/.exec(sent);
+    const job = m ? JSON.parse(Buffer.from(m[1], "base64url").toString("utf8")) : null;
+    check("pasted JD travels inside the link", job && job.origin === "resume_builder" && job.company === "DemoNew" && job.jd_text.includes("payments"), sent.slice(0, 80));
     check("pending row shows Importing", /Importing/.test(await p.eval(`document.querySelector(".ext-table").textContent`)));
-    check("status banner", /Sent to the launcher/.test(await p.eval(`document.querySelector(".ext-status").textContent`)));
+    check("status banner", /Sent to the launcher/.test(await p.eval(`document.querySelector(".ext-status").textContent`)) && /sent to HireScope/.test(await p.eval(`document.querySelector(".ext-status").textContent`)));
     await p.eval(`document.querySelector(".builder-form").elements.company.value = "typing…"`);
     await p.eval(`window.__hsLive({generated_at: "b1", queue: [], launcher: {at: new Date().toISOString().slice(0, 19) + "+00:00", action: "external", ok: true, message: "imported DemoNew — Backend Co-op (DEMO) (job 99); resume queued"}})`);
     await p.sleep(150);
@@ -185,9 +186,10 @@ const scenarios = {
     // URL only
     await p.eval(`(() => { const f = document.querySelector(".builder-form"); f.reset(); f.elements.url.value = "https://jobs.demo.example/postings/7"; })()`);
     await p.eval(`document.querySelector(".builder-form button[type=submit]").click()`); await p.sleep(400);
-    const dl2 = await p.eval(`window.__dl[1]`);
-    check("URL only: saved with the URL and no JD", dl2 && JSON.parse(dl2.text).url === "https://jobs.demo.example/postings/7" && !JSON.parse(dl2.text).jd_text);
-    check("URL only: one external link", (await p.eval(`window.__links.length`)) === 2);
+    const s2 = await p.eval(`window.__links[1] || ""`);
+    const j2 = /data=([A-Za-z0-9_-]+)$/.exec(s2) ? JSON.parse(Buffer.from(/data=([A-Za-z0-9_-]+)$/.exec(s2)[1], "base64url").toString("utf8")) : null;
+    check("URL only: inside the link, no JD", j2 && j2.url === "https://jobs.demo.example/postings/7" && !j2.jd_text);
+    check("URL only: one external link, still no download", (await p.eval(`window.__links.length`)) === 2 && (await p.eval(`window.__dl.length`)) === 0);
   },
   async queue_questions(p) {
     await p.eval(CAPTURE + `; localStorage.setItem("jobsearch.launcherTip.v1", "true")`);

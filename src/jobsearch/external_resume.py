@@ -98,26 +98,54 @@ def requests_dir() -> Path:
     return paths.STATE_DIR / "external_requests"
 
 
-def request(file_arg: str) -> Path:
-    """The launcher's half: remember which file to import (the worker does the rest)."""
-    named_path(file_arg)
+def request(file_arg: str | None = None, payload: dict | None = None) -> Path:
+    """The launcher's half: remember which file to import — or the job itself, sent inside the link — (the worker does
+    the rest)."""
+    if payload is None:
+        named_path(file_arg)
     d = requests_dir()
     d.mkdir(parents=True, exist_ok=True)
     p = d / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}-{os.getpid()}.json"
-    p.write_text(json.dumps({"file": file_arg, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}),
-                 encoding="utf-8")
+    p.write_text(json.dumps({"file": file_arg, "payload": payload,
+                             "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}), encoding="utf-8")
     return p
 
 
-def pending_requests() -> list[Path]:
+def import_payload_and_queue(conn, cfg, payload: dict) -> dict:
+    """A pasted JD sent inside the link: import it (usual dedupe) and queue its resume. No file anywhere."""
+    from resume_builder import queue
+    res = import_file(conn, cfg, None, payload)
+    db.set_meta(conn, "publish_pending", db.utcnow())
+    conn.commit()
+    q = queue.add(conn, [res["job_pk"]], origin="resume_builder")[0]
+    queue.kick()
+    j = conn.execute("SELECT company, title FROM jobs WHERE id=?", (res["job_pk"],)).fetchone()
+    name = f"{j['company']} — {j['title']}" if j else f"job {res['job_pk']}"
+    msg = (f"{'matched existing' if res['status'] == 'duplicate' else 'imported'} {name} (job {res['job_pk']}); resume "
+           + ("queued" if q["status"] == "queued" else q["message"].split(": ", 1)[-1]))
+    return {"job_pk": res["job_pk"], "imported": res["status"], "queue": q["status"], "message": msg, "note": ""}
+
+
+def pending_requests(include_blocked: bool = True) -> list[Path]:
     d = requests_dir()
-    return sorted(d.glob("*.json")) if d.is_dir() else []
+    files = sorted(d.glob("*.json")) if d.is_dir() else []
+    if include_blocked:
+        return files
+    out = []
+    for f in files:                       # waiting for macOS permission: doesn't keep the worker running
+        try:
+            if not json.loads(f.read_text(encoding="utf-8")).get("blocked_reported"):
+                out.append(f)
+        except (OSError, ValueError):
+            pass
+    return out
 
 
 def process_requests(conn, cfg=None) -> list[dict]:
     """The worker's half: import each requested file and queue its resume; the outcome goes to live.js (the Resume
     Builder tab shows it). A file that is refused or can't be imported is reported and dropped."""
     import sqlite3
+    from .ops.desktop_access import readable
     out = []
     for r in pending_requests():
         try:
@@ -125,17 +153,31 @@ def process_requests(conn, cfg=None) -> list[dict]:
         except (OSError, ValueError):
             r.unlink(missing_ok=True)
             continue
+        target = named_path(str(req.get("file") or "x.json"))
+        if not req.get("payload") and target.parent == downloads_dir():
+            ok, why = readable(downloads_dir(), target.name)     # never hang on macOS's Downloads prompt
+            if not ok:
+                if not req.get("blocked_reported"):
+                    cmd = f'./scripts/external_resume.sh "{target.name}"'
+                    db.set_meta(conn, "launcher_last", json.dumps({
+                        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "action": "external", "ok": False,
+                        "message": f"{why} It is imported as soon as that's allowed; or now in Terminal: {cmd}"}))
+                    conn.commit()
+                    r.write_text(json.dumps({**req, "blocked_reported": True}), encoding="utf-8")
+                out.append({"file": req.get("file"), "ok": False, "blocked": True, "message": why})
+                continue
         if cfg is None:
             from .config import load_config
             cfg = load_config(paths.PREFERENCES)
         at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         try:
-            res = import_and_queue(conn, cfg, req["file"])
+            res = (import_payload_and_queue(conn, cfg, req["payload"]) if req.get("payload")
+                   else import_and_queue(conn, cfg, req["file"]))
             msg, ok = (f"{res['note']}; {res['message']}" if res["note"] else res["message"]), True
         except sqlite3.OperationalError:
             break                                         # the database is busy: try again on the next round
         except (FileRefused, ValueError, external.ExternalError) as e:
-            msg, ok = f"{Path(str(req.get('file'))).name}: {e}", False
+            msg, ok = f"{Path(str(req.get('file') or 'the pasted job')).name}: {e}", False
         db.set_meta(conn, "launcher_last", json.dumps({"at": at, "action": "external", "ok": ok, "message": msg}))
         conn.commit()
         r.unlink(missing_ok=True)
@@ -186,9 +228,13 @@ def _payload(p: Path) -> dict | None:
     return data
 
 
-def import_file(conn, cfg, p: Path) -> dict:
-    """{job_pk, status: new | duplicate | updated | seen, message}. Raises ValueError for a file that can't be imported."""
-    payload = _payload(p)
+def import_file(conn, cfg, p: Path | None, payload: dict | None = None) -> dict:
+    """{job_pk, status: new | duplicate | updated | seen, message}. Raises ValueError for a file that can't be imported.
+    `payload`: the job itself (a pasted JD sent inside the link), no file involved."""
+    if payload is None:
+        payload = _payload(p)
+    elif not isinstance(payload, dict) or payload.get("kind") != "hirescope_external_job":
+        raise FileRefused("not a HireScope external job")
     if payload is not None and payload.get("url") and not str(payload.get("jd_text") or "").strip() \
             and not payload.get("file"):
         from .adapters.base import HttpClient

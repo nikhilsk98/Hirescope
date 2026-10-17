@@ -89,6 +89,8 @@ def data_sandbox(tmp_path, monkeypatch):
     monkeypatch.setenv("HIRESCOPE_NO_KICK", "1")
     monkeypatch.setenv("HIRESCOPE_NO_NOTIFY", "1")
     monkeypatch.setenv("HIRESCOPE_NO_LSOF", "1")
+    from jobsearch.ops import desktop_access
+    desktop_access.forget()
 
 
 @pytest.fixture(autouse=True)

@@ -160,4 +160,4 @@ def test_disabled_and_unwritable(xconn, monkeypatch, tmp_path):
         msg = X.update(conn, ro / "sub" / "A.xlsx")
     finally:
         os.chmod(ro, 0o700)
-    assert "not written" in msg and json.loads(db.get_meta(conn, "excel_applications"))["status"] == "error"
+    assert ("not written" in msg or "macOS did not let" in msg) and json.loads(db.get_meta(conn, "excel_applications"))["status"] == "error"

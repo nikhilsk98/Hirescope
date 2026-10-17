@@ -122,6 +122,10 @@ def after_current(job_dir: Path, settings=None) -> str | None:
     enabled, folder = settings_of(settings)
     if not enabled:
         return None
+    from jobsearch.ops.desktop_access import writable
+    ok, why = writable(folder)               # a background build never hangs on a macOS permission prompt
+    if not ok:
+        return f"Desktop copy skipped: {why}"
     try:
         res = sync_job(job_dir, folder)
     except OSError as e:
@@ -173,6 +177,10 @@ def sync_all(settings=None, force: bool = False) -> tuple[int, list[str]]:
     if not (enabled or force):
         return 0, ["Desktop copy is off (desktop_copy.enabled: false in config/resume_builder.yaml); nothing copied."]
     lines, copied, removed = [], 0, 0
+    from jobsearch.ops.desktop_access import writable
+    ok, why = writable(folder)
+    if not ok:
+        return 1, [f"Desktop copy skipped: {why}"]
     try:
         for jd in job_dirs():
             res = sync_job(jd, folder)

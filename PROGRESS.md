@@ -1143,3 +1143,24 @@ Low (left as is): the native file input's look; the faint ⌘K hint.
   launcher succeeds with ~/Downloads unreadable.
 - Needs Nikhil (optional): if the prompt "HireScope Launcher would like to access files in your Downloads folder" is
   still on screen, either answer is fine now (the launcher no longer needs that access).
+
+## Background jobs vs. macOS folder permissions (2026-10-17, found in the end-to-end run)
+- **The scheduled 05:20 quick check hung for an hour** in rename() writing the applications Excel file to the Desktop:
+  macOS was asking whether the background Python may write there, and nobody could answer. The resume worker hung the
+  same way opening a saved external-job file in ~/Downloads. (Earlier sessions recorded Downloads as readable by the
+  venv's Python under launchd; that no longer holds.) Both processes stopped; nothing was lost (the quick check's
+  fetched data is in SQLite; the next run publishes it).
+- Fix: `src/jobsearch/ops/desktop_access.py` probes a protected folder in a child Python with an 8 s timeout (write +
+  rename for the Desktop; list + open for Downloads); a blocked or hanging probe is killed and the caller skips that
+  folder with a message on how to allow it (dashboard notice via live.js). Used by the Excel writer, the Desktop resume
+  copies (`desktop.after_current`, `sync_all`), the statuses / external-job imports of each run (`statuses.access`) and
+  the worker's Resume Builder imports (the request stays and is imported once access is allowed; it no longer keeps
+  the worker running).
+- A pasted JD (or a URL) now travels inside the link: `hirescope://external?data=<base64url JSON>` (≤ 120 KB; macOS
+  delivered a 100 KB link to the launcher in a test). No download, no folder permission. Only an uploaded JD file goes
+  through ~/Downloads (and needs the permission below, or the Terminal fallback).
+- **Needs Nikhil** (one-time, recommended): System Settings → Privacy & Security → Files and Folders → allow
+  **Python** (`/opt/homebrew/…/Python.app`) the **Desktop** and **Downloads** folders (or answer the macOS prompts if
+  they are on screen). Until then: background builds and runs skip the Desktop copies and the Excel file (everything
+  is in data.nosync; any dashboard click through the launcher app — which may write to the Desktop — or
+  `./scripts/sync_desktop_resumes.sh` copies them), and uploaded JD files need `./scripts/external_resume.sh "<file>"`.

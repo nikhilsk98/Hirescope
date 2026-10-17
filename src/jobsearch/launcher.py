@@ -45,6 +45,7 @@ from .storage import db
 
 log = logging.getLogger("jobsearch.launcher")
 MAX_URL = 8000
+MAX_DATA_URL = 120_000                 # external?data=…: a pasted JD travels inside the link (macOS delivers 100 KB)
 BUSY_MS, BUSY_TRIES = 4000, 4          # ~20 s at most on a database a run is writing, then the link is spooled
 MAX_JOBS = 100
 _DIGITS = re.compile(r"^\d{1,9}$")
@@ -121,6 +122,27 @@ def _level(v: str) -> str:
     return v
 
 
+def _data(v: str) -> dict:
+    """external?data=<base64url of the job's JSON>: decoded and checked here, stored only as data."""
+    import base64
+    import binascii
+    if not re.match(r"^[A-Za-z0-9_-]{20,}={0,2}$", v):
+        raise LinkError("data must be base64url")
+    try:
+        obj = json.loads(base64.urlsafe_b64decode(v + "=" * (-len(v) % 4)).decode("utf-8"))
+    except (binascii.Error, ValueError, UnicodeDecodeError):
+        raise LinkError("data is not a saved external job") from None
+    if not isinstance(obj, dict) or obj.get("kind") != "hirescope_external_job" or obj.get("format", 1) != 1:
+        raise LinkError("data is not a HireScope external job")
+    if obj.get("file"):
+        raise LinkError("files travel as a saved file, not inside the link")
+    keep = {k: (str(obj.get(k) or "")[:200_000 if k == "jd_text" else 2000]) for k in
+            ("company", "role", "location", "url", "track", "jd_text", "origin", "created_at")}
+    if not (keep["jd_text"].strip() or keep["url"].strip()):
+        raise LinkError("data has neither a job description nor a URL")
+    return {"kind": "hirescope_external_job", "format": 1, "force": bool(obj.get("force")), **keep}
+
+
 def _version(v: str) -> int:
     if not re.match(r"^\d{1,4}$", v):
         raise LinkError("v must be a resume version number")
@@ -133,7 +155,7 @@ ACTIONS: dict[str, dict] = {
     "cancel": {"job": lambda v: _one_or_many(v, False)},
     "interactive": {"job": lambda v: _one_or_many(v, False)},
     "bucket": {"job": lambda v: _one_or_many(v, True), "op": _choice("add", "remove")},
-    "external": {"file": _file},
+    "external": {"file": _file, "data": _data},
     "note": {"job": lambda v: _one_or_many(v, False), "app": _app, "text": _text},
     "answer": {"q": lambda v: _one_or_many(v, False), "a": _choice("yes", "no"), "entry": _entry, "level": _level,
                "text": _text},
@@ -146,7 +168,7 @@ def parse(url: str) -> tuple[str, dict]:
     """(action, validated parameters) or LinkError."""
     if not isinstance(url, str) or not url:
         raise LinkError("no link given")
-    if len(url) > MAX_URL:
+    if len(url) > (MAX_DATA_URL if url.startswith("hirescope://external?data=") else MAX_URL):
         raise LinkError("link too long")
     if _CTRL.search(url):
         raise LinkError("link contains control characters")
@@ -170,7 +192,7 @@ def parse(url: str) -> tuple[str, dict]:
             raise LinkError(f"unknown parameter {k[:20]!r} for {action}")
         if k in out:
             raise LinkError(f"parameter {k!r} given twice")
-        if _CTRL.search(v) and k != "text":   # text: line breaks allowed, checked by _text
+        if _CTRL.search(v) and k not in ("text", "data"):   # text: line breaks allowed, checked by _text
             raise LinkError(f"parameter {k!r} contains control characters")
         out[k] = spec[k](v)
     return action, validate(action, out)
@@ -178,12 +200,14 @@ def parse(url: str) -> tuple[str, dict]:
 
 def validate(action: str, p: dict) -> dict:
     need = {"cancel": ["job"], "interactive": ["job"], "bucket": ["job", "op"], "status": ["stage"],
-            "external": ["file"], "answer": ["q", "a"], "note": ["text"]}.get(action, [])
+            "external": [], "answer": ["q", "a"], "note": ["text"]}.get(action, [])
     for k in need:
         if k not in p:
             raise LinkError(f"{action} needs {k}")
     if action == "queue" and ("job" in p) == ("list" in p):
         raise LinkError("queue needs either job=<id> or list=bucket")
+    if action == "external" and ("file" in p) == ("data" in p):
+        raise LinkError("external needs file=<saved file> or data=<the job>")
     if action == "note" and ("job" in p) == ("app" in p):
         raise LinkError("note needs either job=<id> or app=<application id>")
     if action == "answer" and p["a"] == "yes" and not (p.get("entry") and p.get("text")):
@@ -298,7 +322,7 @@ def do_external(conn, p: dict) -> str:
     from resume_builder.queue import kick
     from .external_resume import FileRefused, request
     try:
-        request(p["file"])
+        request(p.get("file"), p.get("data"))
     except FileRefused as e:
         raise LinkError(str(e)) from None
     kick()

@@ -2138,6 +2138,8 @@
   const extMatch = (j, x) => j.company.toLowerCase() === String(x.company || "").toLowerCase() && C.tokenSortRatio(C.normTitle(j.title), C.normTitle(x.role || "")) >= 90;
   const extPending = () => store.get(EXT_KEY, []).filter((x) => !JOBS.some((j) => extMatch(j, x)) && Date.now() - Date.parse(x.saved_at || 0) < 7 * 864e5);
   const externalJobs = () => JOBS.filter((j) => (j.badges || []).includes("external"));
+  const b64url = (str) => { const bytes = new TextEncoder().encode(str); let s2 = ""; for (let i = 0; i < bytes.length; i += 0x8000) s2 += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s2).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
   const b64 = (buf) => { let s2 = ""; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) s2 += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s2); };
   let extForce = false; let extLast = null;     // the last submission (shown above the list until the queue picks it up)
   let builderForm = null;                       // built once: live updates re-render the page without losing your typing
@@ -2194,11 +2196,15 @@
     if (file) payload.file = { name: file.name, type: file.type, b64: b64(await file.arrayBuffer()) };
     const slug = (v("company") || (url ? new URL(url).hostname : "job")).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "job";
     const name = `hirescope-external-job-${slug}-${payload.created_at.replace(/[-:]/g, "").slice(0, 15)}-${Math.random().toString(36).slice(2, 6)}.json`;
-    download(name, JSON.stringify(payload, null, 1), "application/json");
-    store.set(EXT_KEY, [...store.get(EXT_KEY, []).slice(-30), { company: payload.company || (url ? new URL(url).hostname : ""), role: payload.role || "(from the URL)", file: name, saved_at: payload.created_at }]);
-    extLast = { name, company: payload.company, role: payload.role, url, at: payload.created_at, sent: false };
+    // a pasted JD (or a URL) travels inside the link: nothing is downloaded and no folder permission is needed; a JD
+    // file is saved to Downloads and named in the link (the worker reads it there)
+    const data = file ? null : b64url(JSON.stringify(payload));
+    const inline = LAUNCHER.installed && data && data.length < 110000;
+    if (!inline) download(name, JSON.stringify(payload, null, 1), "application/json");
+    store.set(EXT_KEY, [...store.get(EXT_KEY, []).slice(-30), { company: payload.company || (url ? new URL(url).hostname : ""), role: payload.role || "(from the URL)", file: inline ? null : name, saved_at: payload.created_at }]);
+    extLast = { name: inline ? null : name, company: payload.company, role: payload.role, url, at: payload.created_at, sent: false };
     if (LAUNCHER.installed) {
-      const sent = await launch(`hirescope://external?file=${encodeURIComponent(name)}`, "Build resume");
+      const sent = await launch(inline ? `hirescope://external?data=${data}` : `hirescope://external?file=${encodeURIComponent(name)}`, "Build resume");
       extLast.sent = !!sent;
       if (sent) { f.reset(); toast(`Saved and queued: ${payload.company || url} — importing, then building in the background`); }
     } else toast(`Saved ${name} to your Downloads`);
@@ -2207,11 +2213,11 @@
   function extStatus(x) {
     const cmd = `cd ${JSON.stringify(META.repo_root || ".")} && ./scripts/external_resume.sh ${JSON.stringify(x.name)}`;
     const ack = LIVE.launcher && String(LIVE.launcher.at || "") >= String(x.at || "").slice(0, 19) && LIVE.launcher.action === "external" ? LIVE.launcher : null;
-    const lines = [el("b", { text: `${x.company || x.url} — ${x.role || "from the URL"}` }), " · saved as ", el("code", { class: "mono", text: x.name })];
+    const lines = [el("b", { text: `${x.company || x.url} — ${x.role || "from the URL"}` }), x.name ? [" · saved as ", el("code", { class: "mono", text: x.name })] : " · sent to HireScope"];
     const msg = !LAUNCHER.installed ? "Waiting for the next run (or run the command below in Terminal)." : !x.sent ? "Not sent to the launcher." :
       ack ? (ack.ok ? ack.message : `Launcher: ${ack.message || "failed"}`) : "Sent to the launcher — importing…";
     return el("div", { class: `banner ${ack && !ack.ok ? "err" : "info"} ext-status`, "aria-live": "polite" }, el("div", null, el("div", null, lines), el("div", { text: msg }),
-      el("div", { style: "margin-top:6px" }, el("button", { class: "btn small", type: "button", onclick: async () => toast((await copyText(cmd)) ? "Command copied — paste it in Terminal" : cmd) }, "Copy Terminal fallback"))));
+      x.name ? el("div", { style: "margin-top:6px" }, el("button", { class: "btn small", type: "button", onclick: async () => toast((await copyText(cmd)) ? "Command copied — paste it in Terminal" : cmd) }, "Copy Terminal fallback")) : null));
   }
   function renderExternalList(box) {
     const jobs = externalJobs().sort((a, b) => String(b.first_seen || "").localeCompare(String(a.first_seen || "")));

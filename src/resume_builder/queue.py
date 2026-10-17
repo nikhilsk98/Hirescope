@@ -553,7 +553,7 @@ class Worker:
                 queued = conn.execute("SELECT COUNT(*) FROM resume_queue WHERE status='queued'").fetchone()[0] + \
                     bool(db.get_meta(conn, "publish_pending")) + len(_launcher.spooled())
                 from jobsearch import external_resume as _ext
-                queued += len(_ext.pending_requests())
+                queued += len(_ext.pending_requests(include_blocked=False))
                 state = "paused" if self.paused and queued else "running" if self.running or queued else "idle"
                 retry_locked(self._write_live, conn, state)
                 if not self.running and not queued:

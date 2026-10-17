@@ -116,11 +116,14 @@ def access(directory: Path) -> str:
     says False there), and Python's glob would silently return nothing, so the listing error is what tells."""
     try:
         os.listdir(directory)
-        return "ok"
     except PermissionError:
         return "blocked"
     except OSError:
         return "missing"
+    # macOS may also *ask* (a prompt nobody can answer in a scheduled job), which blocks the first open() forever:
+    # a probe in a child process with a timeout tells (it opens one file there)
+    from ..ops.desktop_access import readable
+    return "ok" if readable(Path(directory))[0] else "blocked"
 
 
 def newest_export(directory: Path | list[Path]) -> Path | None:

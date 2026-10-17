@@ -217,3 +217,34 @@ def test_launcher_never_opens_the_downloads_folder(env):
         os.chmod(downloads, 0o755)
     assert "imported DemoCorp" in ER.process_requests(conn)[0]["message"] and not ER.pending_requests()
     assert json.loads(db.get_meta(conn, "launcher_last"))["action"] == "external"
+
+
+
+def _data_link(payload: dict) -> str:
+    import base64
+    return "hirescope://external?data=" + base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+
+
+def test_pasted_jd_inside_the_link_needs_no_file(env):
+    """A pasted JD travels inside the link (macOS delivers 100 KB links): nothing in ~/Downloads, no folder permission."""
+    conn, downloads = env
+    payload = {"kind": "hirescope_external_job", "format": 1, "origin": "resume_builder", "company": "DemoInline",
+               "role": "Platform Engineer Co-op (DEMO)", "location": "Remote", "url": "", "track": "coop_intern",
+               "jd_text": JD.replace("DemoCorp", "DemoInline") * 20, "force": False}
+    link = _data_link(payload)
+    assert 8000 < len(link) < launcher.MAX_DATA_URL
+    assert "imports it in the background" in launcher.handle(link)
+    out = ER.process_requests(conn)
+    assert "imported DemoInline" in out[0]["message"] and not list(downloads.iterdir())
+    pk = conn.execute("SELECT id FROM jobs WHERE company='DemoInline'").fetchone()[0]
+    assert queue.active_item(conn, pk)
+
+
+def test_bad_data_links_rejected():
+    for bad, why in ((_data_link({"kind": "other"}), "not a HireScope"), ("hirescope://external?data=%%%%", "base64url"),
+                     (_data_link({"kind": "hirescope_external_job", "company": "X", "jd_text": ""}), "neither"),
+                     (_data_link({"kind": "hirescope_external_job", "jd_text": "x", "file": {"name": "a.pdf"}}), "saved file"),
+                     ("hirescope://external?data=" + "A" * 130000, "too long"),
+                     (_data_link({"kind": "hirescope_external_job", "jd_text": "a JD"}) + "&file=a.json", "file=")):
+        with pytest.raises(launcher.LinkError, match=why):
+            launcher.parse(bad)

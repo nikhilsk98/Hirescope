@@ -233,6 +233,11 @@ def update(conn, path: Path | None = None) -> str:
     if not enabled:
         _record(conn, status="off", path=str(path))
         return ""
+    from .desktop_access import writable
+    ok, why = writable(path.parent)          # never hang on a macOS permission prompt in a background job
+    if not ok:
+        _record(conn, status="error", path=str(path), message=why)
+        return why
     wb = build(conn)
     n = wb["Applications"].max_row - 1
     tmp = path.with_name(f".{path.stem}.{os.getpid()}.tmp.xlsx")
