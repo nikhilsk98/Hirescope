@@ -544,7 +544,14 @@ pending) / Failed**. Each finished build is saved by the build itself (version f
   Logs: `data.nosync/logs/queue/` (one per attempt), `data.nosync/logs/launcher.log` (every link and its outcome).
 - **Queue mode never asks** (`--queue`): `prepare --queue` saves the keyword questions to **Questions for you**
   (dashboard view; `python -m resume_builder questions`), the build goes on without those keywords (truthfully) and
-  ends **Ready (questions pending)**. Answer them, then **Regenerate**.
+  ends **Ready (questions pending)**. In the view, answer Yes (where, level, what you did, and a confirmation tick —
+  only what's true is saved, exactly like `add-evidence` / `add-tool`) or No (never asked again); the answer travels in
+  `hirescope://answer?q=<id>&a=yes|no&entry=…&level=…&text=…` and covers that keyword in every job that asked. Then
+  one click **Regenerate** queues new versions of those jobs.
+- **Queue panel** (header button **◷ Queue N**, or ⌘K → Open the resume queue): what's building now (elapsed time,
+  attempt), what's waiting in order — each with **Cancel** — and what finished today (Ready / Ready (questions
+  pending) / Failed with the reason and **Retry** / Skipped / Cancelled), plus the worker's state (working, paused
+  while a HireScope run writes, idle). Keyboard: Tab through it, Esc closes.
 - From the terminal: `python -m resume_builder queue list | add <job…> [--regenerate] | cancel <job…> | worker`.
 - Links (validated strictly in `src/jobsearch/launcher.py`; anything else is rejected with a short notification and
   logged): `hirescope://queue?job=<id>[,<id>…][&regenerate=1]`, `queue?list=bucket[&regenerate=1]`,

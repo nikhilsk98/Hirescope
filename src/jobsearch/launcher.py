@@ -13,6 +13,9 @@
                                                         Mark Applied (removes the job from the Bucket, records the
                                                         resume version) and application stage changes; stage=undo
                                                         reverts the Mark Applied that created `app`
+    hirescope://answer?q=<question id>&a=yes|no[&entry=<role/project id>&level=<level>&text=<what you did>]
+                                                        Questions for you: your answer (you confirmed it on the
+                                                        dashboard); it covers the keyword in every job that asked
     hirescope://interactive?job=<id>                    Terminal: cd <repo> && claude "/resume-builder <id>"
 
 The page can't run programs: ~/Applications/HireScope Launcher.app (scripts/install_launcher.sh) receives the link
@@ -89,6 +92,32 @@ def _file(v: str) -> str:
     return v
 
 
+MAX_TEXT = 4000
+
+
+def _text(v: str) -> str:
+    """Free text (an answer, a note): at most 4000 characters, no control characters except line breaks and tabs.
+    It is only ever stored as data (parameterized SQL / a Markdown file), never run."""
+    if len(v) > MAX_TEXT:
+        raise LinkError(f"text longer than {MAX_TEXT} characters")
+    if re.search(r"[\x00-\x08\x0b-\x1f\x7f]", v.replace("\r\n", "\n")):
+        raise LinkError("text contains control characters")
+    return v.replace("\r\n", "\n").strip()
+
+
+def _entry(v: str) -> str:
+    if not re.match(r"^[A-Za-z0-9_.-]{1,80}$", v):
+        raise LinkError("entry must be a role / project id from your master resume")
+    return v
+
+
+def _level(v: str) -> str:
+    from resume_builder.tools import LEVELS
+    if v not in LEVELS:
+        raise LinkError(f"level must be one of {', '.join(LEVELS)}")
+    return v
+
+
 def _version(v: str) -> int:
     if not re.match(r"^\d{1,4}$", v):
         raise LinkError("v must be a resume version number")
@@ -102,6 +131,8 @@ ACTIONS: dict[str, dict] = {
     "interactive": {"job": lambda v: _one_or_many(v, False)},
     "bucket": {"job": lambda v: _one_or_many(v, True), "op": _choice("add", "remove")},
     "external": {"file": _file},
+    "answer": {"q": lambda v: _one_or_many(v, False), "a": _choice("yes", "no"), "entry": _entry, "level": _level,
+               "text": _text},
     "status": {"job": lambda v: _one_or_many(v, False), "app": _app, "stage": _choice(*STAGES), "date": _date,
                "v": _version},
 }
@@ -135,7 +166,7 @@ def parse(url: str) -> tuple[str, dict]:
             raise LinkError(f"unknown parameter {k[:20]!r} for {action}")
         if k in out:
             raise LinkError(f"parameter {k!r} given twice")
-        if _CTRL.search(v) and k != "text":
+        if _CTRL.search(v) and k != "text":   # text: line breaks allowed, checked by _text
             raise LinkError(f"parameter {k!r} contains control characters")
         out[k] = spec[k](v)
     return action, validate(action, out)
@@ -143,12 +174,14 @@ def parse(url: str) -> tuple[str, dict]:
 
 def validate(action: str, p: dict) -> dict:
     need = {"cancel": ["job"], "interactive": ["job"], "bucket": ["job", "op"], "status": ["stage"],
-            "external": ["file"]}.get(action, [])
+            "external": ["file"], "answer": ["q", "a"]}.get(action, [])
     for k in need:
         if k not in p:
             raise LinkError(f"{action} needs {k}")
     if action == "queue" and ("job" in p) == ("list" in p):
         raise LinkError("queue needs either job=<id> or list=bucket")
+    if action == "answer" and p["a"] == "yes" and not (p.get("entry") and p.get("text")):
+        raise LinkError("a yes needs entry (where you used it) and text (what you did)")
     if action == "status":
         if "job" not in p and "app" not in p:
             raise LinkError("status needs job=<id> or app=<application id>")
@@ -266,7 +299,20 @@ def do_external(conn, p: dict) -> str:
     return f"{out['note']}; {out['message']}" if out["note"] else out["message"]
 
 
-HANDLERS = {"external": do_external, "queue": do_queue, "cancel": do_cancel, "interactive": do_interactive, "bucket": do_bucket,
+def do_answer(conn, p: dict) -> str:
+    from resume_builder import questions
+    from resume_builder.config import InputError
+    try:
+        out = questions.answer(p["q"][0], p["a"] == "yes", p.get("entry"), p.get("level"), p.get("text"))
+    except InputError as e:
+        raise LinkError(str(e)) from None
+    from resume_builder.hirescope_bridge import write_dashboard_data
+    write_dashboard_data()
+    _after(conn, "answer")
+    return f"saved your answer ({out['answer']}) for {out['keyword']}; jobs that asked: {', '.join(map(str, out['jobs']))}"
+
+
+HANDLERS = {"answer": do_answer, "external": do_external, "queue": do_queue, "cancel": do_cancel, "interactive": do_interactive, "bucket": do_bucket,
             "status": do_status}
 
 

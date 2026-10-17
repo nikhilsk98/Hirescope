@@ -57,7 +57,7 @@ export async function launch({ width = 1440, height = 900, dark = false } = {}) 
       const [code, codeName] = map[key] || [key.toUpperCase().charCodeAt(0), `Key${key.toUpperCase()}`];
       const mods = (opts.shift ? 8 : 0) | (opts.meta ? 4 : 0);
       const base = { key, code: codeName, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code, modifiers: mods };
-      await send("Input.dispatchKeyEvent", { type: "keyDown", ...base, text: key.length === 1 ? key : undefined });
+      await send("Input.dispatchKeyEvent", { type: "keyDown", ...base, text: key.length === 1 ? key : key === "Enter" ? "\r" : undefined });
       await send("Input.dispatchKeyEvent", { type: "keyUp", ...base });
       await page.sleep(60);
     },

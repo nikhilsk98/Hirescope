@@ -67,6 +67,9 @@ def demo_dashboard(conn, cfg, resume, embedder, greenhouse_payload, tmp_path):
                  "(?, 'ready', 1, 1, '2026-10-17T00:00:00+00:00')", (pk,))
     conn.commit()
     ready_apps.ensure(conn, auto_applied=False)
+    conn.execute("INSERT INTO resume_questions (job_pk, kind, keyword, question, options, asked_at) VALUES "
+                 "(?, 'keyword', 'Kafka', 'Have you used Kafka? If yes, where?', '[]', '2026-10-17T00:00:00+00:00')", (pk,))
+    conn.commit()
     write_data_js(dash / "data.js", db.open_jobs(conn), {"summary": {}, "repo_root": str(paths.ROOT)},
                   "America/New_York", resume.version_hash, 200, lambda j: 1)
     statuses.write_sync_js(dash / "sync.js", statuses.sync_payload(conn))
@@ -107,3 +110,7 @@ def test_bucket_tab_add_remove_mark_applied_undo_generate_all(demo_dashboard):
 
 def test_resume_builder_tab_form_external_list_ready_to_apply(demo_dashboard):
     scenario(demo_dashboard, "builder")
+
+
+def test_questions_view_and_queue_panel(demo_dashboard):
+    scenario(demo_dashboard, "queue_questions")

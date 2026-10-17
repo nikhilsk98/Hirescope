@@ -225,6 +225,7 @@
     { id: "tracker", label: "Applied / Tracker", ic: "☑", jobs: () => JOBS.filter((j) => inTrack(j) && TRACKED.includes(statusOf(j))) },
     { id: "shortlisted", label: "Shortlisted", ic: "✓", jobs: () => JOBS.filter((j) => inTrack(j) && statusOf(j) === "shortlisted") },
     { id: "resumes", label: "Resumes", ic: "✎", jobs: () => JOBS.filter((j) => inTrack(j) && resumeStatus(j)) },
+    { id: "questions", label: "Questions for you", ic: "?", special: true, count: () => openQuestions().length, alert: true },
     { id: "followups", label: "Follow-ups Due", ic: "↻", special: true, count: () => new Set([...followupsDue(), ...ghostsDue()].map((a) => a.id)).size },
     { id: "closing", label: "Closing Soon", ic: "⏳", jobs: () => visibleJobs().filter((j) => j.deadline && daysUntil(j.deadline) >= 0 && daysUntil(j.deadline) <= UI_CFG.closing_soon_days) },
     { id: "skillgaps", label: "Skill Gaps", ic: "◔", group: "Insights", special: true, count: () => ((META.skill_gaps || {})[`${ui.track}:30`] || { skills: [] }).skills.length },
@@ -725,7 +726,7 @@
   const modeOf = (vid) => (tstate().modes || {})[vid] || ui.mode || "cards";
   const SPECIAL = { coverage: () => renderCoverage, skillgaps: () => renderSkillGaps, applications: () => renderApplications,
     followups: () => renderFollowups, stats: () => renderStatsView, runlog: () => renderRunLog, seasons: () => renderSeasons,
-    manual: () => renderManualChecks };
+    manual: () => renderManualChecks, questions: () => renderQuestions };
   const PAGES = { bucket: { title: "Bucket", render: () => renderBucket }, builder: { title: "Resume Builder", render: () => renderBuilder } };
   function renderList(keepScroll) {
     const st = tstate();
@@ -1871,6 +1872,100 @@
     ["Copy Terminal command", () => copyResumeCommand(j), "Copies the /resume-builder command (fallback when the launcher can't run)"],
     LAUNCHER.installed ? ["Open a live session in Terminal", () => launch(`hirescope://interactive?job=${j.id}`, "Open Terminal"), "For a build where you answer the keyword questions as it goes"] : null];
 
+  // ---------- Questions for you: JD keywords queue builds left out until you answer (one answer covers every job) ----------
+  const K_ANS = "jobsearch.questionAnswers.v1";       // {question id: {a, at}} sent, until resumes.js says it's answered
+  const sentAnswers = store.get(K_ANS, {});
+  const questionGroups = () => ((window.RESUMES || {}).questions || []);
+  const openQuestions = () => questionGroups().filter((g) => g.open && !g.ids.some((id) => sentAnswers[id]));
+  function renderQuestions(box) {
+    const groups = questionGroups();
+    box.append(el("p", { class: "muted", style: "margin-top:0", text: "Background builds never stop to ask. When a job description wants a tool or skill your evidence doesn't confirm, the build leaves it out (truthfully) and the question waits here — one answer covers every job that asked. Answer only what's true; then Regenerate those jobs." }));
+    if (!groups.length) { box.append(el("div", { class: "empty" }, el("b", { text: "No questions for you." }), el("div", { text: "Questions appear here when a background build skips a keyword it can't confirm." }))); return; }
+    const entries = (window.RESUMES || {}).entries || [{ id: "skills", label: "Skills (no specific role)" }];
+    const err = LIVE.launcher && LIVE.launcher.action === "answer" && !LIVE.launcher.ok ? LIVE.launcher : null;
+    if (err) box.append(el("div", { class: "banner err", style: "margin:0 0 12px", text: `Your last answer wasn't saved: ${err.message}` }));
+    for (const g of groups) {
+      const sent = g.ids.map((id) => sentAnswers[id]).find(Boolean);
+      const jobs = g.jobs.map((x) => BY_ID.get(x.job_pk) || { id: x.job_pk, company: x.company, title: x.title });
+      const card2 = el("section", { class: "side-card question", "aria-label": `Question about ${g.keyword}` },
+        el("div", { class: "q-head" }, el("b", { text: g.keyword }),
+          g.open && !sent ? el("span", { class: "chip warn", text: "Waiting for you" }) : el("span", { class: "chip good", text: `Answered: ${(sent || {}).a || g.answer}` }),
+          el("span", { class: "muted", text: `${g.jobs.length} job${g.jobs.length === 1 ? "" : "s"}` })),
+        el("p", { class: "q-text", text: g.question }),
+        el("div", { class: "q-jobs muted" }, "Asked by: ", jobs.map((j, i) => [i ? " · " : "", el("a", { href: "#", onclick: (e) => { e.preventDefault(); BY_ID.has(j.id) ? openJob(j.id) : showMissingJob(j.id); }, text: `${j.company} — ${j.title}` })])));
+      if (g.open && !sent) card2.append(answerForm(g, entries));
+      else card2.append(el("div", { class: "row-actions", style: "margin-top:8px" },
+        el("button", { class: "btn small primary", type: "button", onclick: () => generateJobs(jobs, true) }, `Regenerate ${jobs.length === 1 ? "this job" : `these ${jobs.length} jobs`}`),
+        el("span", { class: "muted", style: "font-size:12px;align-self:center", text: "New versions can use your answer." })));
+      box.append(card2);
+    }
+  }
+  function answerForm(g, entries) {
+    const id = g.ids[0];
+    const f = el("form", { class: "answer-form", "aria-label": `Answer about ${g.keyword}` });
+    const yes = el("input", { type: "radio", name: `a-${id}`, value: "yes" }); const no = el("input", { type: "radio", name: `a-${id}`, value: "no" });
+    const where = el("select", { "aria-label": "Where you used it" }, el("option", { value: "", text: "Where did you use it?" }), entries.map((x) => el("option", { value: x.id, text: x.label })));
+    const level = el("select", { "aria-label": "Level" }, el("option", { value: "", text: "Level (needed for a tool)" }), ["production", "project", "coursework", "tutorial"].map((l) => el("option", { value: l, text: l })));
+    const text = el("textarea", { rows: 2, maxlength: 500, "aria-label": "What you did with it", placeholder: `What did you do with ${g.keyword}? (one or two sentences, only what's true)` });
+    const ok = el("input", { type: "checkbox" });
+    const yesBox = el("div", { class: "answer-yes", hidden: true }, el("div", { class: "form-grid" }, el("label", null, "Where", where), el("label", null, "Level", level),
+      el("label", { class: "full" }, "What you did", text)), el("label", { class: "confirm-line" }, ok, " I confirm this is true and may be used on my resumes"));
+    for (const r of [yes, no]) r.addEventListener("change", () => { yesBox.hidden = !yes.checked; });
+    f.append(el("div", { class: "answer-choice", role: "radiogroup", "aria-label": `Have you used ${g.keyword}?` },
+      el("label", null, yes, ` Yes, I've used ${g.keyword}`), el("label", null, no, " No (don't ask again)")), yesBox,
+      el("div", { class: "row-end" }, el("button", { class: "btn small primary", type: "submit" }, "Save answer")));
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!yes.checked && !no.checked) { toast("Choose Yes or No"); return; }
+      if (yes.checked && (!where.value || text.value.trim().length < 5)) { toast("Say where you used it and what you did"); return; }
+      if (yes.checked && !ok.checked) { toast("Tick the confirmation: only true answers are saved"); return; }
+      if (!LAUNCHER.installed) { toast("Install the launcher once (./scripts/install_launcher.sh), or answer with: python -m resume_builder questions"); return; }
+      const q = new URLSearchParams({ q: String(id), a: yes.checked ? "yes" : "no" });
+      if (yes.checked) { q.set("entry", where.value); if (level.value) q.set("level", level.value); q.set("text", text.value.trim()); }
+      const sent = await launch(`hirescope://answer?${q.toString()}`, "Save answer");
+      if (!sent) return;
+      sentAnswers[id] = { a: yes.checked ? "yes" : "no", at: new Date().toISOString() }; store.set(K_ANS, sentAnswers);
+      toast(`Answer saved for ${g.keyword} — Regenerate the jobs that asked to use it`); renderCounts(); renderList(true);
+    });
+    return f;
+  }
+
+  // ---------- queue panel: what's building, what's waiting, Cancel per job ----------
+  let queueTimer = null;
+  const QSTATE = { queued: "queued", generating: "generating", done: "ready", failed: "failed" };
+  function openQueuePanel() {
+    const p2 = $("#queue-panel"); p2.hidden = false; $("#queue-btn").setAttribute("aria-expanded", "true");
+    renderQueuePanel(); setTimeout(() => p2.focus(), 0);
+    clearInterval(queueTimer); queueTimer = setInterval(() => { if (!$("#queue-panel").hidden) renderQueueTimes(); }, 1000);
+  }
+  function closeQueuePanel() { $("#queue-panel").hidden = true; $("#queue-btn").setAttribute("aria-expanded", "false"); clearInterval(queueTimer); $("#queue-btn").focus(); }
+  function renderQueueTimes() { for (const n of document.querySelectorAll("[data-started]")) n.textContent = elapsed(n.dataset.started); }
+  function renderQueuePanel() {
+    const items = LIVE.queue || [];
+    const act = items.filter((x) => ["queued", "generating"].includes(x.status));
+    $("#queue-count").textContent = String(act.length); $("#queue-btn").classList.toggle("busy", act.length > 0);
+    const p2 = $("#queue-panel"); if (p2.hidden) return;
+    const w = LIVE.worker || {};
+    $("#queue-worker").textContent = !LAUNCHER.installed ? "Launcher not installed" : w.state === "paused" ? "Paused: a HireScope run is writing" :
+      w.state === "publishing" ? "Adding new jobs to the dashboard…" : act.length ? "Working" : "Idle";
+    const body = $("#queue-body"); body.textContent = "";
+    const jobOf = (x) => BY_ID.get(x.job_pk) || { id: x.job_pk, company: x.company || "?", title: x.title || `Job ${x.job_pk}` };
+    const line = (x, extra) => el("li", { class: `q-item ${x.status}` }, el("div", { class: "q-main" }, el("b", { text: x.company || "?" }), el("span", { class: "muted", text: ` — ${x.title || ""}` }),
+      el("div", { class: "q-meta" }, extra)), ["queued", "generating"].includes(x.status) ? el("button", { class: "btn small ghost", type: "button", onclick: () => cancelBuild(jobOf(x)), "aria-label": `Cancel the resume build for ${x.company}` }, "Cancel") : null);
+    const gen = act.filter((x) => x.status === "generating"); const waiting = act.filter((x) => x.status === "queued");
+    if (!items.length) body.append(el("p", { class: "muted", text: "Nothing queued. Generate Resume (or Generate resumes for all in the Bucket) adds builds here; they run one after another in the background." }));
+    if (gen.length) body.append(el("h4", { text: "Building now" }), el("ul", { class: "q-list" }, gen.map((x) => line(x, [resumeBadge("generating"), " ", el("span", { "data-started": x.started_at || "", text: x.started_at ? elapsed(x.started_at) : "" }), x.attempts > 1 ? ` · attempt ${x.attempts}` : ""]))));
+    if (waiting.length) body.append(el("h4", { text: `Waiting (${waiting.length})` }), el("ol", { class: "q-list" }, waiting.map((x) => line(x, [resumeBadge("queued"), x.message && /retrying/.test(x.message) ? ` ${x.message.slice(0, 120)}` : ""]))));
+    const done = items.filter((x) => !["queued", "generating"].includes(x.status)).slice(0, 8);
+    if (done.length) body.append(el("h4", { text: "Finished today" }), el("ul", { class: "q-list" }, done.map((x) => line(x, [
+      x.status === "done" ? resumeBadge(x.result === "ready_questions" ? "ready_q" : "ready") : x.status === "failed" ? resumeBadge("failed") : el("span", { class: "chip", text: x.status === "skipped" ? "Skipped" : "Cancelled" }),
+      " ", el("span", { class: "muted", text: String(x.message || "").slice(0, 160) }),
+      x.status === "failed" ? [" ", el("button", { class: "btn small", type: "button", onclick: () => queueResume(jobOf(x), false) }, "Retry")] : null]))));
+  }
+  $("#queue-btn").addEventListener("click", () => ($("#queue-panel").hidden ? openQueuePanel() : closeQueuePanel()));
+  $("#queue-close").addEventListener("click", closeQueuePanel);
+  $("#queue-panel").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); closeQueuePanel(); } });
+
   // live.js: re-read every few seconds while something is happening (queue active, or a link was just sent)
   let liveTimer = null; let liveBusy = false; let liveSeen = String(LIVE.generated_at || "");
   function reloadScript(src) {
@@ -1893,7 +1988,7 @@
     if (!d || String(d.generated_at || "") === liveSeen) return;
     if (liveSig(d) === liveSig(LIVE)) { LIVE = d; liveSeen = String(d.generated_at || ""); return; }
     const before = new Map([...LIVE_BY_JOB].map(([k, v]) => [k, v.status + "|" + v.id]));
-    const prevSync = LIVE.sync_at; LIVE = d; liveSeen = String(d.generated_at || ""); indexLive();
+    const prevSync = LIVE.sync_at; const prevLauncher = LIVE.launcher; LIVE = d; liveSeen = String(d.generated_at || ""); indexLive();
     const finished = [...LIVE_BY_JOB].filter(([k, v]) => before.has(k) && before.get(k) !== v.status + "|" + v.id && !["queued", "generating"].includes(v.status));
     for (const [, v] of finished) {
       if (v.status === "skipped") toast(`${v.company}: ${v.message || "already has a READY resume"}`);
@@ -1901,9 +1996,10 @@
       else if (v.status === "done") toast(`Resume ready: ${v.company}${v.result === "ready_questions" ? " (questions pending)" : ""}`);
     }
     const work = [];
-    if (finished.length) work.push(reloadScript("resumes.js").then(() => { RES = ((window.RESUMES || {}).jobs) || {}; mapResumeStatuses(); }));
+    const answered = d.launcher && d.launcher.action === "answer" && d.launcher.at !== (prevLauncher || {}).at;
+    if (finished.length || answered) work.push(reloadScript("resumes.js").then(() => { RES = ((window.RESUMES || {}).jobs) || {}; mapResumeStatuses(); }));
     if (d.sync_at && d.sync_at !== prevSync) work.push(reloadScript("sync.js").then(() => { mergeSync(); SYNC_AT = syncAt(); }));
-    Promise.all(work).then(() => { renderBanners(); renderAll(true); if (pJob) refreshPanel(); });
+    Promise.all(work).then(() => { renderBanners(); renderAll(true); if (pJob) refreshPanel(); renderQueuePanel(); });
   };
   function resumeUsed(a) {
     const r = (a.job || {}).resume;
@@ -2231,6 +2327,7 @@
       ...VIEWS.map((v) => ({ kind: "View", label: v.label, run: () => setView(v.id) })),
       { kind: "Action", label: "Export statuses", run: exportStatuses },
       ...manualRows().map(({ r }) => ({ kind: "Manual check", label: r.company, sub: "Mark checked today", run: () => markManualChecked(r.company) })),
+      { kind: "Action", label: "Open the resume queue", run: () => openQueuePanel() },
       { kind: "Action", label: "Open the Bucket", sub: `${bucketItems().length} jobs`, run: () => switchPage("bucket") },
       { kind: "Action", label: "Generate resumes for all Bucket jobs", run: () => generateAll(false) },
       { kind: "Action", label: "Add application", run: () => openAddApp() },
@@ -2398,7 +2495,7 @@
       case "j": move(1); break;
       case "k": move(-1); break;
       case "Enter": if (sel && tag !== "button" && tag !== "a") openPanel(sel.id); else return; break;
-      case "Escape": if (pJob) closePanel(); else closePop(); break;
+      case "Escape": if (!$("#queue-panel").hidden) closeQueuePanel(); else if (pJob) closePanel(); else closePop(); break;
       case "s": if (sel) shortlist(sel); break;
       case "a": if (sel && !sel.filtered) markApplied(sel); break;
       case " ": if (sel && tag !== "button" && tag !== "a") { e.preventDefault(); setBucket(sel, !inBucket(sel.id)); } else return; break;
@@ -2433,5 +2530,5 @@
     renderAll();
     if (bootJob != null && BY_ID.has(bootJob)) openPanel(bootJob, bootTab);
   }
-  pollLive(false);
+  pollLive(false); renderQueuePanel();
 })();

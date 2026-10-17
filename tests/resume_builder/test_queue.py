@@ -297,3 +297,43 @@ def test_skill_documents_queue_mode():
     sec = skill.split("## Queue mode", 1)[1].split("\n## ", 1)[0]
     assert "Never ask anything" in sec and "prepare <job_id> --queue" in sec
     assert "Never run `add-evidence`" in sec
+
+
+def test_finished_builds_notify_and_refresh_everything(qenv, monkeypatch):
+    sent = []
+    monkeypatch.setattr(queue, "notify", lambda t, m: sent.append((t, m)))
+    qenv.use("ok", qenv.a)
+    queue.add(qenv.conn, [qenv.a])
+    run_worker()
+    assert sent and sent[0][0] == "Resume ready" and "DemoCorp" in sent[0][1]
+    assert (hs_paths.DASHBOARD / "sync.js").exists() and (hs_paths.DASHBOARD / "resumes.js").exists()
+    assert live_payload()["queue"][0]["status"] == "done"
+    qenv.use("fail", qenv.b)
+    queue.add(qenv.conn, [qenv.b])
+    run_worker()
+    assert sent[-1][0] == "Resume failed" and "DEMO build failed" in sent[-1][1]
+
+
+def test_ready_with_questions_pending(qenv, monkeypatch):
+    qenv.conn.execute("INSERT INTO resume_questions (job_pk, kind, keyword, question, asked_at) VALUES (?,?,?,?,?)",
+                      (qenv.a, "keyword", "Kafka", "Have you used Kafka?", "2026-10-17T00:00:00+00:00"))
+    qenv.conn.commit()
+    qenv.use("ok", qenv.a)
+    queue.add(qenv.conn, [qenv.a])
+    run_worker()
+    it = qenv.conn.execute("SELECT result, message FROM resume_queue WHERE job_pk=?", (qenv.a,)).fetchone()
+    assert it["result"] == "ready_questions" and "1 question(s) for you" in it["message"]
+
+
+def test_retry_on_database_is_locked():
+    import sqlite3
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise sqlite3.OperationalError("database is locked")
+        return "ok"
+    assert queue.retry_locked(flaky) == "ok" and len(calls) == 3
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        queue.retry_locked(lambda: (_ for _ in ()).throw(sqlite3.OperationalError("no such table: x")))

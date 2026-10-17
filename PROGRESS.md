@@ -923,7 +923,8 @@ commit and a push.
 - [x] 2 — Resume Builder tab (form → saved file → hirescope://external → import + queue; "Ready to apply" stage)
       (2026-10-17)
 - [x] 3 — launcher: every link type, strict validation, silent except interactive, one-time browser tip (2026-10-17)
-- [ ] 4 — queue: statuses, concurrency, cancel, persistence, retry, --queue questions, notifications, panel, pause
+- [x] 4 — queue: statuses, concurrency, cancel, persistence, retry, --queue questions, notifications, panel, pause
+      (2026-10-17)
 - [ ] 5 — Applications Excel on the Desktop (3 sheets, atomic write, open-in-Excel fallback, instant sync)
 - [x] 6 — two projects on every resume (rules v4.6, commit eb37894; remaining: re-check READY resumes)
 - [ ] 7 — UI review (screenshots light/dark, 13" + narrow; fix high/medium; ask before big changes)
@@ -1031,3 +1032,17 @@ Desktop folder, no Terminal.
 - Tests: tests/test_launcher.py (every valid link type, 22 invalid forms with short errors, 3000 fuzzed links never
   crash or run anything, no shell=True and no Terminal for non-interactive links, exit codes, the applet / launcher.sh
   pass the link as one quoted argument).
+
+## Section 4 report (2026-10-17): background queue
+- Built in section 0 (queue table, worker, concurrency 1–2, one build per job, skip current READY unless regenerate,
+  cancel, restart recovery, retry once with the failure passed on, Failed with the reason, timeout, run-lock pause,
+  "database is locked" retries, notifications, auto-save + refresh, batch warning above 5).
+- Added: Questions for you view (grouped by keyword, Yes form with where / level / what / confirmation, No; one-click
+  Regenerate of the jobs that asked) + `hirescope://answer` (validated: question id, yes|no, entry id, known level,
+  text ≤ 4000 without control characters); queue panel (◷ Queue N in the header: building now with a live elapsed
+  timer, waiting in order, finished today with reasons, Cancel / Retry, worker state; Esc, focus handling); resumes.js
+  reloads after an answer.
+- Harness fix: synthetic Enter now carries "\r" so it activates buttons like a real key press.
+- Tests: answer link (sandboxed inputs), notifications / sync after builds, Ready (questions pending), retry on
+  "database is locked", headless-Chrome questions + queue panel scenario (confirmation required, answer link,
+  Regenerate, counts, elapsed time, keyboard Cancel, Esc returns focus).

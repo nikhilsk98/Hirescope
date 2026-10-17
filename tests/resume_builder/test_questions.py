@@ -1,6 +1,8 @@
 """--queue builds never ask: keyword questions go to "Questions for you"; answers close them everywhere."""
 import json
 
+import pytest
+
 from jobsearch import paths as hs_paths
 from jobsearch.storage import db
 from resume_builder import config as rc
@@ -76,3 +78,26 @@ def test_cli_answer_needs_explicit_confirmation(rb_env, capsys):
                  "Built Kafka consumers for the order pipeline", "--level", "production", "--confirm"]) == 0
     assert "Regenerate them" in capsys.readouterr().out
     assert _open(pk) == 1                                        # Travis CI still open
+
+
+def test_answer_link_saves_and_closes_everywhere(rb_env):
+    from jobsearch import launcher
+    rc.TOOL_CHECKLIST.write_text(CHECKLIST)
+    pk = _job(rb_env, company="Q Co", title="Backend Engineer Intern", job_id="demo-q", keywords=KWS)
+    main(["prepare", str(pk), "--queue"])
+    g = {x["keyword"]: x for x in questions.dashboard_list(db.connect(hs_paths.DB))}
+    for bad, why in ((f"hirescope://answer?q={g['Kafka']['ids'][0]}&a=yes", "needs entry"),
+                     ("hirescope://answer?q=1&a=maybe", "unknown value"), ("hirescope://answer?q=1&a=yes&entry=x&text=" + "a" * 4001, "longer"),
+                     ("hirescope://answer?q=1&a=yes&entry=../x&text=hi", "entry must be"),
+                     ("hirescope://answer?q=1&a=yes&entry=exp-demo&level=expert&text=hi", "level must be")):
+        with pytest.raises(launcher.LinkError, match=why):
+            launcher.parse(bad)
+    from urllib.parse import quote
+    msg = launcher.handle(f"hirescope://answer?q={g['Kafka']['ids'][0]}&a=yes&entry=exp-demo&level=production&text="
+                          + quote("Built Kafka consumers for the order pipeline\nwith retries"))
+    assert "saved your answer (yes) for Kafka" in msg
+    assert "Kafka consumers" in rc.ADDITIONS.read_text()
+    launcher.handle(f"hirescope://answer?q={g['Travis CI']['ids'][0]}&a=no")
+    assert _open(pk) == 0
+    data = json.loads((hs_paths.DASHBOARD / "resumes.js").read_text().split("window.RESUMES = ", 1)[1].rstrip().rstrip(";"))
+    assert not any(x["open"] for x in data["questions"])

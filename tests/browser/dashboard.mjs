@@ -189,6 +189,47 @@ const scenarios = {
     check("URL only: saved with the URL and no JD", dl2 && JSON.parse(dl2.text).url === "https://jobs.demo.example/postings/7" && !JSON.parse(dl2.text).jd_text);
     check("URL only: one external link", (await p.eval(`window.__links.length`)) === 2);
   },
+  async queue_questions(p) {
+    await p.eval(CAPTURE + `; localStorage.setItem("jobsearch.launcherTip.v1", "true")`);
+    await p.key("1");
+    const qbtn = `[...document.querySelectorAll(".view-btn")].find((x) => /Questions for you/.test(x.textContent))`;
+    check("sidebar shows 1 question due", /1/.test(await p.eval(`${qbtn}.querySelector(".n").textContent`)));
+    await p.eval(`${qbtn}.click()`); await p.sleep(150);
+    check("question card", /Kafka/.test(await p.eval(`document.querySelector(".question").textContent`)));
+    // Yes without the confirmation: nothing sent
+    await p.eval(`(() => { const f = document.querySelector(".answer-form"); f.querySelector('input[value=yes]').click();
+      const sel = f.querySelectorAll("select"); sel[0].selectedIndex = 1; f.querySelector("textarea").value = "Built consumers for order events"; })()`);
+    await p.eval(`document.querySelector(".answer-form button[type=submit]").click()`); await p.sleep(100);
+    check("needs the confirmation tick", (await p.eval(`window.__links.length`)) === 0);
+    await p.eval(`document.querySelector(".answer-form .confirm-line input").click()`);
+    await p.eval(`document.querySelector(".answer-form button[type=submit]").click()`); await p.sleep(150);
+    const a = await p.eval(`window.__links[0] || ""`);
+    check("answer link", /^hirescope:\/\/answer\?q=\d+&a=yes&entry=[^&]+&text=Built\+consumers/.test(a), a);
+    check("Regenerate offered after answering", /Regenerate this job/.test(await p.eval(`document.querySelector(".question").textContent`)));
+    await p.eval(`[...document.querySelectorAll(".question button")].find((b) => /Regenerate/.test(b.textContent)).click()`); await p.sleep(150);
+    check("Regenerate queues with regenerate=1", /^hirescope:\/\/queue\?job=\d+&regenerate=1$/.test(await p.eval(`window.__links[1] || ""`)), await p.eval(`window.__links[1] || ""`));
+    // the queue panel: building now (elapsed time), waiting in order with Cancel, finished with the reason
+    const t0 = new Date(Date.now() - 65000).toISOString(); const ids = await p.eval(`window.JOBS.filter((j) => !j.filtered).slice(0, 3).map((j) => j.id)`);
+    await p.eval(`window.__hsLive({generated_at: "q1", worker: {state: "running"}, queue: [
+      {id: 11, job_pk: ${ids[0]}, company: "DemoCo", title: "Gen job", status: "generating", attempts: 1, added_at: "${t0}", started_at: "${t0}"},
+      {id: 12, job_pk: ${ids[1]}, company: "DemoCo", title: "Next job", status: "queued", attempts: 0, added_at: "${t0}"},
+      {id: 13, job_pk: ${ids[2]}, company: "DemoCo", title: "Bad job", status: "failed", attempts: 2, added_at: "${t0}", finished_at: "${t0}", message: "bullet_length: 3 lines"}]})`);
+    await p.sleep(150);
+    check("Queue button counts active builds", await p.eval(`document.querySelector("#queue-count").textContent`) === "2");
+    await p.eval(`document.querySelector("#queue-btn").focus()`); await p.key("Enter"); await p.sleep(200);
+    check("panel opens with focus", await p.eval(`!document.querySelector("#queue-panel").hidden && document.querySelector("#queue-panel").contains(document.activeElement)`));
+    const txt = await p.eval(`document.querySelector("#queue-body").textContent`);
+    check("building / waiting / finished", /Building now/.test(txt) && /Waiting \(1\)/.test(txt) && /Finished today/.test(txt) && /bullet_length/.test(txt), txt);
+    check("elapsed time", /^1m 0[5-9]s$|^1m 1\ds$/.test(await p.eval(`document.querySelector("[data-started]").textContent`)), await p.eval(`document.querySelector("[data-started]").textContent`));
+    await p.eval(`window.__links.length = 0`);
+    await p.key("Tab"); await p.key("Tab");
+    const cancelFocused = await p.eval(`document.activeElement.getAttribute("aria-label") || document.activeElement.textContent`);
+    check("Cancel reachable by keyboard", /Cancel/.test(cancelFocused), cancelFocused);
+    await p.key("Enter"); await p.sleep(150);
+    check("Cancel sends hirescope://cancel", /^hirescope:\/\/cancel\?job=\d+$/.test(await p.eval(`window.__links[0] || ""`)), await p.eval(`window.__links[0] || ""`));
+    await p.eval(`document.querySelector("#queue-panel").focus()`); await p.key("Escape"); await p.sleep(100);
+    check("Esc closes and returns focus", await p.eval(`document.querySelector("#queue-panel").hidden && document.activeElement.id === "queue-btn"`));
+  },
   async setup_banner(p) {
     check("setup banner when the launcher isn't installed", await p.eval(`!!document.querySelector(".setup-banner")`));
     await p.eval(CAPTURE);

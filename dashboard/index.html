@@ -12,6 +12,7 @@
     <div class="brand"><span class="logo" aria-hidden="true">H</span>HireScope</div>
     <div class="run" title="Last run"><span id="run-dot" class="dot"></span><span id="run-text">No run yet</span><a id="log-link" class="log-link" hidden target="_blank" rel="noopener noreferrer" title="Open the run log (data.nosync/logs/jobsearch.log)">Log</a></div>
     <div class="search"><input id="q" type="search" placeholder="Search title, company, skills, location…  ( / )" aria-label="Search jobs (press / to focus)"></div>
+    <button id="queue-btn" class="btn ghost queue-btn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="queue-panel" title="Resume queue: what's building and what's waiting"><span aria-hidden="true">◷</span> Queue <span class="count" id="queue-count">0</span></button>
     <button id="palette-btn" class="btn ghost" type="button" aria-label="Command palette (⌘K)" title="Jump to anything (⌘K)"><span class="kbd">⌘K</span></button>
     <button id="export-statuses" class="btn" type="button" title="Download your statuses and applications as jobsearch-statuses.json">Export statuses</button>
     <button id="help-btn" class="btn ghost" type="button" aria-label="Keyboard shortcuts">?</button>
@@ -146,6 +147,11 @@
     <ul id="palette-list" role="listbox" aria-label="Results"></ul>
     <div class="muted palette-foot"><span class="kbd">↑</span> <span class="kbd">↓</span> move · <span class="kbd">Enter</span> open · <span class="kbd">Esc</span> close</div>
   </dialog>
+
+  <section id="queue-panel" class="queue-panel" role="dialog" aria-modal="false" aria-labelledby="queue-title" hidden tabindex="-1">
+    <div class="queue-head"><h3 id="queue-title">Resume queue</h3><span class="muted" id="queue-worker"></span><span class="spacer"></span><button class="btn small ghost" type="button" id="queue-close" aria-label="Close the queue panel (Esc)">✕</button></div>
+    <div id="queue-body"></div>
+  </section>
 
   <div id="toasts" role="status" aria-live="polite"></div>
   <dialog id="help" aria-label="Keyboard shortcuts">
