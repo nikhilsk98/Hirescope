@@ -930,8 +930,8 @@ commit and a push.
 - [x] 6 — two projects on every resume (rules v4.6, eb37894; 17/19 READY resumes OK; 2 need an unlock: Needs Nikhil)
 - [x] 7 — UI review (screenshots light/dark, 13" + narrow; fix high/medium; ask before big changes) (2026-10-17;
       4 larger changes wait for Nikhil's OK)
-- [ ] 8 — no "In Progress" anywhere (hard check on the rendered PDF; scan + regenerate)
-- [ ] 9 — end-to-end test (coverage, real run + import, real launcher/worker, a–j, cleanup)
+- [x] 8 — no "In Progress" anywhere (hard check on the rendered PDF; scan + regenerate) (2026-10-17)
+- [x] 9 — end-to-end test (coverage, real run + import, real launcher/worker, a–j, cleanup) (2026-10-17)
 
 ## Design (decided 2026-10-17)
 - **Transport**: the page (CSP connect-src 'none', file://) talks out only by opening `hirescope://…` links (one per
@@ -1171,3 +1171,67 @@ Low (left as is): the native file input's look; the faint ⌘K hint.
   write leaves a marker that the next sync retries. Also fixed: a skipped write inside the launcher re-sent
   hirescope://sync, a loop (49 links before it was stopped); the launcher never re-sends it now, and a background job
   sends it once per marker.
+
+Section 8 regenerations (through the real queue): Amazon SDE Early Career 19540 → v5, J&J Software Test Engineering
+62484 → v2, LineVision 124710 → v6 (after two fixes: the Skills-row cap and the long-bullet memory). All three are READY,
+one page, 2 projects, no "In Progress"; their Desktop copies are current. Older `_vN` Desktop copies of earlier versions
+(e.g. Amazon _v1/_v2, Nissan _v2/_v3, HPE Cloud Developer _v2/_v5/_v6, Default _v1) still contain the old label; they are
+history, never the current file.
+
+## Section 9 report (2026-10-17): end-to-end
+- Tests: 825 passed; line coverage 58% overall (jobsearch + resume_builder; new modules: launcher 92%, Excel 94%,
+  ready_apps 88%, questions 88%, hooks 82%, installer 81%, queue 74%).
+- Real run: the scheduled 08:00 full run (launchd → scripts/run.sh; my own `./scripts/run.sh` was correctly refused
+  while it ran): 388 of 450 sources OK, 9 failed — all Workday "non-JSON" responses (5 flagged one-off; Bose answered
+  normally right after; Symbotic redirected to Workday's maintenance page), 53 manual, 1,091 new, 6,591 visible; it
+  re-extracted 123k stored jobs (EXTRACT_VERSION .27) and no longer hangs on the Desktop (skipped with a log line).
+  `./scripts/import_pending.sh`: 0 errors (deduped a leftover test file).
+- Launcher + worker installed for real (`./scripts/install_launcher.sh`). Headless Chrome on the real dashboard
+  (scratch profile); every link the page opened was handed to macOS (`open`), i.e. to the installed launcher:
+  a. ticked 147710 (co-op), 2090 (full-time) and 35054 (from 147710's Similar list) → Bucket 3, in SQLite within 5 s.
+  b. Generate Resume on 147710 → page showed Queued → Generating → Ready; no Terminal window; v1 in
+     generated_resumes and on the Desktop; worker logged the notification; shown after reload.
+  c. Generate resumes for all → `queue?list=bucket` queued 2 (duplicate skipped); Cancel on Strada from the queue
+     panel cancelled it; 2090 built to READY v2.
+  d. Resume Builder with a real JD (Strada's posting under "DEMO E2E Co (test)") → imported, queued, built READY v1,
+     in My Applications as Ready to apply. First attempt exposed the Downloads hang (fixed: pasted JDs travel inside
+     the link, no file).
+  e. (scratch copy: answering writes to resume inputs) DEMO job with Elasticsearch / GraphQL / Snowflake / dbt →
+     READY v2 with 2 questions pending, nothing asked; answered Snowflake through `hirescope://answer` → Regenerate →
+     v3 lists Snowflake; dbt still pending.
+  f. Mark Applied on 147710 from the Bucket → left the Bucket, application with today's date and resume v1, Excel row
+     correct with links; stage → Interviewing → Excel updated (8 s after the fix that keeps clicks fast).
+  g. Opened the Excel file in Microsoft Excel, edited a note → "(pending).xlsx" in 8 s + dashboard notice; closed
+     Excel, next edit → file replaced, pending copy removed, row shows the new note.
+  h. 20 of 22 READY resumes pass every check (2 projects, no "In Progress", 1 page, truth 0 unsupported, section
+     order, bullet budget); Centric and DoorDash wait on the unlock (Needs Nikhil). Listed jobs: no full-time job
+     without sponsorship visible; Rubrik "(US Citizen)" no longer listed after the fix; the only hard-flagged visible
+     job is Quartus, an external job you added (always shown by design).
+  i. `launchctl kickstart -k` during Amazon's build → the restarted worker stopped the leftover build and re-queued it
+     first ("resumed after the worker restarted"); a forced failing build (scratch) retried once, then Failed with
+     the reason, notification sent.
+  j. 8 bad links (non-numeric / negative IDs, unknown stage / op / list, /etc/hosts, ../ path, a shell-injection
+     attempt) rejected with short errors; nothing ran.
+- Bugs found and fixed during the run (each with a test): lost clicks (stay-open applet), links lost to a busy
+  database (spool), the launcher and the worker hanging on macOS Desktop / Downloads prompts (child processes with
+  timeouts; inline JD), a hirescope://sync loop, slow clicks from Desktop catch-up, a 13-item Skills row crashing
+  prepare, queue retries repeating a too-long bullet (long-bullet memory), the U.S.-citizenship filter missing a
+  listed requirement and a title, a log header in failure reasons.
+- Cleanup: removed the test application (147710) and the DEMO application, reset the three jobs' statuses, deleted
+  their Bucket / queue / resume rows, resume folders and Desktop copies (147710, 2090, 148392), the DEMO job (JD file,
+  package), the saved test file, its archived copy and the DEMO entry in run 101's summary; republished the dashboard,
+  resumes.js, sync.js and the Excel file (back to your 7 applications). Kept: the 3 regenerated resumes (real), logs,
+  screenshots (data.nosync/screenshots/e2e, ui-review), the long-bullet memory.
+
+## Needs Nikhil (this work)
+1. **macOS folder access for background jobs** (recommended): System Settings → Privacy & Security → Files and Folders →
+   allow **Python** and **HireScope Launcher** the Desktop and Downloads folders (or answer the prompts when shown).
+   Until then background builds/runs skip Desktop copies they can't replace and uploaded JD files; run
+   `./scripts/sync_desktop_resumes.sh` / `python -m resume_builder refresh` in Terminal to catch up. Pasted JDs need
+   nothing.
+2. **Centric Software (46867) and DoorDash (16070)**: unlock the pre-v4 Accenture bullets
+   (`python -m resume_builder unlock 46867 exp-accenture:cbbee0`, `… unlock 16070 exp-accenture:006984`), then
+   Regenerate; they still show 1 project.
+3. **UI changes waiting for your OK** (section 7): hide the sidebar on the Bucket / Resume Builder pages; replace the
+   "Add job by URL" Terminal command; remove the "External Jobs" view; fold Shortlist into the Bucket.
+4. First click on a link in Chrome: tick "Always allow" for HireScope Launcher.
