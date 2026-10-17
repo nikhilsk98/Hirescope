@@ -468,6 +468,7 @@ def handle(url: str, db_path: Path | None = None, from_spool: bool = False) -> s
 
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    os.environ["HIRESCOPE_IN_LAUNCHER"] = "1"     # a skipped Desktop write here never re-sends hirescope://sync
     if len(argv) != 1:
         print("HireScope: expected exactly one hirescope:// link", file=sys.stderr)
         return 2

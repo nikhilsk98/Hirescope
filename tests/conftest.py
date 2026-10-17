@@ -89,6 +89,7 @@ def data_sandbox(tmp_path, monkeypatch):
     monkeypatch.setenv("HIRESCOPE_NO_KICK", "1")
     monkeypatch.setenv("HIRESCOPE_NO_NOTIFY", "1")
     monkeypatch.setenv("HIRESCOPE_NO_LSOF", "1")
+    monkeypatch.setenv("HIRESCOPE_DESKTOP_DIRECT", "1")       # resume copies in-process (test_desktop_access: the child)
     from jobsearch.ops import desktop_access
     desktop_access.forget()
 

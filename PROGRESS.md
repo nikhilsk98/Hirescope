@@ -1164,3 +1164,10 @@ Low (left as is): the native file input's look; the faint ⌘K hint.
   they are on screen). Until then: background builds and runs skip the Desktop copies and the Excel file (everything
   is in data.nosync; any dashboard click through the launcher app — which may write to the Desktop — or
   `./scripts/sync_desktop_resumes.sh` copies them), and uploaded JD files need `./scripts/external_resume.sh "<file>"`.
+- Follow-up (same day): a probe can't decide it — macOS lets a program open files it created itself, so a probe passed
+  and the real work (replacing the Excel file, reading Desktop PDFs other programs wrote) still hung, in the worker
+  and in the launcher. Now the real Desktop work runs in a child process killed after a timeout
+  (`desktop_access.place` for the Excel file, `sync_desktop` for resume PDFs, `readable` for Downloads); a skipped
+  write leaves a marker that the next sync retries. Also fixed: a skipped write inside the launcher re-sent
+  hirescope://sync, a loop (49 links before it was stopped); the launcher never re-sends it now, and a background job
+  sends it once per marker.

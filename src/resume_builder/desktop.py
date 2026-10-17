@@ -122,12 +122,11 @@ def after_current(job_dir: Path, settings=None) -> str | None:
     enabled, folder = settings_of(settings)
     if not enabled:
         return None
-    from jobsearch.ops.desktop_access import writable
-    ok, why = writable(folder)               # a background build never hangs on a macOS permission prompt
-    if not ok:
-        from jobsearch.ops.desktop_access import mark_pending
-        mark_pending(why)                    # the launcher app copies it (it may write to the Desktop)
-        return f"Desktop copy skipped here: {why}"
+    if not os.environ.get("HIRESCOPE_DESKTOP_DIRECT"):
+        # a child process does the copy, killed after a timeout: a build never hangs on a macOS permission prompt
+        from jobsearch.ops.desktop_access import sync_desktop
+        ok, line = sync_desktop(job_dir)
+        return line if line and (not ok or "copied" in line and not line.endswith("(0 copied, 0 removed)")) else None
     try:
         res = sync_job(job_dir, folder)
     except OSError as e:
@@ -173,16 +172,17 @@ def remove_duplicates(folder: Path) -> list[tuple[Path, Path]]:
     return out
 
 
-def sync_all(settings=None, force: bool = False) -> tuple[int, list[str]]:
-    """Mirror every job (backfill / re-sync). (exit code, lines to print). `force` runs even when disabled."""
+def sync_all(settings=None, force: bool = False, direct: bool = False) -> tuple[int, list[str]]:
+    """Mirror every job (backfill / re-sync). (exit code, lines to print). `force` runs even when disabled. Done in a
+    child process (never hangs on a macOS permission prompt) unless `direct` (that child itself)."""
     enabled, folder = settings_of(settings)
     if not (enabled or force):
         return 0, ["Desktop copy is off (desktop_copy.enabled: false in config/resume_builder.yaml); nothing copied."]
+    if not direct and not os.environ.get("HIRESCOPE_DESKTOP_DIRECT"):
+        from jobsearch.ops.desktop_access import sync_desktop
+        ok, line = sync_desktop()
+        return (0 if ok else 1), [line]
     lines, copied, removed = [], 0, 0
-    from jobsearch.ops.desktop_access import writable
-    ok, why = writable(folder)
-    if not ok:
-        return 1, [f"Desktop copy skipped: {why}"]
     try:
         for jd in job_dirs():
             res = sync_job(jd, folder)

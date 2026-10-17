@@ -130,10 +130,13 @@ def test_open_in_excel_saves_pending_and_applies_next_sync(xconn):
     assert json.loads(db.get_meta(conn, "excel_applications"))["status"] == "ok"
 
 
-def test_replace_failure_keeps_the_old_file(xconn, monkeypatch):
+def test_replace_failure_keeps_the_old_file(xconn, monkeypatch, capsys):
+    """The child that places the file: a failed replace keeps the old file and saves the update beside it."""
+    from jobsearch.ops import desktop_access
     conn, a, b = xconn
     X.update(conn)
     before = xlsx().read_bytes()
+    staged = paths.STATE_DIR / "excel" / xlsx().name
     real = Path.replace
 
     def boom(self, target):
@@ -141,8 +144,10 @@ def test_replace_failure_keeps_the_old_file(xconn, monkeypatch):
             raise PermissionError(13, "Permission denied")
         return real(self, target)
     monkeypatch.setattr(Path, "replace", boom)
-    msg = X.update(conn)
-    assert "couldn't be replaced" in msg and xlsx().read_bytes() == before and X.pending_path(xlsx()).exists()
+    assert desktop_access._place_main(str(staged), str(xlsx())) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["status"] == "pending" and "couldn't be replaced" in out["message"]
+    assert xlsx().read_bytes() == before and X.pending_path(xlsx()).exists()
 
 
 def test_disabled_and_unwritable(xconn, monkeypatch, tmp_path):
@@ -160,4 +165,4 @@ def test_disabled_and_unwritable(xconn, monkeypatch, tmp_path):
         msg = X.update(conn, ro / "sub" / "A.xlsx")
     finally:
         os.chmod(ro, 0o700)
-    assert ("not written" in msg or "macOS did not let" in msg) and json.loads(db.get_meta(conn, "excel_applications"))["status"] == "error"
+    assert "macOS did not let" in msg and json.loads(db.get_meta(conn, "excel_applications"))["status"] == "error"

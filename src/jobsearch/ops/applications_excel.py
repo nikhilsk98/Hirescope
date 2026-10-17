@@ -7,7 +7,8 @@ Applied Companies (one row per company), Summary (totals by stage and track, app
 Written after a dashboard change reaches SQLite through the launcher (Mark Applied, stage changes, notes, the Bucket),
 after every HireScope run, import_pending.sh, `resume_builder refresh` and every queue build.
 
-Safe writes: the workbook goes to a temporary file in the same folder and replaces the old one atomically. If the
+Safe writes: the workbook is built in data.nosync, then a child process (ops/desktop_access, killed after a timeout so
+a macOS permission prompt can never hang a background job) copies it next to the old one and replaces it atomically. If the
 file is open in Excel (its "~$" owner file is there, or Excel holds it open), the old file is left alone and the update is
 saved as "HireScope Applications (pending).xlsx"; the next sync (once Excel has closed it) replaces the file and
 removes the pending copy. The dashboard shows a notice meanwhile. Nothing is ever deleted from SQLite here.
@@ -233,41 +234,16 @@ def update(conn, path: Path | None = None) -> str:
     if not enabled:
         _record(conn, status="off", path=str(path))
         return ""
-    from .desktop_access import writable
-    ok, why = writable(path.parent)          # never hang on a macOS permission prompt in a background job
-    if not ok:
-        from .desktop_access import mark_pending
-        mark_pending(why)
-        _record(conn, status="error", path=str(path), message=why)
-        return why
     wb = build(conn)
     n = wb["Applications"].max_row - 1
-    tmp = path.with_name(f".{path.stem}.{os.getpid()}.tmp.xlsx")
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        wb.save(tmp)
-    except OSError as e:                  # e.g. macOS didn't allow this program to write to the Desktop
-        msg = (f"{path} not written ({e.strerror or e}). If macOS blocks the Desktop for the background worker, allow "
-               "it under System Settings → Privacy & Security → Files and Folders, or set excel_applications.path")
-        _record(conn, status="error", path=str(path), message=msg)
-        return msg
-    pend = pending_path(path)
-    if open_in_excel(path):
-        tmp.replace(pend)
-        msg = (f"{path.name} is open in Excel: this update was saved as {pend.name}; it replaces the file at the next "
-               "sync after you close it")
-        _record(conn, status="pending", path=str(path), pending_path=str(pend), message=msg)
-        return msg
-    try:
-        tmp.replace(path)
-    except OSError as e:                  # e.g. a permission problem: keep the old file, save the update beside it
-        try:
-            tmp.replace(pend)
-        except OSError:
-            tmp.unlink(missing_ok=True)
-        msg = f"{path.name} couldn't be replaced ({e.strerror or e}); the update is in {pend.name}"
-        _record(conn, status="pending", path=str(path), pending_path=str(pend), message=msg)
-        return msg
-    pend.unlink(missing_ok=True)
-    _record(conn, status="ok", path=str(path), message=f"{n} application(s)")
-    return ""
+    staged = paths.STATE_DIR / "excel" / path.name          # built in data.nosync; only a child touches the Desktop
+    staged.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(staged)
+    from .desktop_access import place
+    res = place(staged, path)
+    st = res.get("status", "error")
+    if st == "ok":
+        _record(conn, status="ok", path=str(path), message=f"{n} application(s)")
+        return ""
+    _record(conn, status=st, path=str(path), pending_path=res.get("pending_path"), message=res.get("message", ""))
+    return res.get("message", "")

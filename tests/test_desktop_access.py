@@ -1,54 +1,71 @@
-"""Desktop writes in background jobs never hang on a macOS permission prompt (a quick check sat an hour in rename())."""
+"""Desktop / Downloads work in a child process with a timeout: a background job never hangs on a macOS permission
+prompt (a quick check sat an hour in rename(); the worker and the launcher hung in open())."""
 import json
-import time
+import subprocess
 
-from jobsearch import paths
+import pytest
+
+from jobsearch import launcher, paths
 from jobsearch.ops import applications_excel, desktop_access
 from jobsearch.storage import db
 
 
-def test_probe_ok_and_cached(tmp_path):
-    desktop_access.forget()
-    assert desktop_access.writable(tmp_path / "Desktop")[0]
-    assert not list((tmp_path / "Desktop").iterdir())                 # leaves nothing behind
-    assert str(tmp_path / "Desktop") in desktop_access._cache
+@pytest.fixture
+def hanging_child(monkeypatch):
+    """A child that never finishes, like one waiting for an unanswered macOS prompt (killed after 1 s)."""
+    real = subprocess.run
+
+    def run(args, **kw):
+        if "jobsearch.ops.desktop_access" in args:
+            args = [args[0], "-c", "import time; time.sleep(30)"]
+            kw["timeout"] = 1
+        return real(args, **kw)
+    monkeypatch.setattr(desktop_access.subprocess, "run", run)
 
 
-def test_hanging_write_is_killed_and_reported(tmp_path, monkeypatch):
-    desktop_access.forget()
-    monkeypatch.setattr(desktop_access, "_PROBE", "import time; time.sleep(30)")
-    t = time.time()
-    ok, why = desktop_access.writable(tmp_path / "D", timeout=1)
-    assert not ok and time.time() - t < 5 and "System Settings" in why and "waiting for permission" in why
+def test_excel_is_placed_by_a_child(tmp_path):
+    conn = db.connect(paths.DB)
+    assert applications_excel.update(conn) == ""
+    assert applications_excel.settings()[1].exists()
+    assert json.loads(db.get_meta(conn, "excel_applications"))["status"] == "ok"
+    assert not desktop_access.pending_marker().exists()
 
 
-def test_excel_skips_a_blocked_desktop_and_says_how_to_allow(tmp_path, monkeypatch):
-    desktop_access.forget()
-    monkeypatch.setattr(desktop_access, "_PROBE", "import sys; sys.exit('PermissionError: Operation not permitted')")
+def test_a_hanging_desktop_write_is_killed_and_reported(hanging_child):
     conn = db.connect(paths.DB)
     msg = applications_excel.update(conn)
-    assert "macOS did not let" in msg and not applications_excel.settings()[1].exists()
+    assert "macOS did not let" in msg and "waiting for macOS permission" in msg
     st = json.loads(db.get_meta(conn, "excel_applications"))
     assert st["status"] == "error" and "Privacy & Security" in st["message"]
-    desktop_access.forget()
+    assert desktop_access.pending_marker().exists()                # the next sync tries again
 
 
-def test_desktop_resume_copy_skips_a_blocked_desktop(tmp_path, monkeypatch):
+def test_desktop_resume_copies_in_a_child(monkeypatch, hanging_child):
     from resume_builder import desktop
-    desktop_access.forget()
-    monkeypatch.setattr(desktop_access, "_PROBE", "import sys; sys.exit(1)")
-    assert desktop.after_current(tmp_path / "x").startswith("Desktop copy skipped")
+    monkeypatch.delenv("HIRESCOPE_DESKTOP_DIRECT")
     code, lines = desktop.sync_all()
-    assert code == 1 and "Desktop copy skipped" in lines[0]
-    desktop_access.forget()
+    assert code == 1 and lines[0].startswith("Desktop copy skipped")
 
 
-def test_blocked_downloads_keeps_the_request_and_says_how(tmp_path, monkeypatch, cfg):
+def test_desktop_sync_child_runs_for_real(monkeypatch):
+    from resume_builder import desktop
+    monkeypatch.delenv("HIRESCOPE_DESKTOP_DIRECT")
+    code, lines = desktop.sync_all()
+    assert code == 0 and "Desktop folder" in lines[0]
+
+
+def test_downloads_read_check(tmp_path, hanging_child):
+    ok, why = desktop_access.readable(tmp_path)
+    assert not ok and "Downloads Folder" in why
+
+
+def test_downloads_read_check_ok(tmp_path):
+    (tmp_path / "a.json").write_text("{}")
+    assert desktop_access.readable(tmp_path, "a.json")[0]
+
+
+def test_blocked_downloads_keeps_the_request_and_says_how(monkeypatch, cfg, hanging_child):
     from jobsearch import external_resume as ER
-    from jobsearch import launcher
-    desktop_access.forget()
-    monkeypatch.setattr(desktop_access, "_READ", "import time; time.sleep(30)")
-    monkeypatch.setattr(desktop_access.subprocess, "run", _short(desktop_access.subprocess.run))
     d = ER.downloads_dir()
     d.mkdir(parents=True, exist_ok=True)
     (d / "hirescope-external-job-X-1.json").write_text("{}")
@@ -58,49 +75,32 @@ def test_blocked_downloads_keeps_the_request_and_says_how(tmp_path, monkeypatch,
     assert out[0]["blocked"] and len(ER.pending_requests()) == 1 and ER.pending_requests(include_blocked=False) == []
     last = json.loads(db.get_meta(conn, "launcher_last"))
     assert not last["ok"] and "Downloads Folder" in last["message"] and "external_resume.sh" in last["message"]
-    desktop_access.forget()
 
 
-def _short(run):
-    def wrapped(*a, **k):
-        k["timeout"] = min(k.get("timeout", 1), 1)
-        return run(*a, **k)
-    return wrapped
-
-
-def test_blocked_desktop_hands_copies_to_the_launcher(tmp_path, monkeypatch):
-    """A background job that can't write the Desktop leaves a marker; the next launcher call (hirescope://sync, sent by
-    that job) makes the copies and clears it."""
-    from jobsearch import launcher
-    from jobsearch.ops.desktop_access import pending_marker
-    desktop_access.forget()
-    monkeypatch.setattr(desktop_access, "_PROBE", "import sys; sys.exit(1)")
-    conn = db.connect(paths.DB)
-    applications_excel.update(conn)
-    assert pending_marker().exists()
-    monkeypatch.undo()                                  # the launcher app may write there
+def test_sync_link_catches_up_and_never_loops(monkeypatch):
+    """hirescope://sync runs the Desktop catch-up; a skipped write inside the launcher never re-sends the link."""
+    sent = []
+    monkeypatch.delenv("HIRESCOPE_NO_KICK")
+    monkeypatch.setattr(desktop_access.subprocess, "run", _record_open(desktop_access.subprocess.run, sent))
+    monkeypatch.setenv("HIRESCOPE_IN_LAUNCHER", "1")
+    desktop_access.mark_pending("blocked")
+    assert sent == []                                     # inside the launcher: no new link
+    desktop_access.pending_marker().unlink()
+    monkeypatch.delenv("HIRESCOPE_IN_LAUNCHER")
+    desktop_access.mark_pending("blocked")
+    desktop_access.mark_pending("blocked again")
+    assert sent == [["open", "-g", "hirescope://sync"]]   # from a background job: once
     monkeypatch.setenv("HIRESCOPE_NO_KICK", "1")
-    monkeypatch.setenv("JOBSEARCH_EXCEL_PATH", str(tmp_path / "Desktop2" / "A.xlsx"))
-    monkeypatch.setattr(paths, "DATA", tmp_path / "sandbox" / "data.nosync")
-    desktop_access.forget()
     launcher.handle("hirescope://sync")
-    assert not pending_marker().exists() and (tmp_path / "Desktop2" / "A.xlsx").exists()
-    import pytest
+    assert not desktop_access.pending_marker().exists()
     with pytest.raises(launcher.LinkError):
         launcher.parse("hirescope://sync?x=1")
 
 
-def test_probe_opens_an_existing_file(tmp_path):
-    """The probe reads a file that is already there (macOS asks for those, not for a program's own new files)."""
-    desktop_access.forget()
-    d = tmp_path / "D" / "Company"
-    d.mkdir(parents=True)
-    f = d / "resume.pdf"
-    f.write_bytes(b"%PDF")
-    f.chmod(0)                                  # unreadable: like a file this program may not open
-    try:
-        assert not desktop_access.writable(tmp_path / "D")[0]
-    finally:
-        f.chmod(0o644)
-    desktop_access.forget()
-    assert desktop_access.writable(tmp_path / "D")[0]
+def _record_open(real, sent):
+    def run(args, **kw):
+        if args and args[0] == "open":
+            sent.append(list(args))
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return real(args, **kw)
+    return run

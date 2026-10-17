@@ -55,16 +55,12 @@ def _sync(conn) -> None:
 
 
 def _desktop_catch_up(force: bool = False) -> str:
-    """Copies a background job had to skip (Desktop blocked for it): made now, if this process may write there."""
-    from .ops.desktop_access import pending_marker, writable
+    """Copies a background job had to skip (Desktop blocked for it): made now, in a child process (never hangs)."""
+    from .ops.desktop_access import pending_marker, sync_desktop
     m = pending_marker()
     if not (m.exists() or force):
         return ""
-    from resume_builder import desktop
-    enabled, folder = desktop.settings_of()
-    if not enabled or not writable(folder)[0]:
-        return ""
-    code, lines = desktop.sync_all()
-    if code == 0:
+    ok, line = sync_desktop()
+    if ok:
         m.unlink(missing_ok=True)
-    return lines[-1] if lines else ""
+    return line
