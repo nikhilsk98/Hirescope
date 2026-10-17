@@ -30,7 +30,8 @@ def after_change(conn=None, reason: str = "", desktop: bool = False) -> list[str
             steps.append(("applications Excel", lambda: applications_excel.update(conn)))
         except ImportError:
             pass
-        steps.append(("Desktop resume copies", lambda: _desktop_catch_up(force=desktop)))
+        if desktop:      # only the explicit hirescope://sync: copying can take a while, a click must not wait for it
+            steps.append(("Desktop resume copies", lambda: _desktop_catch_up(force=True)))
         from . import live
         steps.append(("live.js", lambda: live.write(conn)))
         for what, fn in steps:
