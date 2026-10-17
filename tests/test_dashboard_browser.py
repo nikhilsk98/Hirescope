@@ -118,3 +118,7 @@ def test_questions_view_and_queue_panel(demo_dashboard):
 
 def test_stage_and_note_edits_sync_and_excel_notice(demo_dashboard):
     scenario(demo_dashboard, "excel")
+
+
+def test_keyboard_navigation_of_new_tabs_and_controls(demo_dashboard):
+    scenario(demo_dashboard, "keyboard")

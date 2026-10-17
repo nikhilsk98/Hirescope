@@ -247,6 +247,55 @@ const scenarios = {
     await p.eval(`window.__hsLive({generated_at: "x2", queue: [], excel: {status: "ok"}})`); await p.sleep(150);
     check("notice goes away after the next sync", !(await p.eval(`!!document.querySelector(".excel-banner")`)));
   },
+  async perf(p) {          // real dashboard timings (read-only)
+    const nav = await p.eval(`(() => { const t = performance.getEntriesByType("navigation")[0]; return { dcl: Math.round(t.domContentLoadedEventEnd), load: Math.round(t.loadEventEnd) }; })()`);
+    check(`page load ${nav.load} ms`, nav.load < 4000, JSON.stringify(nav));
+    const jobs = await p.eval(`window.JOBS.length`);
+    await p.key("2");
+    const t1 = await p.eval(`(async () => { const t = performance.now(); [...document.querySelectorAll(".view-btn")].find((x) => /All Jobs/.test(x.textContent)).click(); await new Promise(requestAnimationFrame); return Math.round(performance.now() - t); })()`);
+    check(`All Jobs (${jobs} loaded) renders in ${t1} ms`, t1 < 500);
+    const t2 = await p.eval(`(async () => { const q = document.querySelector("#q"); const t = performance.now(); q.value = "engineer"; q.dispatchEvent(new Event("input"));
+      await new Promise((r) => setTimeout(r, 130)); const t3 = performance.now(); await new Promise(requestAnimationFrame); return Math.round(performance.now() - t - 120); })()`);
+    check(`search filters in ${t2} ms (after the 120 ms debounce)`, t2 < 400);
+    const t4 = await p.eval(`(async () => { const t = performance.now(); document.querySelector("#palette-btn").click(); const q = document.querySelector("#palette-q"); q.value = "software engineer"; q.dispatchEvent(new Event("input"));
+      for (let i = 0; i < 100 && !/Job/.test(document.querySelector("#palette-list").textContent); i++) await new Promise((r) => setTimeout(r, 50));
+      for (let i = 0; i < 200 && /Loading every job/.test(document.querySelector("#palette-list").textContent); i++) await new Promise((r) => setTimeout(r, 50));
+      return Math.round(performance.now() - t); })()`);
+    check(`⌘K with search.js loaded in ${t4} ms`, t4 < 3000);
+    const t5 = await p.eval(`(async () => { const q = document.querySelector("#palette-q"); const t = performance.now(); q.value = "backend intern boston"; q.dispatchEvent(new Event("input")); await new Promise(requestAnimationFrame); return Math.round(performance.now() - t); })()`);
+    check(`⌘K search over every job in ${t5} ms`, t5 < 300);
+  },
+  async keyboard(p) {       // the new controls by keyboard alone
+    await p.eval(CAPTURE + `; localStorage.setItem("jobsearch.launcherTip.v1", "true")`);
+    const active = `(() => { const a = document.activeElement; return (a.id || "") + "|" + (a.getAttribute("aria-label") || a.textContent || "").trim().slice(0, 60); })()`;
+    // top tabs: one tab stop (roving tabindex), arrows move, Enter/arrow activates
+    await p.eval(`document.querySelector('.track-tab[aria-selected="true"]').focus()`);
+    const stops = await p.eval(`[...document.querySelectorAll(".track-tab")].filter((t) => t.tabIndex === 0).length`);
+    check("top tabs are one tab stop", stops === 1, stops);
+    await p.key("ArrowRight"); await p.key("ArrowRight"); await p.sleep(150);
+    const onPage = await p.eval(`document.body.dataset.page`);
+    check("arrow keys reach the Bucket / Resume Builder tabs", onPage === "bucket" || onPage === "builder", onPage);
+    // Bucket checkbox: Tab from a card reaches it; Space ticks it
+    await p.key("1"); await p.sleep(150);
+    await p.eval(`document.querySelector("#list .card").focus()`); await p.key("Tab");
+    check("Tab from a card reaches its Bucket checkbox", await p.eval(`document.activeElement.classList.contains("bucket-cb")`), await p.eval(active));
+    await p.key(" "); await p.sleep(150);
+    check("Space on the checkbox adds to the Bucket", await p.eval(`document.querySelector("#tab-bucket .count").textContent`) === "1");
+    // Bucket page: Tab through a row reaches Generate / Open / Mark Applied / Remove
+    await p.key("Escape"); await p.eval(`document.activeElement.blur()`); await p.key("3"); await p.sleep(200);
+    await p.eval(`document.querySelector("[data-bucket-row] input[type=checkbox]").focus()`);
+    const seen = [];
+    for (let i = 0; i < 6; i++) { await p.key("Tab"); seen.push(await p.eval(active)); }
+    check("row buttons reachable in order", seen.some((x) => /Generate resume/.test(x)) && seen.some((x) => /\|Mark /.test(x)) && seen.some((x) => /Remove/.test(x)), JSON.stringify(seen));
+    // Resume Builder form: fields reachable, submit by keyboard
+    await p.eval(`document.activeElement.blur()`); await p.key("4"); await p.sleep(200);
+    await p.eval(`document.querySelector(".builder-form input[name=company]").focus()`);
+    const f = [];
+    for (let i = 0; i < 7; i++) { f.push(await p.eval(`document.activeElement.name || document.activeElement.textContent`)); await p.key("Tab"); }
+    check("form fields in order", JSON.stringify(f.slice(0, 6)) === JSON.stringify(["company", "role", "location", "url", "track", "file"]), JSON.stringify(f));
+    const focusVisible = await p.eval(`(() => { document.querySelector(".builder-form input[name=company]").focus(); return getComputedStyle(document.activeElement).outlineStyle; })()`);
+    check("visible focus outline", focusVisible !== "none", focusVisible);
+  },
   async setup_banner(p) {
     check("setup banner when the launcher isn't installed", await p.eval(`!!document.querySelector(".setup-banner")`));
     await p.eval(CAPTURE);

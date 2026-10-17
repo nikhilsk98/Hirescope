@@ -85,7 +85,10 @@
         (!r || String(q) > String(r.updated_at || ""))) return "queued";
     const rv = resumeReviews[j.id];
     if (!r) return it && it.status === "failed" ? "failed" : "";
-    const st = r.status === "validating" ? "generating" : r.status;
+    let st = r.status === "validating" ? "generating" : r.status;
+    // "generating" / "queued" with nothing in the queue and older than 2 h: an abandoned session (e.g. a Terminal
+    // build that never finished), not something in progress: show what the versions say
+    if ((st === "generating" || st === "queued") && Date.now() - Date.parse(r.updated_at || 0) > 2 * 3600e3) st = (r.current && r.current.status) || "";
     if (st === "ready" && r.current && rv && rv.version === r.current.version) return "reviewed";
     if ((st === "ready" || st === "reviewed") && r.questions_pending) return "ready_q";
     return st;
@@ -364,29 +367,31 @@
   function renderBanners() {
     const box = $("#banners"); box.textContent = "";
     const s = META.summary || {};
-    const fails = s.failures || [], manual = s.manual || [], partial = s.partial || [];
+    const onJobs = !PAGES[ui.page];       // run / coverage notices belong to the job tabs, not the Bucket / Resume Builder
+    const fails = onJobs ? s.failures || [] : [], manual = onJobs ? s.manual || [] : [], partial = onJobs ? s.partial || [] : [];
+    const manDue = manualRows().filter((x) => x.st.state !== "ok").length;
+    const dueText = manDue ? ` · ${manDue} not checked in ${MANUAL_DAYS} days (or never)` : "";
+    const openManual = () => (manDue && (tstate().view || "") !== "manual" ? el("button", { class: "btn small x", type: "button", onclick: () => setView("manual") }, "Open Manual Checks") : null);
     const manualList = (title) => el("details", null, el("summary", { text: title }),
       el("ul", null, manual.map((m) => el("li", null, `${m.company}: `, m.error ? el("span", { text: `${m.error} ` }) : "", safeUrl(m.url) ? el("a", { href: m.url, target: "_blank", rel: "noopener noreferrer", text: "check manually" }) : ""))));
     if (fails.length) {
       const d = el("details", null, el("summary", { text: `Last run had problems: ${fails.length} failed, ${manual.length} need a manual check, ${partial.length} partial listings` }),
         el("ul", null, fails.map((f) => el("li", { text: `${f.company} (${f.source}) failed — ${f.error}` }))));
       box.append(el("div", { class: "banner err" }, d));
-      if (manual.length) box.append(el("div", { class: "banner info" }, manualList(`${manual.length} companies to check by hand (job systems HireScope can't read) — see Coverage`)));
+      if (manual.length) box.append(el("div", { class: "banner info" }, manualList(`${manual.length} companies to check by hand (job systems HireScope can't read)${dueText}`), openManual()));
     } else if (manual.length) {
-      box.append(el("div", { class: "banner info" }, manualList(`No failures. ${manual.length} companies to check by hand (job systems HireScope can't read)${partial.length ? `; ${partial.length} partial listings` : ""} — see Coverage`)));
+      box.append(el("div", { class: "banner info" }, manualList(`No failures. ${manual.length} companies to check by hand (job systems HireScope can't read)${dueText}${partial.length ? `; ${partial.length} partial listings` : ""}`), openManual()));
     } else if (partial.length) {
       box.append(el("div", { class: "banner warn" }, `${partial.length} sources returned partial listings (page caps); closures for those are verified per job. See Coverage.`));
     }
-    const manDue = manualRows().filter((x) => x.st.state !== "ok").length;
-    if (manDue && (tstate().view || "") !== "manual") {
-      box.append(el("div", { class: "banner warn" }, el("span", { text: `${manDue} manual compan${manDue === 1 ? "y" : "ies"} not checked in ${MANUAL_DAYS} days (or never).` }),
-        el("button", { class: "btn small x", type: "button", onclick: () => setView("manual") }, "Open Manual Checks")));
+    if (onJobs && manDue && !manual.length && (tstate().view || "") !== "manual") {
+      box.append(el("div", { class: "banner warn" }, el("span", { text: `${manDue} manual compan${manDue === 1 ? "y" : "ies"} not checked in ${MANUAL_DAYS} days (or never).` }), openManual()));
     }
-    if (META.partial_run) box.append(el("div", { class: "banner warn", text: (META.summary || {}).scope === "quick"
+    if (onJobs && META.partial_run) box.append(el("div", { class: "banner-note muted", text: (META.summary || {}).scope === "quick"
       ? "Last run was a quick check (My Companies and tier-1 sources); everything else was refreshed by the last full run."
       : "The last run checked only one company/source; other companies were not re-checked." }));
     const ha = META.health_alerts || [];
-    if (ha.length) box.append(el("div", { class: "banner err" }, el("details", null, el("summary", { text: `Source health: ${ha.length} source${ha.length > 1 ? "s" : ""} returned far fewer jobs than usual (likely broken, not "no new jobs")` }),
+    if (onJobs && ha.length) box.append(el("div", { class: "banner err" }, el("details", null, el("summary", { text: `Source health: ${ha.length} source${ha.length > 1 ? "s" : ""} returned far fewer jobs than usual (likely broken, not "no new jobs")` }),
       el("ul", null, ha.map((a) => el("li", { text: a.message }))))));
     const xl = LIVE.excel || {};
     if (xl.status === "pending" || xl.status === "error") box.append(el("div", { class: `banner ${xl.status === "error" ? "err" : "warn"} excel-banner` },
@@ -527,7 +532,7 @@
   }
 
   // ---------- cards / table ----------
-  const avatarColor = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${h % 360} 42% 42%)`; };
+  const avatarColor = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${h % 360} 42% 32%)`; };
   function ring(score, label, size = 52) {
     const r = size / 2 - 5, c = 2 * Math.PI * r, v = Math.max(0, Math.min(100, score || 0));
     return el("div", { class: "ring", style: `width:${size}px;height:${size}px`, title: `${Math.round(v)} / 100 — ${label || ""}. ${META.disclaimer || ""}` },
@@ -1047,7 +1052,7 @@
     const body = el("tbody");
     for (const x of items) body.append(bucketRow(x));
     box.append(el("div", { class: "table-wrap" }, el("table", { class: "grid bucket-table", "aria-label": "Bucket" },
-      el("colgroup", null, ["36px", null, "120px", "64px", "230px", "120px", "300px"].map((w) => el("col", { style: w ? `width:${w}` : null }))),
+      el("colgroup", null, ["36px", null, "118px", "60px", "220px", "130px", "372px"].map((w) => el("col", { style: w ? `width:${w}` : null }))),
       el("thead", null, el("tr", null, el("th", { scope: "col" }, all), ...["Role", "Track", "Score", "Resume", "Deadline", "Actions"].map((h, i) => el("th", { scope: "col", class: i === 2 ? "num" : "", text: h })))),
       body)));
     box.append(el("p", { class: "muted", style: "font-size:12px", text: "Jobs stay here until you mark them applied or remove them, even after a posting closes. Marking a job applied moves it to My Applications." }));
@@ -1070,13 +1075,13 @@
       el("td", null, rs ? resumeBadge(rs, resumeTitle(j)) : el("span", { class: "muted", text: "No resume yet" }),
         r && r.current && !busy ? el("div", null, el("a", { href: r.current.pdf, target: "_blank", rel: "noopener", class: "small-link" }, `Preview v${r.current.version}`)) : null),
       el("td", { class: "nowrap" }, j.deadline ? el("span", { class: d != null && d <= 7 ? "warn-text" : "", text: `${fmtDate(j.deadline)}${d != null ? ` (${d < 0 ? "passed" : d === 0 ? "today" : `${d}d`})` : ""}` }) : el("span", { class: "muted", text: "Not stated" })),
-      el("td", { class: "row-actions" },
-        busy ? el("button", { class: "btn small ghost", type: "button", onclick: () => cancelBuild(j), "aria-label": `Cancel the resume build for ${j.company}` }, "Cancel")
+      el("td", null, el("div", { class: "row-actions" },
+        busy ? el("button", { class: "btn small", type: "button", onclick: () => cancelBuild(j), "aria-label": `Cancel the resume build for ${j.company}` }, "Cancel")
           : el("button", { class: "btn small" + (HAS_RESUME.includes(rs) ? "" : " primary"), type: "button", onclick: () => queueResume(j, HAS_RESUME.includes(rs)),
             "aria-label": `${HAS_RESUME.includes(rs) ? "Regenerate" : "Generate"} resume for ${j.title} at ${j.company}` }, HAS_RESUME.includes(rs) ? "Regenerate" : "Generate Resume"),
         apply ? el("a", { class: "btn small", href: apply, target: "_blank", rel: "noopener noreferrer", "aria-label": `Open the application for ${j.company}` }, "Open Application") : null,
         el("button", { class: "btn small", type: "button", onclick: () => markApplied(j), "aria-label": `Mark ${j.title} at ${j.company} applied` }, "Mark Applied"),
-        el("button", { class: "btn small ghost", type: "button", onclick: () => setBucket(j, false), "aria-label": `Remove ${j.title} at ${j.company} from the Bucket`, title: "Remove from Bucket" }, "Remove")));
+        el("button", { class: "btn small ghost icon-btn", type: "button", onclick: () => setBucket(j, false), "aria-label": `Remove ${j.title} at ${j.company} from the Bucket`, title: "Remove from Bucket" }, "✕"))));
   }
   async function removeFromBucket(jobs) {
     if (!jobs.length) return;
@@ -2233,11 +2238,11 @@
           v && !busy ? el("div", { class: "small-links" }, el("a", { href: v.pdf, target: "_blank", rel: "noopener" }, `Preview v${v.version}`), " · ",
             el("a", { href: v.pdf, download: v.pdf_name || "resume.pdf" }, "Download")) : null),
         el("td", null, app ? el("span", { class: `chip ${app.stage === "ready" ? "warn" : "info"}`, text: STAGE_LABEL[app.stage] }) : el("span", { class: "muted", text: "—" })),
-        el("td", { class: "row-actions" },
-          busy ? el("button", { class: "btn small ghost", type: "button", onclick: () => cancelBuild(j) }, "Cancel")
+        el("td", null, el("div", { class: "row-actions" },
+          busy ? el("button", { class: "btn small", type: "button", onclick: () => cancelBuild(j) }, "Cancel")
             : el("button", { class: "btn small", type: "button", onclick: () => queueResume(j, HAS_RESUME.includes(rs)) }, HAS_RESUME.includes(rs) ? "Regenerate" : "Generate Resume"),
-          app && app.stage !== "ready" ? el("button", { class: "btn small ghost", type: "button", onclick: () => openDrawer(app.id) }, "Applied ✓")
-            : el("button", { class: "btn small" + (app ? " primary" : ""), type: "button", onclick: () => markApplied(j), "aria-label": `Mark ${j.title} at ${j.company} applied` }, "Mark Applied"))));
+          app && app.stage !== "ready" ? el("button", { class: "btn small", type: "button", onclick: () => openDrawer(app.id), title: "Open in My Applications" }, "Applied ✓")
+            : el("button", { class: "btn small" + (app ? " primary" : ""), type: "button", onclick: () => markApplied(j), "aria-label": `Mark ${j.title} at ${j.company} applied` }, "Mark Applied")))));
     }
     box.append(el("div", { class: "table-wrap" }, el("table", { class: "grid ext-table", "aria-label": "External jobs" },
       el("thead", null, el("tr", null, ["Role", "Track", "Added", "Resume", "Application", "Actions"].map((h) => el("th", { scope: "col", text: h })))), body)));
@@ -2281,7 +2286,9 @@
   function switchTrack(t) {
     const onApps = ["applications", "stats", "followups"].includes(tstate().view);
     const v = tstate().view;
+    const fromPage = ui.page !== "jobs";
     ui.track = t; ui.page = "jobs"; if (onApps) tstate().view = v; saveUI();
+    if (fromPage) renderBanners();
     $("#q").value = tstate().q || ""; closePop(); renderAll();
     for (const n of [$("#main"), $("#tiles")]) { n.classList.remove("swap-in"); void n.offsetWidth; n.classList.add("swap-in"); }
   }

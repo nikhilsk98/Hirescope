@@ -928,7 +928,8 @@ commit and a push.
 - [x] 5 — Applications Excel on the Desktop (3 sheets, atomic write, open-in-Excel fallback, instant sync)
       (2026-10-17)
 - [x] 6 — two projects on every resume (rules v4.6, eb37894; 17/19 READY resumes OK; 2 need an unlock: Needs Nikhil)
-- [ ] 7 — UI review (screenshots light/dark, 13" + narrow; fix high/medium; ask before big changes)
+- [x] 7 — UI review (screenshots light/dark, 13" + narrow; fix high/medium; ask before big changes) (2026-10-17;
+      4 larger changes wait for Nikhil's OK)
 - [ ] 8 — no "In Progress" anywhere (hard check on the rendered PDF; scan + regenerate)
 - [ ] 9 — end-to-end test (coverage, real run + import, real launcher/worker, a–j, cleanup)
 
@@ -1072,3 +1073,42 @@ Desktop folder, no Terminal.
   bullets, so it can't pass the truth check. To fix: `~/.venvs/hirescope/bin/python -m resume_builder unlock 16070
   exp-accenture:006984` and `… unlock 46867 exp-accenture:cbbee0`, then Regenerate both from the dashboard (or the
   Bucket's Regenerate). Until then their current versions stay as they are.
+
+## Section 7 report (2026-10-17): UI review
+Screenshots: data.nosync/screenshots/ui-review/{before,after}/ (42 views × light/dark × 1440 px / 760 px = 168 each;
+every top tab, every sidebar view, My Applications board / table / Applied Companies / stats, all 7 panel tabs, the
+application drawer, the queue panel, ⌘K, a toast, the help dialog, empty Bucket, the setup banner) + report.json (per
+shot: console errors, horizontal overflow, clipped controls, WCAG AA contrast of every rendered text element).
+tests/browser/ui_review.mjs reproduces it (read-only, scratch profile, links captured).
+
+Findings (fixed):
+- High — Bucket / Resume Builder tables: the Actions cell was `display:flex` on the `<td>`, breaking table layout
+  (row borders misaligned) → buttons in an inner div, kept on one line.
+- High — narrow window: the four top tabs wrapped into two-line labels ("Full- / time") → nowrap, horizontally
+  scrollable tab row below 1000 px.
+- High — dark theme: the "H" logo was white on a light gradient (1.7–2.1:1) → dark text in dark mode (token test).
+- Medium — avatar initials 3.05–3.63:1 (AA needs 4.5) → avatar lightness 42% → 32% (≥ 4.91 for every hue; test).
+- Medium — a stale "Resume: Generating" (an unfinished Terminal session hours ago) → in-flight statuses with nothing in
+  the queue and older than 2 h show what the versions say.
+- Medium — four stacked banners: two about the same manual-check companies merged into one (with Open Manual
+  Checks); the quick-check notice is now a quiet line; run / coverage notices only on the job tabs, not on the Bucket
+  or Resume Builder pages.
+- Medium — Bucket row actions wrapped onto two lines; "Remove" as text → one line, ✕ with an accessible label;
+  heavy underlined titles in the new tables → underline on hover / focus only; the "…" menu button had no border
+  (specificity); "No resume yet" wrapped to three lines on narrow screens; "Applied ✓" looked like plain text.
+- Checked and fine: no console errors in any view; no horizontal page overflow; no clipped controls; status badges
+  carry an icon and text, not color alone; keyboard: top tabs are one tab stop with arrow keys, Bucket checkboxes
+  (Tab + Space), Bucket row buttons, Resume Builder form order, queue Cancel, Esc returns focus (tests/browser
+  "keyboard" + "queue_questions" scenarios); performance on the real data (5,629 loaded jobs): load 138 ms, All Jobs
+  14 ms, search 25 ms after the 120 ms debounce, ⌘K incl. loading search.js 111 ms, ⌘K search over every job 4 ms.
+
+Waiting for Nikhil's approval (larger changes, not made):
+1. Hide the sidebar on the Bucket and Resume Builder pages (full width; on narrow windows the job views push those
+   pages ~250 px down). Before / after previews: data.nosync/screenshots/ui-review/proposals/.
+2. The sidebar "Add job by URL" card still copies a Terminal command: replace it with a link to the Resume Builder
+   tab (URL only), or a launcher link that adds the job without building a resume.
+3. The "External Jobs" sidebar view duplicates the Resume Builder tab's list (and counts per track while the tab counts
+   both): remove the view.
+4. "Shortlisted" overlaps the Bucket (both are "jobs I want"): fold Shortlist into the Bucket or keep both with
+   clearer labels.
+Low (left as is): the native file input's look; the faint ⌘K hint.

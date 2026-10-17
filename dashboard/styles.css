@@ -29,7 +29,7 @@
     --shadow-1: 0 1px 2px rgba(0, 0, 0, .4); --shadow-2: 0 8px 24px rgba(0, 0, 0, .5); --shadow-panel: -12px 0 40px rgba(0, 0, 0, .55);
     --strong: #79d69a; --strong-bg: #173322; --stretch: #f2c26a; --stretch-bg: #3a2c12; --weak: #b4b4bc; --weak-bg: #2a2a2f;
     --flag: #f3a29a; --flag-bg: #3d1d1b;
-    --coop: #c3a6ff; --coop-bg: #2c2242; --ft: #6fd8ca; --ft-bg: #15332f; --unclear: #b4b4bc; --unclear-bg: #2a2a2f;
+    --coop: #c3a6ff; --logo-fg: #15121c; --coop-bg: #2c2242; --ft: #6fd8ca; --ft-bg: #15332f; --unclear: #b4b4bc; --unclear-bg: #2a2a2f;
     --kw-match: #79d69a; --kw-match-bg: #173322; --kw-syn: #9cc2ff; --kw-syn-bg: #1b2a44; --kw-miss: #f3a29a; --kw-miss-bg: #3d1d1b;
     --info-bg: #1b2440; --info: #b6c7ff; --warn-bg: #3a3015; --warn: #f2d585; --err-bg: #3d1d1b; --err: #f3a29a;
     color-scheme: dark;
@@ -42,7 +42,7 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, .4); --shadow-2: 0 8px 24px rgba(0, 0, 0, .5); --shadow-panel: -12px 0 40px rgba(0, 0, 0, .55);
   --strong: #79d69a; --strong-bg: #173322; --stretch: #f2c26a; --stretch-bg: #3a2c12; --weak: #b4b4bc; --weak-bg: #2a2a2f;
   --flag: #f3a29a; --flag-bg: #3d1d1b;
-  --coop: #c3a6ff; --coop-bg: #2c2242; --ft: #6fd8ca; --ft-bg: #15332f; --unclear: #b4b4bc; --unclear-bg: #2a2a2f;
+  --coop: #c3a6ff; --logo-fg: #15121c; --coop-bg: #2c2242; --ft: #6fd8ca; --ft-bg: #15332f; --unclear: #b4b4bc; --unclear-bg: #2a2a2f;
   --kw-match: #79d69a; --kw-match-bg: #173322; --kw-syn: #9cc2ff; --kw-syn-bg: #1b2a44; --kw-miss: #f3a29a; --kw-miss-bg: #3d1d1b;
   --info-bg: #1b2440; --info: #b6c7ff; --warn-bg: #3a3015; --warn: #f2d585; --err-bg: #3d1d1b; --err: #f3a29a;
   color-scheme: dark;
@@ -88,7 +88,7 @@ textarea { height: auto; padding: var(--sp-2); }
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: var(--sp-3); height: 56px; padding: 0 var(--sp-5);
   background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--border); }
 .brand { display: flex; align-items: center; gap: var(--sp-2); font-weight: 700; font-size: var(--fs-lg); letter-spacing: -.01em; }
-.logo { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, var(--coop), var(--ft)); color: #fff; font-size: 15px; }
+.logo { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, var(--coop), var(--ft)); color: var(--logo-fg, #fff); font-size: 15px; }
 .run { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--text-2); white-space: nowrap; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-3); }
 .dot.green { background: #26a35a; } .dot.amber { background: #e0a21b; } .dot.red { background: #d64545; }
@@ -510,3 +510,18 @@ table.manual-table tr.due-row td:first-child { box-shadow: inset 3px 0 0 var(--s
 .answer-form { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--border); }
 .answer-choice { display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-2); font-size: var(--fs-sm); }
 .answer-yes { margin-bottom: var(--sp-2); } .confirm-line { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); margin-top: 6px; }
+.banner-note { margin-top: var(--sp-2); font-size: var(--fs-xs); padding: 0 var(--sp-1); }
+.row-actions { flex-wrap: nowrap; white-space: nowrap; align-items: center; }
+.icon-btn { min-width: 30px; padding: 0 8px; }
+.bucket-table .row-title, .ext-table .row-title { text-decoration: none; }
+.bucket-table .row-title:hover, .ext-table .row-title:hover, .bucket-table .row-title:focus-visible, .ext-table .row-title:focus-visible { text-decoration: underline; color: var(--accent); }
+.btn.more-btn { border: 1px solid var(--border); }
+@media (max-width: 1100px) { .row-actions { flex-wrap: wrap; white-space: normal; } }
+.track-tab { white-space: nowrap; }
+@media (max-width: 1000px) {
+  .track-tabs { overflow-x: auto; scrollbar-width: thin; gap: var(--sp-1); }
+  .track-tab { padding-left: var(--sp-3); padding-right: var(--sp-3); flex: none; }
+  .track-both { white-space: nowrap; flex: none; margin-left: var(--sp-3); }
+}
+.bucket-table td .muted, .ext-table td .muted { white-space: nowrap; }
+.bucket-table td.role .muted, .ext-table td.role .muted { white-space: normal; }

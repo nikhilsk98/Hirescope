@@ -171,6 +171,8 @@ def test_design_tokens_meet_wcag_aa(theme):
     t = theme_tokens()[theme]
     low = [(fg, bg, round(contrast(t[fg], t[bg]), 2)) for fg, bgs in PAIRS.items() for bg in bgs if contrast(t[fg], t[bg]) < 4.5]
     assert not low, f"{theme}: pairs below 4.5:1: {low}"
+    logo = t.get("logo-fg", "#ffffff")              # the "H" logo: its text on both ends of its gradient
+    assert min(contrast(logo, t["coop"]), contrast(logo, t["ft"])) >= 4.5, theme
 
 
 # --- ⌘K: every job, both tracks, every view -------------------------------------------------------------------------
@@ -233,3 +235,15 @@ def test_result_by_id_for_similar_jobs_without_details():
     assert a["company"] == "DemoCo" and a["trackLabel"] and a["reason"] == "Season has passed: Fall 2026" and a["state"] == "u"
     assert b["state"] == "c" and b["date"] == "2026-10-01" and b["track"] == "full_time"
     assert c is None and d is None
+
+
+@needs_node
+def test_avatar_initials_meet_wcag_aa_for_every_hue():
+    import re
+    src = (Path(__file__).resolve().parents[1] / "dashboard" / "app.js").read_text()
+    s, l = map(int, re.search(r"return `hsl\(\$\{h % 360\} (\d+)% (\d+)%\)`", src).groups())
+    out = subprocess.run([NODE, "-e", f"""
+const lum=(c)=>{{const [r,g,b]=c.map(v=>{{v/=255;return v<=0.03928?v/12.92:((v+0.055)/1.055)**2.4}});return 0.2126*r+0.7152*g+0.0722*b}};
+function hsl(h,s,l){{s/=100;l/=100;const k=n=>(n+h/30)%12,a=s*Math.min(l,1-l),f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));return [f(0),f(8),f(4)].map(x=>x*255)}}
+let min=99; for (let h=0;h<360;h++) min=Math.min(min, 1.05/(lum(hsl(h,{s},{l}))+0.05)); console.log(min);"""], capture_output=True, text=True, check=True)
+    assert float(out.stdout) >= 4.5          # white initials on the avatar color (18px bold = normal text: 4.5:1)
