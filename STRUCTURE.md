@@ -8,9 +8,12 @@ hirescope/
 ├── README.md  PROGRESS.md  STRUCTURE.md  requirements.txt  pyproject.toml  .env.example
 ├── config/          tuning and source lists (companies.yaml, title_rules.yaml, resume_builder.yaml, …)
 ├── dashboard/       the static dashboard (index.html, app.js, …) + generated data.js, details/, sync.js, resumes.js,
-│                    search.js (every job, for the ⌘K palette)
+│                    search.js (every job, for the ⌘K palette), live.js (queue / worker / Excel state, re-read every few
+│                    seconds), launcher.js (is the hirescope:// launcher installed?)
 ├── docs/            notes; docs/prompts/ = the build prompts this project was built from
-├── scripts/         run.sh, setup.sh, schedule.sh (+ launchd/ templates), add_url.sh, add_job.sh, import_pending.sh, sync_desktop_resumes.sh, migrate_layout.py
+├── scripts/         run.sh, setup.sh, schedule.sh (+ launchd/ templates), add_url.sh, add_job.sh, import_pending.sh, sync_desktop_resumes.sh, migrate_layout.py,
+│                    install_launcher.sh / uninstall_launcher.sh, launcher.sh (one hirescope:// link), queue_worker.sh,
+│                    launcher/HireScopeLauncher.applescript (the launcher app's source)
 ├── src/jobsearch/   HireScope (discovery → scoring → dashboard)
 ├── src/resume_builder/   the Resume Builder (/resume-builder)
 ├── tests/           DEMO data only
@@ -47,10 +50,11 @@ hirescope/
     │   ├── _default/            the Default one-page resume (no job description): v1, v2, … like any job
     │   ├── learn_it.md          JD keywords missing from your evidence in several prepared jobs (rule 61)
     │   └── _cache/              evidence bank, batch queue, missing_keywords.json, keyword_answers.json (your "no"s)
-    ├── logs/        jobsearch.log (rotated), launchd logs, last_run_summary.txt
+    ├── logs/        jobsearch.log (rotated), launchd logs, last_run_summary.txt, launcher.log (every hirescope:// link),
+    │                queue/ (one log per queued build attempt)
     ├── backups/     daily SQLite snapshots (last 14)
     ├── digests/  exports/  screenshots/
-    └── state/       run.lock (while a run is active)
+    └── state/       run.lock (while a run is active), queue_worker.lock, queue.trigger (starts the launchd worker)
 
 ~/Desktop/Generated Resumes/   COPIES of READY PDFs only (desktop_copy in config/resume_builder.yaml; outside the repo)
     ├── <Company>/<Role>_<JobID>/  Nikhil_Shivakumar_Resume_<Company>.pdf (current), …_<Company>_v<N>.pdf (older READY)
@@ -60,6 +64,12 @@ hirescope/
 - Resume Builder code for the v4 master: `master_v4.py` (parser), `v4build.py` (snapshot baseline, template-macro
   rendering, layout checks), `rules_v4.py` (rules v4.3 checks). HireScope's matcher reads the same v4 master through
   `jobsearch/extract/resume.py` (usable bullets and inventory skills only).
+- Zero-CLI resumes: `~/Applications/HireScope Launcher.app` → `scripts/launcher.sh` → `src/jobsearch/launcher.py`
+  (validates and runs each hirescope:// link); `src/resume_builder/queue.py` (SQLite `resume_queue`, the launchd worker
+  `com.nikhil.hirescope.worker`); `src/resume_builder/questions.py` (Questions for you: `resume_questions`);
+  `src/jobsearch/bucket.py` (the Bucket: `bucket`); `src/jobsearch/hooks.py` (what every change refreshes: sync.js,
+  applications, Excel, live.js); `src/jobsearch/live.py` (dashboard/live.js, launcher.js);
+  `src/jobsearch/ops/launcher_install.py` (install / uninstall).
 - Desktop copy: `src/resume_builder/desktop.py` mirrors each job's READY PDFs when a version becomes current
   (`versions.set_current`) and on `./scripts/sync_desktop_resumes.sh` (`python -m resume_builder sync-desktop`);
   tests point it at a temporary folder (`JOBSEARCH_DESKTOP_DIR`).

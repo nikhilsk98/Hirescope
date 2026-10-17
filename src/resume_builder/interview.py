@@ -117,6 +117,6 @@ def save_answer(entry_id: str, question: str, answer: str, confirmed: bool, bank
     tmp = path.with_suffix(".tmp")
     tmp.write_text(text.rstrip("\n") + "\n" + block, encoding="utf-8")
     tmp.replace(path)
-    if keyword:
-        keywords.record_answer(keyword, "saved")
+    if keyword:      # a "no" stays a no (decline): recording it as "saved" would read as a yes everywhere else
+        keywords.record_answer(keyword, "no" if a.casefold() in ("no", "none") else "saved")
     return path

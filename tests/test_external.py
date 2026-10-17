@@ -468,7 +468,7 @@ def test_applied_companies():
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 def test_core_js_applied_companies_and_external_duplicate_match_python():
-    core = json.dumps(str(paths.DASHBOARD / "core.js"))
+    core = json.dumps(str(paths.ROOT / "dashboard" / "core.js"))
     js = f"""const C = require({core});
 const jobs = [{{id: 7, company: "DemoCorp", title: "Software Engineer Co-op (DEMO)", apply_url: "https://www.demo.example/jobs/1/"}}];
 console.log(JSON.stringify({{rows: C.appliedCompanies({json.dumps(_apps())}),

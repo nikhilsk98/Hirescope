@@ -907,3 +907,68 @@ reuse, web-sockets → Socket.IO).
   unlock decision first. Their generations are prepared but not built.
 
 **Tests**: 7 new (tests/resume_builder/test_two_projects.py); repair-order tests updated for rule 67 v4.6.
+
+---
+
+# Zero-CLI resumes: Bucket, Resume Builder tab, launcher, queue, Excel (started 2026-10-17)
+Built from the "two new dashboard tabs … end-to-end test" prompt (sections 0–9). Resume here: read this section and
+`git log --oneline`, then continue from the first unchecked section. Each section ends with all tests passing, a
+commit and a push.
+
+## Status
+- [x] 0 — Zero-CLI: install_launcher.sh (hirescope:// app + launchd worker), Generate Resume queues via the launcher,
+      "Copy command" only under "…", setup banner (2026-10-17)
+- [ ] 1 — Bucket tab (checkbox = add to Bucket; per-job + bucket actions; Mark Applied removes with Undo; export 6)
+- [ ] 2 — Resume Builder tab (form → saved file → hirescope://external → import + queue; "Ready to apply" stage)
+- [ ] 3 — launcher: every link type, strict validation, silent except interactive, one-time browser tip
+- [ ] 4 — queue: statuses, concurrency, cancel, persistence, retry, --queue questions, notifications, panel, pause
+- [ ] 5 — Applications Excel on the Desktop (3 sheets, atomic write, open-in-Excel fallback, instant sync)
+- [x] 6 — two projects on every resume (rules v4.6, commit eb37894; remaining: re-check READY resumes)
+- [ ] 7 — UI review (screenshots light/dark, 13" + narrow; fix high/medium; ask before big changes)
+- [ ] 8 — no "In Progress" anywhere (hard check on the rendered PDF; scan + regenerate)
+- [ ] 9 — end-to-end test (coverage, real run + import, real launcher/worker, a–j, cleanup)
+
+## Design (decided 2026-10-17)
+- **Transport**: the page (CSP connect-src 'none', file://) talks out only by opening `hirescope://…` links (one per
+  click: Chrome allows one external-protocol launch per user gesture, so side effects happen in the launcher, e.g.
+  Mark Applied also removes the Bucket entry). It hears back by re-loading `dashboard/live.js` (queue, worker, Excel
+  state; written by the launcher and the worker) every few seconds, and `resumes.js` / `sync.js` when a build ends.
+  `dashboard/launcher.js` says whether the launcher is installed (setup banner otherwise).
+- **Launcher**: `~/Applications/HireScope Launcher.app` (AppleScript applet from scripts/launcher/, LSUIElement, URL
+  scheme hirescope) → `scripts/launcher.sh "<url>"` → `python -m jobsearch.launcher` (validation + dispatch; the URL is
+  passed as one quoted argument and parsed in Python, never by a shell). Errors → a short notification.
+- **Worker**: launchd agent `com.nikhil.hirescope.worker` (RunAtLoad, KeepAlive on crash, WatchPaths on
+  data.nosync/state/queue.trigger, kickstarted by the launcher) → `python -m resume_builder queue worker`: runs
+  `claude -p "/resume-builder <id> --queue"` per job (stdin closed, allowlisted tools), exits when the queue is empty.
+- **SQLite (migration 9)**: resume_queue, bucket, resume_questions.
+- Notes and question answers travel in the link itself (URL-encoded, ≤ 4000 chars, parsed in Python, written with
+  parameterized SQL) instead of a downloaded file per keystroke; JD files go through ~/Downloads (or
+  inputs/external_jobs/) as before.
+
+## Section 0 report (2026-10-17): zero-CLI resumes
+- `./scripts/install_launcher.sh` builds `~/Applications/HireScope Launcher.app` (osacompile from
+  scripts/launcher/HireScopeLauncher.applescript; Info.plist: bundle id com.nikhil.hirescope.launcher, URL scheme
+  hirescope, LSUIElement; ad-hoc signed; registered with lsregister) and loads the launchd agent
+  `com.nikhil.hirescope.worker` (RunAtLoad, KeepAlive on crash only, WatchPaths data.nosync/state/queue.trigger, PATH
+  with ~/.local/bin + Homebrew). `uninstall_launcher.sh` removes both. Installed for real: `open "hirescope://…"`
+  reached the pipeline silently (no Terminal; logged in data.nosync/logs/launcher.log), a bad link was rejected,
+  and the worker exited 0 on its own after 30 s idle.
+- Migration 9: resume_queue, bucket, resume_questions. `resume_builder/queue.py`: add (no duplicates; current READY
+  skipped unless regenerate), cancel (stops the build's process group), recover after a restart (kills what's left
+  of the build, re-queues without using an attempt), worker (concurrency 1–2, one build per job, pause while the run
+  lock is held, retry once then Failed with the reason, timeout, notifications, after-build refresh).
+- `claude -p "/resume-builder <id> --queue"`: --permission-mode acceptEdits, --permission-prompts none, only
+  `python -m resume_builder …` allowed in Bash; stdin closed. SKILL.md "Queue mode" section. `prepare --queue` saves
+  keyword questions (resume_questions) instead of asking; `questions` CLI; any answer (add-evidence, add-tool,
+  decline, dashboard) closes the keyword's questions in every job.
+- Bug found and fixed: a "no" answer through `save_answer` (decline) was recorded as "saved" in keyword_answers.json.
+- config/resume_builder.yaml `resume_queue:` sits below a marker line excluded from the build input hash, so adding
+  it didn't invalidate any version (checked: the hash of the text above the marker equals the old file's).
+- Dashboard: Generate Resume / Regenerate / `g` queue through the launcher (one-time "Always allow" tip); Copy
+  Terminal command and a live Terminal session moved under "…"; setup banner when the launcher isn't installed;
+  live.js polling (3 s while busy, 20 s idle) moves statuses on their own and reloads resumes.js / sync.js when a
+  build ends; one resume badge style (Queued / Generating / Ready / Ready (questions pending) / Failed).
+- Tests: a global sandbox fixture (data dir, dashboard dir, Excel path, Downloads, no notifications, no launchd kick)
+  so no test can touch real data; tests/resume_builder/test_queue.py (queue, worker with stub builds, launcher
+  validation, silent mode, installer), test_questions.py, tests/test_dashboard_browser.py (headless Chrome via
+  tests/browser/cdp.mjs: no console errors, Generate Resume → hirescope://queue, tip once, live statuses, `g`).

@@ -78,6 +78,19 @@ def desktop_sandbox(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def data_sandbox(tmp_path, monkeypatch):
+    """No test touches real data: data.nosync, the generated dashboard files, the Desktop Excel file, ~/Downloads,
+    notifications and the launchd worker all point at temporary stand-ins (a test may narrow them further)."""
+    from jobsearch import paths as _p
+    monkeypatch.setattr(_p, "DATA", tmp_path / "sandbox" / "data.nosync")
+    monkeypatch.setattr(_p, "DASHBOARD", tmp_path / "sandbox" / "dashboard")
+    monkeypatch.setenv("JOBSEARCH_EXCEL_PATH", str(tmp_path / "sandbox" / "Desktop" / "HireScope Applications.xlsx"))
+    monkeypatch.setenv("JOBSEARCH_DOWNLOADS_DIR", str(tmp_path / "sandbox" / "Downloads"))
+    monkeypatch.setenv("HIRESCOPE_NO_KICK", "1")
+    monkeypatch.setenv("HIRESCOPE_NO_NOTIFY", "1")
+
+
+@pytest.fixture(autouse=True)
 def no_sleep(monkeypatch):
     monkeypatch.setattr("jobsearch.adapters.base.time.sleep", lambda s: None)
 

@@ -8,7 +8,8 @@ append-only and always unioned. Everything in the file is data (never instructio
 Export formats: 1 = {statuses}; 2 = + track_overrides {key: track}; 3 = + track_overrides {key: {track,
 updated_at}} and applications {id: application}; 4 = + manual_checks {company: {checked_at, history, updated_at}};
 5 = + resume_reviews {job_pk: {version, reviewed_at}} (Resume Builder) and applications[].resume (the resume version
-used: {job_pk, version, pdf, pdf_sha}).
+used: {job_pk, version, pdf, pdf_sha}); 6 = + bucket {job_pk: {in, added_at, updated_at, snap}} (the Bucket tab) and the
+"ready" stage (Ready to apply).
 """
 from __future__ import annotations
 
@@ -48,6 +49,7 @@ class ImportResult:
     overrides_applied: int = 0
     manual_checks_applied: int = 0
     resume_reviews_applied: int = 0
+    bucket_applied: int = 0
     apps_new: int = 0
     apps_updated: int = 0
     apps_kept_db: int = 0
@@ -131,7 +133,7 @@ def load_export(path: Path) -> dict:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict) or not isinstance(raw.get("statuses", {}), dict):
         raise ValueError("not a HireScope statuses export")
-    if raw.get("format", 1) not in (1, 2, 3, 4, 5):
+    if raw.get("format", 1) not in (1, 2, 3, 4, 5, 6):
         raise ValueError(f"unknown export format {raw.get('format')!r}")
     return raw
 
@@ -187,6 +189,11 @@ def merge(conn, payload: dict, apps_dir: Path | None, now: str | None = None) ->
             res.resume_reviews_applied, res.errors = n, [*res.errors, *errs]
         except ImportError:
             res.errors.append("resume reviews in the export, but the Resume Builder isn't installed")
+
+    if payload.get("bucket"):
+        from .. import bucket
+        n, errs = bucket.merge(conn, payload["bucket"], exported, _iso)
+        res.bucket_applied, res.errors = n, [*res.errors, *errs]
 
     apps = payload.get("applications") or {}
     if isinstance(apps, list):
@@ -342,31 +349,38 @@ def ensure_applications(conn, apps_dir: Path | None, now: str | None = None) -> 
         key = job_key(j)
         if j["id"] in have_pk or key in have_key:
             continue
-        app_id = f"job-{j['id']}"
         at = j["user_status_at"] or now
-        extra = json.loads(j["extra"] or "{}")
-        track = j["track_override"] or j["track"]
-        conn.execute(
-            "INSERT OR IGNORE INTO applications (id, job_key, job_pk, company, company_key, title, track, link, source, "
-            "applied_date, stage, deleted, created_at, updated_at, extra) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)",
-            (app_id, key, j["id"], j["company"], j["company_key"], j["title"], track if track in TRACKS else None,
-             j["apply_url"] or j["source_url"] or None, app_source(j["source"]), at[:10],
-             APPLIED_STATUSES[j["user_status"]], at, at,
-             json.dumps({"source": j["source"], "label": j["label"], "level": j["level"], "job_id": j["job_id"],
-                         "score": None if j["score"] is None else round(j["score"]),
-                         **({"external": True} if j["source"] in ADDED_BY_YOU else {}),
-                         **({"origin": extra["external"].get("origin")} if isinstance(extra.get("external"), dict) else {})})))
-        conn.execute("INSERT OR IGNORE INTO application_events (app_id, at, kind, from_stage, to_stage, note) "
-                     "VALUES (?,?,?,?,?,?)", (app_id, at, "created", "", APPLIED_STATUSES[j["user_status"]], ""))
-        _save_jd_copy(conn, app_id, j["id"], apps_dir)
-        out.append(app_id)
+        out.append(insert_app(conn, j, f"job-{j['id']}", APPLIED_STATUSES[j["user_status"]], at, at[:10], apps_dir))
     conn.commit()
     return out
 
 
-def mark_applied(conn, job_pk: int, apps_dir: Path | None, applied_date: str | None = None) -> str:
-    """Mark one job applied from the command line (as the dashboard's Mark Applied does): status "applied" and its
-    application with the resume version that is current right now. Returns the application id."""
+def insert_app(conn, j, app_id: str, stage: str, at: str, applied_date: str | None, apps_dir: Path | None) -> str:
+    """One application for a HireScope job: company, role, track, link, source (HireScope / External), a saved JD
+    copy, a "created" timeline event."""
+    extra = json.loads(j["extra"] or "{}")
+    track = j["track_override"] or j["track"]
+    conn.execute(
+        "INSERT OR IGNORE INTO applications (id, job_key, job_pk, company, company_key, title, track, link, source, "
+        "applied_date, stage, deleted, created_at, updated_at, extra) VALUES (?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)",
+        (app_id, job_key(j), j["id"], j["company"], j["company_key"], j["title"], track if track in TRACKS else None,
+         j["apply_url"] or j["source_url"] or None, app_source(j["source"]), applied_date, stage, at, at,
+         json.dumps({"source": j["source"], "label": j["label"], "level": j["level"], "job_id": j["job_id"],
+                     "score": None if j["score"] is None else round(j["score"]),
+                     **({"external": True} if j["source"] in ADDED_BY_YOU else {}),
+                     **({"origin": extra["external"].get("origin")} if isinstance(extra.get("external"), dict) else {})})))
+    conn.execute("INSERT OR IGNORE INTO application_events (app_id, at, kind, from_stage, to_stage, note) "
+                 "VALUES (?,?,?,?,?,?)", (app_id, at, "created", "", stage, ""))
+    _save_jd_copy(conn, app_id, j["id"], apps_dir)
+    return app_id
+
+
+def mark_applied(conn, job_pk: int, apps_dir: Path | None, applied_date: str | None = None,
+                 app_id: str | None = None, version: int | None = None) -> str:
+    """Mark one job applied (the dashboard's Mark Applied through the launcher, or the command line): status
+    "applied", its application (with the dashboard's own id when given, so the page and SQLite share one record) and
+    the exact resume version you are sending (`version` when the page says which, else the current READY one), and the
+    job leaves the Bucket. An application at "Ready to apply" moves to Applied. Returns the application id."""
     j = conn.execute("SELECT * FROM jobs WHERE id=?", (job_pk,)).fetchone()
     if j is None:
         raise ValueError(f"no HireScope job {job_pk}")
@@ -374,25 +388,103 @@ def mark_applied(conn, job_pk: int, apps_dir: Path | None, applied_date: str | N
     day = applied_date or now[:10]
     if not _DATE.match(day):
         raise ValueError(f"applied date must be YYYY-MM-DD (got {day!r})")
-    existing = conn.execute("SELECT id FROM applications WHERE deleted=0 AND (job_pk=? OR job_key=?)",
+    from .. import bucket
+    undo = {"prev_status": j["user_status"], "prev_status_at": j["user_status_at"],
+            "bucket_removed": bucket.in_bucket(conn, job_pk)}
+    if undo["bucket_removed"]:
+        bucket.set_in(conn, job_pk, False, now)
+    existing = conn.execute("SELECT id, stage FROM applications WHERE deleted=0 AND (job_pk=? OR job_key=?)",
                             (job_pk, job_key(j))).fetchone()
-    if existing:
-        return existing["id"]
     if j["user_status"] not in APPLIED_STATUSES:
         conn.execute("UPDATE jobs SET user_status='applied', skip_reason=NULL, user_status_at=? WHERE id=?", (now, job_pk))
-    ids = ensure_applications(conn, apps_dir, now)
-    app_id = ids[0] if ids else f"job-{job_pk}"
-    conn.execute("UPDATE applications SET applied_date=? WHERE id=?", (day, app_id))
-    try:   # the exact resume version you are sending: the current ready/reviewed build
-        from resume_builder.hirescope_bridge import resume_ref
-        ref = resume_ref(conn, job_pk)
+    if existing and existing["stage"] != "ready":
+        conn.commit()
+        return existing["id"]
+    if existing:                                       # Ready to apply → Applied, dated today
+        app_id = existing["id"]
+        undo["prev_stage"] = "ready"
+        conn.execute("UPDATE applications SET stage='applied', applied_date=?, updated_at=? WHERE id=?", (day, now, app_id))
+        conn.execute("INSERT OR IGNORE INTO application_events (app_id, at, kind, from_stage, to_stage, note) "
+                     "VALUES (?,?,?,?,?,?)", (app_id, now, "stage", "ready", "applied", ""))
+    else:
+        app_id = app_id or f"job-{job_pk}"
+        if not re.match(r"^[A-Za-z0-9_-]{1,64}$", app_id):
+            raise ValueError("bad application id")
+        if conn.execute("SELECT 1 FROM applications WHERE id=?", (app_id,)).fetchone():   # undone, then re-applied
+            conn.execute("UPDATE applications SET deleted=0, stage='applied', applied_date=?, updated_at=? WHERE id=?",
+                         (day, now, app_id))
+        else:
+            insert_app(conn, j, app_id, "applied", now, day, apps_dir)
+    try:   # the exact resume version you are sending
+        from resume_builder.hirescope_bridge import resume_ref, version_ref
+        ref = (version_ref(conn, job_pk, version) if version else None) or resume_ref(conn, job_pk)
         if ref:
             ref = {**ref, "linked": "applied", **({"pdf_name": Path(ref["pdf"]).name} if ref.get("pdf") else {})}
             conn.execute("UPDATE applications SET resume=? WHERE id=?", (json.dumps(ref), app_id))
     except ImportError:
         pass
+    db.set_meta(conn, f"undo_applied:{app_id}", json.dumps(undo))
     conn.commit()
     return app_id
+
+
+def undo_applied(conn, job_pk: int, app_id: str) -> bool:
+    """The toast's Undo after Mark Applied: the application goes (or back to Ready to apply), the job's status and
+    its Bucket entry come back as they were. Only for an application Mark Applied just made."""
+    raw = db.get_meta(conn, f"undo_applied:{app_id}")
+    a = conn.execute("SELECT * FROM applications WHERE id=? AND job_pk=?", (app_id, job_pk)).fetchone()
+    if not raw or not a:
+        return False
+    undo, now = json.loads(raw), db.utcnow()
+    if undo.get("prev_stage") == "ready":
+        conn.execute("UPDATE applications SET stage='ready', applied_date=NULL, updated_at=? WHERE id=?", (now, app_id))
+        conn.execute("INSERT OR IGNORE INTO application_events (app_id, at, kind, from_stage, to_stage, note) "
+                     "VALUES (?,?,?,?,?,?)", (app_id, now, "stage", "applied", "ready", "undo"))
+    else:
+        conn.execute("UPDATE applications SET deleted=1, updated_at=? WHERE id=?", (now, app_id))
+    conn.execute("UPDATE jobs SET user_status=?, user_status_at=? WHERE id=?",
+                 (undo.get("prev_status"), now if undo.get("prev_status") is not None else now, job_pk))
+    if undo.get("bucket_removed"):
+        from .. import bucket
+        bucket.set_in(conn, job_pk, True, now)
+    db.set_meta(conn, f"undo_applied:{app_id}", "")
+    conn.commit()
+    return True
+
+
+STAGE_TO_STATUS = {"applied": "applied", "oa": "applied", "interviewing": "interviewing", "offer": "offer",
+                   "rejected": "rejected", "ghosted": "applied", "withdrawn": "applied"}   # as the dashboard maps them
+
+
+def move_stage(conn, app_id: str, stage: str, at: str | None = None) -> bool:
+    """An application's stage change from the dashboard (drag, [ / ], the drawer's stage bar): stage, timeline event,
+    and the job's status (as the dashboard keeps them in step). Returns whether anything changed."""
+    if stage not in STAGES:
+        raise ValueError(f"unknown stage {stage!r}")
+    a = conn.execute("SELECT * FROM applications WHERE id=?", (app_id,)).fetchone()
+    if a is None:
+        raise ValueError(f"no application {app_id} in SQLite yet (Export statuses once)")
+    if a["stage"] == stage and not a["deleted"]:
+        return False
+    at = at or db.utcnow()
+    applied = a["applied_date"] or (at[:10] if a["stage"] == "ready" and stage != "ready" else None)
+    conn.execute("UPDATE applications SET stage=?, deleted=0, applied_date=?, updated_at=? WHERE id=?",
+                 (stage, applied, at, app_id))
+    conn.execute("INSERT OR IGNORE INTO application_events (app_id, at, kind, from_stage, to_stage, note) "
+                 "VALUES (?,?,?,?,?,?)", (app_id, at, "stage", a["stage"], stage, ""))
+    if a["job_pk"] and stage in STAGE_TO_STATUS:
+        conn.execute("UPDATE jobs SET user_status=?, user_status_at=? WHERE id=?", (STAGE_TO_STATUS[stage], at,
+                                                                                    a["job_pk"]))
+    conn.commit()
+    return True
+
+
+def app_for_job(conn, job_pk: int):
+    j = conn.execute("SELECT company, source, job_id FROM jobs WHERE id=?", (job_pk,)).fetchone()
+    if not j:
+        return None
+    return conn.execute("SELECT * FROM applications WHERE deleted=0 AND (job_pk=? OR job_key=?) ORDER BY created_at "
+                        "LIMIT 1", (job_pk, job_key(j))).fetchone()
 
 
 # --- SQLite -> dashboard -----------------------------------------------------------------------------
@@ -437,8 +529,10 @@ def sync_payload(conn) -> dict:
                           "job_pk IS NOT NULL)"):
         state[job_key(r)] = [r["job_status"], r["status_changed_at"]]
     from . import manual_checks
+    from .. import bucket
     return {"generated_at": db.utcnow(), "statuses": statuses, "track_overrides": overrides,
-            "applications": applications(conn), "job_state": state, "manual_checks": manual_checks.entries(conn)}
+            "applications": applications(conn), "job_state": state, "manual_checks": manual_checks.entries(conn),
+            "bucket": bucket.entries(conn)}
 
 
 def write_sync_js(path: Path, payload: dict) -> None:

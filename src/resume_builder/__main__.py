@@ -3,7 +3,7 @@
   check                      dependencies and inputs
   default                    the master's Default one-page resume, unchanged (no job description; master v4), checked
                              against your template compiled as written → generated_resumes/_default/v<N>
-  prepare <job> [--profile X] [--regenerate] [--force] [--discard-edits]
+  prepare <job> [--profile X] [--regenerate] [--force] [--discard-edits] [--queue]
                              evidence bank, JD analysis, baseline + brief for the drafter (work/); reuses the
                              current version when nothing changed (unless --regenerate)
   review <job>               reviewer packet for _work/draft.json (rule findings + truth check), once per generation
@@ -27,6 +27,10 @@
   mark-reviewed <job> [N]    you reviewed/approved the current (or given) version
   refresh                    re-sync resume statuses into HireScope and rewrite dashboard/resumes.js
   batch shortlisted [--yes]  queue every shortlisted job (shows the count and a usage warning; --yes to start)
+  queue list | add JOB… [--regenerate] | add --bucket | cancel JOB… | worker
+                             the background resume queue (the dashboard fills it through the hirescope:// launcher)
+  questions [--all] | questions answer ID --yes --entry E --answer A [--level L] --confirm | --no
+                             Questions for you: JD keywords queue builds left out (one answer covers every job)
   schema                     the content JSON schema
 Job = the HireScope job ID (the number in the dashboard URL: #…&job=123).
 """
@@ -241,8 +245,12 @@ def cmd_prepare(args) -> int:
           f"injection warnings: {len(a['injection_warnings'])}")
     print(f"  brief:    {out['work']}/brief.md\n  baseline: {out['baseline']}\n  write:    {out['work']}/content.json")
     kp = a.get("keyword_plan") or {}
+    if args.queue and kp.get("questions"):
+        print(f"  queue mode: {len(kp['questions'])} keyword question(s) saved to Questions for you (dashboard, "
+              "`python -m resume_builder questions`). Don't ask them and don't save answers: draft without these "
+              "keywords; the result is Ready (questions pending).")
     for q in kp.get("questions", []):
-        print(f"  ❓ ask Nikhil ({q['kind']}): {q['question']}")
+        print(f"  {'❓ saved for Nikhil' if args.queue else '❓ ask Nikhil'} ({q['kind']}): {q['question']}")
     for g in kp.get("known_gaps", []):
         print(f"  gap: {g}")
     for w in out["bank_warnings"]:
@@ -448,6 +456,86 @@ def cmd_refresh(args) -> int:
     from .hirescope_bridge import refresh_all
     n = refresh_all()
     print(f"HireScope updated for {n} job(s) with resumes; dashboard/resumes.js rewritten.")
+    try:
+        from jobsearch import hooks
+        for line in hooks.after_change(reason="resume_builder refresh"):
+            print(line)
+    except Exception as e:  # noqa: BLE001 — the resume statuses above are what this command is for
+        print(f"Warning: dashboard sync / applications Excel not updated: {e}", file=sys.stderr)
+    return 0
+
+
+def cmd_queue(args) -> int:
+    """The background resume queue (what the dashboard's Generate Resume buttons fill)."""
+    from jobsearch.storage import db as hs_db
+    from jobsearch import paths as hs_paths
+    from . import queue
+    if args.action == "worker":
+        return queue.worker_main(once=args.once)
+    conn = hs_db.connect(hs_paths.DB)
+    try:
+        if args.action == "list":
+            rows = queue.items(conn)
+            if not rows:
+                print("The resume queue is empty.")
+            for r in rows:
+                print(f"{r['status']:<10} job {r['job_pk']:<7} {(r['company'] or '?')[:28]:<28} "
+                      f"{(r['title'] or '')[:44]:<44} {r['message'] or ''}")
+            return 0
+        if args.action == "cancel":
+            for j in args.jobs:
+                print(queue.cancel(conn, int(j))["message"])
+            return 0
+        jobs = [int(j) for j in args.jobs] if args.jobs else []
+        if args.bucket:
+            jobs = queue.bucket_jobs(conn, args.regenerate)
+        if not jobs:
+            print("Nothing to queue.")
+            return 0
+        s = queue.settings()
+        if len(jobs) > s["batch_warn"] and not args.yes:
+            print(f"{len(jobs)} jobs: each build is a full drafter + reviewer + truth pass in Claude Code (roughly the "
+                  f"usage of running /resume-builder {len(jobs)} times). Not queued; confirm with --yes.")
+            return 3
+        for o in queue.add(conn, jobs, args.regenerate, origin="cli",
+                           batch=f"cli-{queue.now()}" if len(jobs) > 1 else None):
+            print(o["message"])
+    finally:
+        conn.close()
+    print("worker started" if queue.kick() else "worker not started (run ./scripts/install_launcher.sh once, or "
+          "`python -m resume_builder queue worker`)")
+    return 0
+
+
+def cmd_questions(args) -> int:
+    """Questions for you: keyword questions saved by queue builds (one answer covers every job that asked)."""
+    from jobsearch.storage import db as hs_db
+    from jobsearch import paths as hs_paths
+    from . import questions
+    if args.action == "answer":
+        if args.yes == args.no:
+            print("Error: answer --yes (with --entry and --answer, plus --level for a tool) or --no", file=sys.stderr)
+            return 2
+        if args.yes and not args.confirm:
+            print("Error: not saved — add --confirm once you're sure it's true", file=sys.stderr)
+            return 2
+        out = questions.answer(args.id, bool(args.yes), args.entry, args.level, args.answer, args.where)
+        print(f"Saved ({out['answer']}) for {out['keyword']} → {out['saved_to']}. Jobs that asked: "
+              f"{', '.join(map(str, out['jobs']))}. Regenerate them: python -m resume_builder queue add "
+              f"{' '.join(map(str, out['jobs']))} --regenerate")
+        return 0
+    conn = hs_db.connect(hs_paths.DB)
+    try:
+        groups = questions.dashboard_list(conn)
+    finally:
+        conn.close()
+    shown = [g for g in groups if g["open"] or args.all]
+    if not shown:
+        print("No open questions.")
+    for g in shown:
+        state = "open" if g["open"] else f"answered {g['answer']} ({(g['answered_at'] or '')[:10]})"
+        jobs = ", ".join(f"{x['job_pk']} {x['company']}" for x in g["jobs"])
+        print(f"[{min(g['ids'])}] {g['keyword']} — {state}\n    {g['question']}\n    jobs: {jobs}")
     return 0
 
 
@@ -492,6 +580,8 @@ def main(argv=None) -> int:
     p.add_argument("--regenerate", action="store_true", help="build a new version even if nothing changed")
     p.add_argument("--force", action="store_true", help="start over even if a generation is in progress")
     p.add_argument("--discard-edits", action="store_true", help="don't carry hand edits of the current version")
+    p.add_argument("--queue", action="store_true", help="background queue build: keyword questions are saved for "
+                   "the dashboard, never asked")
     p = sub.add_parser("build")
     p.add_argument("job")
     p.add_argument("--content")
@@ -546,6 +636,25 @@ def main(argv=None) -> int:
     p.add_argument("job")
     p.add_argument("version", nargs="?", type=int)
     sub.add_parser("schema")
+    p = sub.add_parser("queue", help="the background resume queue: list | add JOB… [--regenerate] | add --bucket | "
+                       "cancel JOB… | worker")
+    p.add_argument("action", choices=["list", "add", "cancel", "worker"])
+    p.add_argument("jobs", nargs="*")
+    p.add_argument("--regenerate", action="store_true")
+    p.add_argument("--bucket", action="store_true", help="add: every Bucket job without a current READY resume")
+    p.add_argument("--yes", action="store_true", help="add: you confirmed a batch above resume_queue.batch_warn")
+    p.add_argument("--once", action="store_true", help="worker: exit as soon as the queue is empty")
+    p = sub.add_parser("questions", help="Questions for you: list [--all] | answer ID --yes/--no")
+    p.add_argument("action", nargs="?", default="list", choices=["list", "answer"])
+    p.add_argument("id", nargs="?", type=int)
+    p.add_argument("--all", action="store_true")
+    p.add_argument("--yes", action="store_true")
+    p.add_argument("--no", action="store_true")
+    p.add_argument("--entry", help="yes: the role / project id (or skills)")
+    p.add_argument("--level", help="yes: production | project | coursework | tutorial")
+    p.add_argument("--answer", help="yes: what you did with it")
+    p.add_argument("--where")
+    p.add_argument("--confirm", action="store_true")
     p = sub.add_parser("sync-desktop", help="copy every READY resume PDF to the Desktop folder (desktop_copy)")
     p.add_argument("--force", action="store_true", help="copy even when desktop_copy.enabled is false")
     args = ap.parse_args(argv)
@@ -558,7 +667,8 @@ def main(argv=None) -> int:
                 "add-evidence": cmd_add_evidence, "add-tool": cmd_add_tool, "decline": cmd_decline, "tags": cmd_tags,
                 "gaps": cmd_gaps, "diff": cmd_diff, "rollback": cmd_rollback, "lock": cmd_lock,
                 "unlock": cmd_unlock, "mark-reviewed": cmd_mark_reviewed, "refresh": cmd_refresh,
-                "batch": cmd_batch, "sync-desktop": cmd_sync_desktop}[args.cmd](args)
+                "batch": cmd_batch, "sync-desktop": cmd_sync_desktop, "queue": cmd_queue,
+                "questions": cmd_questions}[args.cmd](args)
     except (InputError, ContentError, CompileError, versions.LockedError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 2

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- HireScope background resume queue. Rendered by `scripts/install_launcher.sh`. Started on demand (the launcher
+     kickstarts it and touches the trigger file), at login (to finish anything still queued) and again after a crash;
+     it exits on its own once the queue is empty. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{{LABEL}}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>{{REPO}}/scripts/queue_worker.sh</string>
+  </array>
+  <key>WorkingDirectory</key><string>{{REPO}}</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>WatchPaths</key><array><string>{{TRIGGER}}</string></array>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>{{PATH}}</string>
+  </dict>
+  <key>StandardOutPath</key><string>{{LOG_DIR}}/launchd-worker.log</string>
+  <key>StandardErrorPath</key><string>{{LOG_DIR}}/launchd-worker.log</string>
+</dict>
+</plist>

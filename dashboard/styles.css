@@ -454,3 +454,11 @@ table.vgrid td { overflow: hidden; }
 .view-btn .n.due { color: var(--warn); background: var(--warn-bg); padding: 0 6px; border-radius: var(--r-pill); font-weight: 700; }
 table.manual-table td { vertical-align: middle; }
 table.manual-table tr.due-row td:first-child { box-shadow: inset 3px 0 0 var(--stretch); }
+
+/* ---------- zero-CLI resumes: resume status badge, "…" menu ---------- */
+.chip.rs { font-weight: 600; }
+.more-wrap { display: inline-block; position: relative; }
+.more-btn { min-width: 32px; letter-spacing: 1px; }
+.more-pop { top: auto; bottom: 36px; left: auto; right: 0; min-width: 250px; display: flex; flex-direction: column; gap: 2px; }
+.more-pop .btn { justify-content: flex-start; text-align: left; width: 100%; }
+.section .more-pop, .card .more-pop { top: 32px; bottom: auto; }

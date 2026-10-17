@@ -88,7 +88,18 @@ def sync_job(conn, pk: int) -> dict | None:
             (pk, m["version"], m.get("status"), str(v / f["pdf"]) if f.get("pdf") else None, str(v / f.get("tex", "main.tex")),
              str(v / "manifest.json"), rc.sha256_file(v / "manifest.json"), m.get("generated_at") or db.utcnow(),
              m.get("reviewed_at"), json.dumps(summary)))
+    # a build waiting in or running from the background queue: the queue is the truth, however long it waits
+    q = conn.execute("SELECT status FROM resume_queue WHERE job_pk=? AND status IN ('queued','generating') ORDER BY id "
+                     "LIMIT 1", (pk,)).fetchone()
     row = conn.execute("SELECT status, updated_at FROM resume_status WHERE job_pk=?", (pk,)).fetchone()
+    if q:
+        conn.execute("INSERT INTO resume_status (job_pk, status, current_version, latest_version, message, job_dir, "
+                     "updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(job_pk) DO UPDATE SET status=excluded.status, "
+                     "current_version=excluded.current_version, latest_version=excluded.latest_version, "
+                     "job_dir=excluded.job_dir", (pk, q["status"], (cur or {}).get("version"),
+                                                  (latest or {}).get("version"), None, str(jd), _now_us()))
+        conn.commit()
+        return latest
     # a status set after the newest version (a run in progress, or a build that stopped before saving a version)
     # wins over the manifests; an in-progress one older than 2 h is treated as abandoned
     stamp, built = (row["updated_at"] or "") if row else "", (latest or {}).get("generated_at", "")
@@ -120,6 +131,19 @@ def sync_job(conn, pk: int) -> dict | None:
     return latest
 
 
+def clear_in_flight(pk: int, db_path: Path | None = None) -> None:
+    """After a cancelled build: the job's status goes back to what its versions say (or no status at all)."""
+    conn = _conn(db_path)
+    try:
+        conn.execute("DELETE FROM resume_status WHERE job_pk=? AND status IN ('queued','generating','validating')",
+                     (int(pk),))
+        conn.commit()
+        sync_job(conn, int(pk))
+        write_dashboard_data(conn)
+    finally:
+        conn.close()
+
+
 def _rel(path: Path) -> str:
     """Relative link from dashboard/ to a resume file (works on file://)."""
     return Path(os.path.relpath(Path(path).absolute(), hs_paths.DASHBOARD.absolute())).as_posix()
@@ -127,12 +151,15 @@ def _rel(path: Path) -> str:
 
 def dashboard_payload(conn) -> dict:
     out = {}
+    from . import questions
+    open_q = questions.open_counts(conn)
     for r in conn.execute("SELECT s.*, j.company, j.source, j.job_id, j.title FROM resume_status s "
                           "JOIN jobs j ON j.id = s.job_pk"):
         r = dict(r)
         entry = {"status": r["status"], "message": r["message"], "updated_at": r["updated_at"],
                  "key": f"{r['company']}::{r['source']}::{r['job_id']}",
-                 "command": f'claude "/resume-builder {r["job_pk"]}"', "current": None, "latest": None, "versions": []}
+                 "command": f'claude "/resume-builder {r["job_pk"]}"', "current": None, "latest": None, "versions": [],
+                 "questions_pending": open_q.get(r["job_pk"], 0)}
         for b in conn.execute("SELECT * FROM resume_builds WHERE job_pk=? ORDER BY version", (r["job_pk"],)):
             b = dict(b)
             vdir = Path(b["manifest_path"]).parent
@@ -169,7 +196,9 @@ def write_dashboard_data(conn=None, path: Path | None = None) -> Path:
     own = conn is None
     conn = conn or _conn()
     try:
-        payload = {"generated_at": db.utcnow(), "jobs": dashboard_payload(conn), "learn_it": _learn_it()}
+        from . import questions
+        payload = {"generated_at": db.utcnow(), "jobs": dashboard_payload(conn), "learn_it": _learn_it(),
+                   "questions": questions.dashboard_list(conn), "entries": questions.answer_entries()}
     finally:
         if own:
             conn.close()
@@ -237,6 +266,16 @@ def resume_ref(conn, pk: int, at: str | None = None) -> dict | None:
     pick = pick or rows[-1]
     return {"job_pk": pk, "version": pick["version"], "pdf": pick["pdf_path"],
             "pdf_sha": json.loads(pick["summary"] or "{}").get("pdf_sha"), "linked": "auto" if at else "current"}
+
+
+def version_ref(conn, pk: int, version: int) -> dict | None:
+    """A specific READY / reviewed version of the job's resume (the one the page says you are sending)."""
+    b = conn.execute("SELECT * FROM resume_builds WHERE job_pk=? AND version=? AND status IN ('ready','reviewed')",
+                     (int(pk), int(version))).fetchone()
+    if not b:
+        return None
+    return {"job_pk": int(pk), "version": b["version"], "pdf": b["pdf_path"],
+            "pdf_sha": json.loads(b["summary"] or "{}").get("pdf_sha"), "linked": "current"}
 
 
 def link_applications(conn) -> int:

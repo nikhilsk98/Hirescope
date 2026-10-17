@@ -7,6 +7,7 @@ data.nosync/generated_resumes/<Company>/<Role>_<JobID>/v<N>/.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import unicodedata
@@ -57,7 +58,7 @@ def check_inputs() -> dict[str, str]:
             "rules": sha256_file(rc.RULES),
             "evidence_additions": sha256_file(rc.ADDITIONS) if rc.ADDITIONS.exists() else "none",
             "tool_checklist": sha256_file(rc.TOOL_CHECKLIST) if rc.TOOL_CHECKLIST.exists() else "none",
-            "config": sha256_file(rc.CONFIG_FILE)}
+            "config": rc.config_hash()}
 
 
 def ascii_name(s: str) -> str:
@@ -560,6 +561,13 @@ def _prepare_work(job, pkg, analysis, bank, settings, hashes, jd_dir, work, lock
     keywords.write_learn_it(bank)
     (work / "questions.json").write_text(json.dumps(analysis["keyword_plan"], indent=1, ensure_ascii=False),
                                          encoding="utf-8")
+    # "Questions for you" (dashboard + `questions`): a queue build never waits for answers, and an interactive one
+    # whose questions went unanswered leaves them there too; answering closes them everywhere
+    try:
+        from . import questions
+        analysis["questions_open"] = questions.record(job["id"], analysis["keyword_plan"].get("questions") or [])
+    except Exception as e:  # noqa: BLE001 — the generation goes on; the brief still lists the questions
+        analysis.setdefault("warnings", []).append(f"keyword questions not saved for the dashboard: {e}")
     base = draft.baseline(analysis, bank, settings)
     (work / "package.md").write_text(pkg, encoding="utf-8")
     jd_analysis.save(analysis, work / "analysis.json")
@@ -574,7 +582,9 @@ def _prepare_work(job, pkg, analysis, bank, settings, hashes, jd_dir, work, lock
     state = {"job_pk": job["id"], "company": job["company"], "title": job["title"], "prepared_at": utcnow(),
              "input_hashes": hashes, "settings_hash": settings.hash(), "profile": analysis["profile"]["picked"],
              "track": analysis["track"], "attempts": 0, "package_hash": analysis["package_hash"],
-             "dedupe_key": key, "status": "generating", "conflicts": carried["conflicts"]}
+             "dedupe_key": key, "status": "generating", "conflicts": carried["conflicts"],
+             "queue_item": int(os.environ["HIRESCOPE_QUEUE_ITEM"]) if os.environ.get("HIRESCOPE_QUEUE_ITEM", "").isdigit()
+             else None}
     (work / "state.json").write_text(json.dumps(state, indent=1), encoding="utf-8")
     return {"job_dir": str(jd_dir), "work": str(work), "analysis": analysis, "baseline": str(work / "baseline.json"),
             "bank_warnings": bank.warnings, "state": state, "carried": carried, "locks": locks}

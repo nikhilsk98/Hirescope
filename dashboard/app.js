@@ -59,20 +59,43 @@
   const V = window.HSView;
   let statuses = store.get(K.statuses, {});
   // Resume Builder (dashboard/resumes.js from SQLite): status + versions per HireScope job id. "Mark reviewed" saves here
-  // and goes out with Export statuses (format 5); "Generate Resume" copies the command and shows "queued" locally.
-  const RES = ((window.RESUMES || {}).jobs) || {};
+  // and goes out with Export statuses. Generate Resume queues a background build through the hirescope:// launcher;
+  // dashboard/live.js (re-read every few seconds) says what the queue is doing, so statuses move on their own:
+  // Queued → Generating → Ready / Ready (questions pending) / Failed.
+  let RES = ((window.RESUMES || {}).jobs) || {};
   const resumeReviews = store.get(K.resumeReviews, {});
-  const resumeQueued = store.get(K.resumeQueued, {});
+  const resumeQueued = store.get(K.resumeQueued, {});   // {job id: ISO time you clicked} until the queue confirms it
   const resumeOf = (j) => RES[String(j.id)] || null;
+  let LIVE = window.LIVE || {};
+  let LIVE_BY_JOB = new Map();     // job id → its newest queue item (an active one wins)
+  const indexLive = () => {
+    LIVE_BY_JOB = new Map();
+    for (const it of LIVE.queue || []) {
+      const cur = LIVE_BY_JOB.get(it.job_pk); const act = (x) => x && ["queued", "generating"].includes(x.status);
+      if (!cur || (act(it) && !act(cur)) || (act(it) === act(cur) && String(it.added_at) > String(cur.added_at))) LIVE_BY_JOB.set(it.job_pk, it);
+    }
+  };
+  indexLive();
+  const REQUEST_TTL_MS = 10 * 60 * 1000;
   function resumeStatus(j) {
-    const r = resumeOf(j); const q = resumeQueued[j.id];
+    const r = resumeOf(j); const it = LIVE_BY_JOB.get(j.id); const q = resumeQueued[j.id];
+    if (it && ["queued", "generating"].includes(it.status)) return it.status;
+    // clicked, not confirmed by the queue yet (the launcher answers within seconds; a stale click expires)
+    if (q && Date.now() - Date.parse(q) < REQUEST_TTL_MS && (!it || String(q) > String(it.added_at || "")) &&
+        (!r || String(q) > String(r.updated_at || ""))) return "queued";
     const rv = resumeReviews[j.id];
-    if (q && (!r || String(q) > String(r.updated_at || ""))) return "queued";
-    if (r && r.current && rv && rv.version === r.current.version && r.status === "ready") return "reviewed";
-    return r ? r.status : "";
+    if (!r) return it && it.status === "failed" ? "failed" : "";
+    const st = r.status === "validating" ? "generating" : r.status;
+    if (st === "ready" && r.current && rv && rv.version === r.current.version) return "reviewed";
+    if ((st === "ready" || st === "reviewed") && r.questions_pending) return "ready_q";
+    return st;
   }
-  const RESUME_CHIP = { queued: ["Resume queued", "info"], generating: ["Resume: generating", "info"], validating: ["Resume: validating", "info"],
-    ready: ["Resume ready", "good"], reviewed: ["Resume reviewed ✓", "good"], failed: ["Resume failed", "flag"] };
+  // one badge style for queue / resume statuses everywhere (cards, Bucket, panels, Resume Builder, queue panel)
+  const RESUME_CHIP = { queued: ["Resume: Queued", "info", "◷"], generating: ["Resume: Generating", "info", "⟳"],
+    ready: ["Resume: Ready", "good", "✓"], ready_q: ["Resume: Ready (questions pending)", "warn", "?"],
+    reviewed: ["Resume: Ready · reviewed", "good", "✓"], failed: ["Resume: Failed", "flag", "✗"] };
+  const resumeBadge = (rs, title) => (RESUME_CHIP[rs] ? el("span", { class: `chip rs ${RESUME_CHIP[rs][1]}`, title: title || null },
+    el("span", { "aria-hidden": "true", text: RESUME_CHIP[rs][2] + " " }), RESUME_CHIP[rs][0]) : null);
   const overrides = {};
   for (const [k, v] of Object.entries(store.get(K.overrides, {}))) overrides[k] = typeof v === "string" ? { track: v, updated_at: "1970-01-01T00:00:00Z" } : v;
   let apps = store.get(K.apps, {});
@@ -94,8 +117,9 @@
   const appsCfg = Object.assign({ follow_up_days: [7, 10], ghosted_after_days: 30, same_company_window_days: 30, near_duplicate_ratio: 85 }, META.applications_cfg || {});
   const UI_CFG = Object.assign({ apply_today_size: 5, closing_soon_days: 7 }, META.ui_cfg || {});   // preferences apply_today
 
-  // SQLite's copy (sync.js, written by each run) fills in anything this browser doesn't have; newer always wins
-  (function mergeSync() {
+  // SQLite's copy (sync.js, written by each run and by the launcher) fills in anything this browser doesn't have;
+  // newer always wins. Re-run when live.js says SQLite changed (sync_at).
+  function mergeSync() {
     const S = window.SYNC; if (!S) return;
     let changed = false;
     for (const [k, v] of Object.entries(S.statuses || {})) if (!statuses[k] || String(v.updated_at) > String(statuses[k].updated_at || "")) { statuses[k] = Object.assign({}, statuses[k] || {}, v); changed = true; }
@@ -103,7 +127,8 @@
     for (const a of S.applications || []) { const m = C.mergeApp(apps[a.id], a); if (JSON.stringify(m) !== JSON.stringify(apps[a.id])) { apps[a.id] = m; changed = true; } }
     for (const [k, v] of Object.entries(S.manual_checks || {})) if (!manualChecks[k] || String(v.updated_at) > String(manualChecks[k].updated_at || "")) { manualChecks[k] = v; changed = true; }
     if (changed) { store.set(K.statuses, statuses); saveOverrides(); saveApps(); saveManual(); }
-  })();
+  }
+  mergeSync();
 
   const STAGE_STATUS = { applied: "applied", oa: "applied", interviewing: "interviewing", offer: "offer", rejected: "rejected", ghosted: "applied", withdrawn: "applied" };
   function setStatus(j, patch) {
@@ -314,14 +339,15 @@
     }
   }
   // unsynced = changed in this browser after the last export and after SQLite's copy (sync.js) of the same item
-  const SYNC_AT = (() => {
+  const syncAt = () => {
     const S = window.SYNC || {}; const m = { s: {}, o: {}, a: {}, m: {} };
     for (const [k, v] of Object.entries(S.statuses || {})) m.s[k] = v.updated_at || "";
     for (const [k, v] of Object.entries(S.track_overrides || {})) m.o[k] = v.updated_at || "";
     for (const a of S.applications || []) m.a[a.id] = a.updated_at || "";
     for (const [k, v] of Object.entries(S.manual_checks || {})) m.m[k] = v.updated_at || "";
     return m;
-  })();
+  };
+  let SYNC_AT = syncAt();
   function unsynced() {
     const last = store.get(K.exported, null) || "";
     const newer = (map) => ([k, x]) => { const t = String(x.updated_at || ""); return t > last && t > (map[k] || ""); };
@@ -355,6 +381,13 @@
     const ha = META.health_alerts || [];
     if (ha.length) box.append(el("div", { class: "banner err" }, el("details", null, el("summary", { text: `Source health: ${ha.length} source${ha.length > 1 ? "s" : ""} returned far fewer jobs than usual (likely broken, not "no new jobs")` }),
       el("ul", null, ha.map((a) => el("li", { text: a.message }))))));
+    if (!LAUNCHER.installed) {
+      const cmd = `cd ${JSON.stringify(META.repo_root || ".")} && ./scripts/install_launcher.sh`;
+      box.append(el("div", { class: "banner info setup-banner" }, el("div", null, el("b", { text: "One-time setup for one-click resumes. " }),
+        "Run ", el("code", { class: "mono", text: "./scripts/install_launcher.sh" }), " once in Terminal (HireScope folder). It installs the HireScope Launcher and a background worker: ",
+        "Generate Resume, the Bucket and the Resume Builder tab then build and save resumes on their own. Until then Generate Resume copies a Terminal command."),
+        el("button", { class: "btn small x", type: "button", onclick: async () => toast((await copyText(cmd)) ? "Setup command copied — paste it in Terminal, then reload this page" : cmd) }, "Copy setup command")));
+    }
     if (/example/i.test(META.resume_path || "")) box.append(el("div", { class: "banner warn", text: `Scored against ${META.resume_path} (DEMO resume).` }));
     if (unsynced()) box.append(el("div", { class: "banner info" }, el("span", { text: "Unsynced changes — your statuses live only in this browser until you export them." }),
       el("button", { class: "btn small x", type: "button", onclick: exportStatuses }, "Export statuses")));
@@ -522,7 +555,7 @@
     for (const [, v] of Object.entries(RED).filter(([k, v]) => (j.flags || {})[k] === v)) out.push(el("span", { class: "chip flag", text: v }));
     const ref = REF[j.company]; if (ref && ref.count) out.push(el("span", { class: "chip info", title: `You know ${ref.count} ${ref.count > 1 ? "people" : "person"} here (LinkedIn connections export)`, text: `Referral · ${ref.count}` }));
     const st = statusOf(j); if (st) out.push(el("span", { class: "chip", text: `● ${st}` }));
-    const rs = resumeStatus(j); if (rs && RESUME_CHIP[rs]) out.push(el("span", { class: `chip ${RESUME_CHIP[rs][1]}`, title: (resumeOf(j) || {}).message || "", text: RESUME_CHIP[rs][0] }));
+    const rs = resumeStatus(j); if (rs && RESUME_CHIP[rs]) out.push(resumeBadge(rs, resumeTitle(j)));
     return out;
   }
   const postedText = (j) => (j.posted ? `Posted ${fmtDate(j.posted)}` : j.discovered ? `Discovered ${fmtTime(j.first_seen)} (posting date unknown)` : "Posting date unknown");
@@ -1321,6 +1354,12 @@
   }
   $("#p-close").addEventListener("click", closePanel);
   $("#p-back").addEventListener("click", () => { const b = navStack.pop(); if (b) openJob(b.id, { back: true, tab: b.tab }); }); $("#scrim").addEventListener("click", () => { if (dApp) closeDrawer(); if (pJob) closePanel(); });
+  // after a status change: the open panel's badges, actions and (on Overview) its resume section
+  function refreshPanel() {
+    if (!pJob) return;
+    const pb = $("#p-badges"); pb.textContent = ""; pb.append(...badgesOf(pJob));
+    renderActions(); if (pTab === "Overview" && pDetail) renderPanel();
+  }
   function renderPanelBody(node) { const b = $("#p-body"); b.textContent = ""; b.append(node); b.scrollTop = 0; }
   function renderPanel() {
     const tabs = $("#p-tabs"); tabs.textContent = "";
@@ -1547,9 +1586,11 @@
   function renderActions() {
     const j = pJob; if (!j) return; const box = $("#p-actions"); box.textContent = "";
     if (!j.filtered) {
-      box.append(el("button", { class: "btn primary", type: "button", onclick: () => copyResumeCommand(j),
-        title: `Copies  claude "/resume-builder ${j.id}"  — paste it in Terminal in the HireScope folder (copy-the-command workflow) (g)` }, "Generate Resume (copy command)"));
-      box.append(el("button", { class: "btn small", type: "button", onclick: () => generate(j), title: "Download the job package (.md) and copy it" }, "Job package"));
+      const rs = resumeStatus(j); const busy = rs === "queued" || rs === "generating";
+      box.append(el("button", { class: "btn primary", type: "button", disabled: busy, onclick: () => queueResume(j, ["ready", "ready_q", "reviewed"].includes(rs)),
+        title: LAUNCHER.installed ? "Queue a tailored resume; it builds and saves in the background (g)" : "The launcher isn't installed: copies the Terminal command (g)" },
+        busy ? (rs === "queued" ? "Resume queued…" : "Generating…") : ["ready", "ready_q", "reviewed"].includes(rs) ? "Regenerate Resume" : "Generate Resume"));
+      box.append(moreMenu([...resumeFallbacks(j), ["Download job package (.md)", () => generate(j), "The job package as Markdown (also copied)"]], "More resume actions"));
     }
     const apply = safeUrl(j.apply_url);
     if (apply) box.append(el("a", { class: "btn", href: apply, target: "_blank", rel: "noopener noreferrer", title: "Open application (o)" }, "Open Application"));
@@ -1567,13 +1608,113 @@
     const li = safeUrl(j.linkedin_url); if (li) box.append(el("a", { class: "btn small ghost", href: li, target: "_blank", rel: "noopener noreferrer" }, "LinkedIn search"));
     box.append(...quickLinks(j));
   }
+  // Terminal fallback (the "…" menu, or when the launcher isn't installed): copy the /resume-builder command
   async function copyResumeCommand(j, regenerate) {
-    const cmd = `claude "/resume-builder ${j.id}${regenerate ? " --regenerate" : ""}"`;
+    const cmd = `cd ${JSON.stringify(META.repo_root || ".")} && claude "/resume-builder ${j.id}${regenerate ? " --regenerate" : ""}"`;
     const ok = await copyText(cmd);
-    resumeQueued[j.id] = new Date().toISOString(); store.set(K.resumeQueued, resumeQueued);
-    toast(ok ? `Copied: ${cmd} — paste it in Terminal in the HireScope folder, then refresh this page when it's done` : cmd);
-    renderAll(true); if (pJob) { renderActions(); if (pTab === "Overview" && pDetail) renderPanel(); }
+    toast(ok ? "Command copied — paste it in Terminal; refresh this page when it's done" : cmd);
   }
+
+  // ---------- hirescope:// launcher + background resume queue ----------
+  // The page can't run programs (file://, no network). Each action opens one hirescope:// link, which the HireScope
+  // Launcher app (scripts/install_launcher.sh) hands to the pipeline silently; live.js tells us what happened.
+  const LAUNCHER = window.HS_LAUNCHER || { installed: false };
+  const K_TIP = "jobsearch.launcherTip.v1";
+  let lastLaunch = 0;
+  function openLink(url) {         // one external-protocol navigation; the page itself stays put
+    const a = el("a", { href: url, style: "display:none" }); document.body.append(a); a.click(); a.remove();
+    lastLaunch = Date.now(); pollLive(true);
+  }
+  async function launch(url, what) {
+    if (!LAUNCHER.installed) return false;
+    if (!store.get(K_TIP, false)) {
+      const ok = await confirmDialog("One-time tip: allow the HireScope Launcher", [
+        "Your browser will ask “Open HireScope Launcher?” for this page.",
+        "Tick “Always allow” (so it doesn't ask every time), then choose Open.",
+        "The launcher runs in the background: no Terminal window opens."], what || "Continue");
+      if (!ok) return null;
+      store.set(K_TIP, true);
+    }
+    window.__hsLaunch ? window.__hsLaunch(url) : openLink(url);   // __hsLaunch: tests capture the link
+    return true;
+  }
+  async function queueResume(j, regenerate) {
+    if (!LAUNCHER.installed) { await copyResumeCommand(j, regenerate); return; }
+    const sent = await launch(`hirescope://queue?job=${j.id}${regenerate ? "&regenerate=1" : ""}`, regenerate ? "Regenerate" : "Generate Resume");
+    if (!sent) return;
+    resumeQueued[j.id] = new Date().toISOString(); store.set(K.resumeQueued, resumeQueued);
+    toast(`${regenerate ? "Regenerating" : "Queued"}: ${j.company} — builds in the background (keep going; it saves itself)`);
+    renderAll(true); if (pJob) refreshPanel();
+  }
+  async function cancelBuild(j) {
+    const sent = await launch(`hirescope://cancel?job=${j.id}`, "Cancel build");
+    if (!sent) return;
+    delete resumeQueued[j.id]; store.set(K.resumeQueued, resumeQueued);
+    toast(`Cancelling: ${j.company}`);
+  }
+  function resumeTitle(j) {
+    const it = LIVE_BY_JOB.get(j.id); const r = resumeOf(j);
+    if (it && it.status === "generating" && it.started_at) return `Generating for ${elapsed(it.started_at)}${it.attempts > 1 ? ` (attempt ${it.attempts})` : ""}`;
+    if (it && it.status === "queued") return queuePosition(it);
+    return (it && it.status === "failed" && it.message) || (r && r.message) || "";
+  }
+  const elapsed = (iso) => { const s2 = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000)); return s2 < 60 ? `${s2}s` : `${Math.floor(s2 / 60)}m ${String(s2 % 60).padStart(2, "0")}s`; };
+  function queuePosition(it) {
+    const waiting = (LIVE.queue || []).filter((x) => x.status === "queued");
+    const i = waiting.findIndex((x) => x.id === it.id);
+    return i < 0 ? "Queued" : `Queued · ${i === 0 ? "next" : `${i + 1}${["", "", "nd", "rd"][i + 1] || "th"} in line`}`;
+  }
+  // "…" menu: rarely needed fallbacks, kept out of the way
+  function moreMenu(items, label) {
+    const wrap = el("div", { class: "filter-wrap more-wrap" });
+    const btn = el("button", { class: "btn small ghost more-btn", type: "button", "aria-haspopup": "menu", "aria-expanded": "false", "aria-label": label || "More actions", title: label || "More actions" }, "…");
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation(); const was = openPop && openPop.dataset.f === "more" && wrap.contains(openPop); closePop(); if (was) return;
+      const pop = el("div", { class: "popover more-pop", role: "menu" }); pop.dataset.f = "more";
+      for (const [text, fn, title] of items.filter(Boolean)) pop.append(el("button", { class: "btn small ghost", type: "button", role: "menuitem", title: title || null,
+        onclick: () => { closePop(); fn(); } }, text));
+      wrap.append(pop); openPop = pop; btn.setAttribute("aria-expanded", "true");
+      setTimeout(() => { const f = pop.querySelector("button"); if (f) f.focus(); }, 0);
+      pop.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); closePop(); btn.focus(); } });
+    });
+    wrap.append(btn);
+    return wrap;
+  }
+  const resumeFallbacks = (j) => [
+    ["Copy Terminal command", () => copyResumeCommand(j), "Copies the /resume-builder command (fallback when the launcher can't run)"],
+    LAUNCHER.installed ? ["Open a live session in Terminal", () => launch(`hirescope://interactive?job=${j.id}`, "Open Terminal"), "For a build where you answer the keyword questions as it goes"] : null];
+
+  // live.js: re-read every few seconds while something is happening (queue active, or a link was just sent)
+  let liveTimer = null; let liveBusy = false; let liveSeen = String(LIVE.generated_at || "");
+  function reloadScript(src) {
+    return new Promise((res) => {
+      const sEl = el("script", { src: `${src}?t=${Date.now()}` });
+      sEl.onload = () => { sEl.remove(); res(true); }; sEl.onerror = () => { sEl.remove(); res(false); };
+      document.head.append(sEl);
+    });
+  }
+  const liveActive = () => (LIVE.queue || []).some((x) => ["queued", "generating"].includes(x.status));
+  function pollLive(soon) {
+    clearTimeout(liveTimer);
+    if (!LAUNCHER.installed) return;
+    const fast = soon || liveActive() || Date.now() - lastLaunch < 60000;
+    liveTimer = setTimeout(async () => { if (!liveBusy) { liveBusy = true; await reloadScript("live.js"); liveBusy = false; } pollLive(false); }, soon ? 1500 : fast ? 3000 : 20000);
+  }
+  window.__hsLive = (d) => {
+    if (!d || String(d.generated_at || "") === liveSeen) return;
+    const before = new Map([...LIVE_BY_JOB].map(([k, v]) => [k, v.status + "|" + v.id]));
+    const prevSync = LIVE.sync_at; LIVE = d; liveSeen = String(d.generated_at || ""); indexLive();
+    const finished = [...LIVE_BY_JOB].filter(([k, v]) => before.has(k) && before.get(k) !== v.status + "|" + v.id && !["queued", "generating"].includes(v.status));
+    for (const [, v] of finished) {
+      if (v.status === "skipped") toast(`${v.company}: ${v.message || "already has a READY resume"}`);
+      else if (v.status === "failed") toast(`Resume failed: ${v.company} — ${String(v.message || "").slice(0, 120)}`);
+      else if (v.status === "done") toast(`Resume ready: ${v.company}${v.result === "ready_questions" ? " (questions pending)" : ""}`);
+    }
+    const work = [];
+    if (finished.length) work.push(reloadScript("resumes.js").then(() => { RES = ((window.RESUMES || {}).jobs) || {}; mapResumeStatuses(); }));
+    if (d.sync_at && d.sync_at !== prevSync) work.push(reloadScript("sync.js").then(() => { mergeSync(); SYNC_AT = syncAt(); }));
+    Promise.all(work).then(() => { renderBanners(); renderAll(true); if (pJob) refreshPanel(); });
+  };
   function resumeUsed(a) {
     const r = (a.job || {}).resume;
     if (!r) return el("div", { class: "full muted", style: "font-size:12px", text: "Resume used: none recorded (Mark Applied records the current tailored resume)" });
@@ -1595,10 +1736,17 @@
   function resumeSection(j) {
     const r = resumeOf(j); const rs = resumeStatus(j);
     const box = el("div", { class: "section" }, el("h3", { text: "Resume" }));
-    if (!r) {
-      box.append(el("p", { class: "muted", style: "margin:0 0 8px", text: rs === "queued" ? "Command copied — run it in Terminal, then refresh this page." :
-        "No tailored resume yet. Generate Resume copies a command for Claude Code (copy-the-command workflow; nothing runs from this page)." }));
-      return box;
+    if (!r || rs === "queued" || rs === "generating") {
+      const it = LIVE_BY_JOB.get(j.id);
+      if (rs === "queued" || rs === "generating") box.append(el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px" },
+        resumeBadge(rs), el("span", { class: "muted", text: resumeTitle(j) }),
+        it ? el("button", { class: "btn small ghost", type: "button", onclick: () => cancelBuild(j) }, "Cancel") : null));
+      if (!r) {
+        box.append(el("p", { class: "muted", style: "margin:0 0 8px", text: rs ? "It saves itself when done (version folder, Desktop copy) and shows up here." :
+          LAUNCHER.installed ? "No tailored resume yet. Generate Resume queues one; it builds and saves in the background." :
+            "No tailored resume yet. Install the launcher once (./scripts/install_launcher.sh) and Generate Resume builds it in the background; until then it copies a Terminal command." }));
+        return box;
+      }
     }
     const v = r.current; const latest = r.latest;
     box.append(el("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px" },
@@ -1626,7 +1774,10 @@
       // review the current version even while a new generation is queued
       if (v.status === "ready" && !reviewedHere) acts.append(el("button", { class: "btn small", type: "button", onclick: () => markResumeReviewed(j) }, "Mark reviewed"));
       if (reviewedHere && v.status === "ready") acts.append(el("span", { class: "muted", style: "font-size:12px;align-self:center", text: "Reviewed here — saved with Export statuses" }));
-      acts.append(el("button", { class: "btn small ghost", type: "button", onclick: () => copyResumeCommand(j, true), title: "Copies the command with --regenerate (a new version)" }, "Regenerate (copy command)"));
+      acts.append(el("button", { class: "btn small", type: "button", onclick: () => queueResume(j, true), title: "Queue a new version (builds in the background)" },
+        rs === "ready_q" ? "Regenerate (after answering)" : "Regenerate"));
+      if (rs === "ready_q" && VIEWS.some((v) => v.id === "questions")) acts.append(el("button", { class: "btn small ghost", type: "button", onclick: () => setView("questions") }, `Answer ${r.questions_pending} question${r.questions_pending === 1 ? "" : "s"}`));
+      acts.append(moreMenu(resumeFallbacks(j), "More resume actions"));
       box.append(acts);
     }
     return box;
@@ -1917,7 +2068,8 @@
       b: "Open and scored, but below the top N jobs per track that the dashboard shows." }[res.state] || res.view;
     body.append(facts([["Where", res.view], ["Status", where], res.reason ? ["Filter reason", res.reason] : null,
       ["HireScope ID", String(res.id)]]),
-      el("p", { class: "muted", style: "font-size:12px", text: "Full details aren't loaded for this job. Generate Resume works from the command line: claude \"/resume-builder " + res.id + "\"." }));
+      el("p", { class: "muted", style: "font-size:12px", text: "Full details aren't loaded for this job. You can still queue its resume." }),
+      el("button", { class: "btn small", type: "button", onclick: () => { $("#job-info").close(); queueResume({ id: res.id, company: res.company, title: res.title }, false); } }, "Generate Resume"));
     $("#job-info-li").href = linkedinSearch(res.company, res.title);
     d.showModal(); $("#job-info-close").focus();
   }
@@ -1995,7 +2147,7 @@
       case " ": if (sel && tag !== "button" && tag !== "a") { e.preventDefault(); togglePick(sel.id); } else return; break;
       case "x": if (sel) openSkipPicker(sel); break;
       case "o": if (sel && safeUrl(sel.apply_url)) window.open(sel.apply_url, "_blank", "noopener"); break;
-      case "g": if (sel && !sel.filtered) copyResumeCommand(sel); break;
+      case "g": if (sel && !sel.filtered) queueResume(sel, false); break;
       case "/": e.preventDefault(); $("#q").focus(); break;
       case "?": $("#help").showModal(); break;
       case "1": switchTrack("coop_intern"); break;
@@ -2018,4 +2170,5 @@
     renderAll();
     if (bootJob != null && BY_ID.has(bootJob)) openPanel(bootJob, bootTab);
   }
+  pollLive(false);
 })();

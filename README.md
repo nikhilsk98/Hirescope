@@ -18,14 +18,16 @@ never logs in, never scrapes LinkedIn, never applies or messages anyone, and sen
 3. `./scripts/run.sh --all` — first full run (~25 min; later runs fetch only what changed).
 4. Open `dashboard/index.html`. Shortlist / skip with a reason / **Mark Applied**; **Export statuses** now and then.
 5. `./scripts/schedule.sh install` — full runs 08:00 + 18:00 and quick checks every 2.5 h.
+6. `./scripts/install_launcher.sh` — once: one-click resumes from the dashboard (no Terminal, no pasting; see
+   [Zero-CLI resumes](#zero-cli-resumes-launcher--background-queue)).
 
 ## Daily use
 
 1. Runs happen on their own (08:00, 18:00, plus a quick check every 2.5 h) once the schedule is installed. Run one
    by hand any time: `./scripts/run.sh` (or `--quick`, `--company "Stripe"`, `--dry-run`).
 2. Open `dashboard/index.html`. Start in **Last 24h** / the pinned **Apply Today** strip of each track tab;
-   open a job (`Enter`), check its Keywords and Full JD, **Generate Resume** (copies the `/resume-builder` command
-   for Claude Code; see [Resume Builder](#resume-builder)), apply, then **Mark
+   open a job (`Enter`), check its Keywords and Full JD, **Generate Resume** (queued; it builds and saves itself in
+   the background — see [Zero-CLI resumes](#zero-cli-resumes-launcher--background-queue)), apply, then **Mark
    Applied** (`a`). Shortlist (`s`) or skip with a reason (`x`) as you go — that is what feedback learning learns from.
 3. Click **Export statuses** at the end of a session. The next run imports it from `~/Downloads` into SQLite (and
    backups), so nothing you did lives only in the browser. To import right away (or if a run reports it can't read
@@ -478,8 +480,9 @@ checks, reports, versions, HireScope statuses). It never submits applications an
    template bullets that aren't in your master resume.
 
 ### Use
-- Dashboard → open a job → **Generate Resume (copy command)** (or `g`) copies `claude "/resume-builder <id>"`. Paste it
-  in Terminal in the HireScope folder (copy-the-command workflow: the page runs nothing). The job shows "queued".
+- Dashboard → open a job → **Generate Resume** (or `g`): queued, built and saved in the background (below). Before
+  `./scripts/install_launcher.sh` it copies `claude "/resume-builder <id>"` for Terminal instead; that command stays
+  available under **…** (Copy Terminal command, or a live Terminal session where you answer the keyword questions).
 - Or in Claude Code: `/resume-builder <job_id> [--regenerate] [--profile backend|fullstack|cloud|ml]`; the job ID is
   the number in the dashboard URL (`#…&job=123`). `/resume-builder --batch shortlisted` for every shortlisted job
   (shows the count and a usage warning and waits for your OK).
@@ -494,6 +497,36 @@ checks, reports, versions, HireScope statuses). It never submits applications an
 - Statuses: queued → generating → validating → **ready** (every required check passed) → **reviewed** (only when you
   mark it: dashboard button + Export statuses, or `mark-reviewed`), or **failed** (reasons listed; the last good
   version stays current).
+
+### Zero-CLI resumes (launcher + background queue)
+One-time setup: `./scripts/install_launcher.sh` (remove: `./scripts/uninstall_launcher.sh`). It installs
+- **HireScope Launcher** (`~/Applications/HireScope Launcher.app`), registered for `hirescope://` links. The static
+  page can't run programs, so each dashboard action opens one such link; the launcher hands it to
+  `scripts/launcher.sh` → `python -m jobsearch.launcher`, silently (no window, no Dock icon, no Terminal). The first
+  time, the browser asks "Open HireScope Launcher?": tick **Always allow** (the dashboard says so once).
+- **The resume worker** (launchd `com.nikhil.hirescope.worker`): started on demand, at login and after a crash; it
+  runs `claude -p "/resume-builder <id> --queue"` per job and exits when the queue is empty.
+
+Generate Resume adds the job to the queue instantly (keep clicking other jobs). Statuses on cards and panels move on
+their own (the page re-reads `dashboard/live.js` every few seconds): **Queued → Generating → Ready / Ready (questions
+pending) / Failed**. Each finished build is saved by the build itself (version folder in
+`data.nosync/generated_resumes/`, PDF copied to the Desktop folder); the worker then refreshes HireScope's resume status
+(`resume_builder refresh`), the dashboard files and the applications Excel file, and sends a macOS notification.
+
+- **Queue** (`resume_queue` in SQLite; survives restarts): one build at a time by default
+  (`config/resume_builder.yaml` → `resume_queue.concurrency`, max 2), never the same job twice at once; a job with a
+  current READY resume is skipped unless you asked for Regenerate. A failed build is retried once, then marked
+  Failed with the reason (`resume_queue.retries`); a build running longer than `timeout_minutes` (45) is stopped.
+  The worker pauses while a HireScope run holds the run lock and retries when SQLite says "database is locked".
+  Logs: `data.nosync/logs/queue/` (one per attempt), `data.nosync/logs/launcher.log` (every link and its outcome).
+- **Queue mode never asks** (`--queue`): `prepare --queue` saves the keyword questions to **Questions for you**
+  (dashboard view; `python -m resume_builder questions`), the build goes on without those keywords (truthfully) and
+  ends **Ready (questions pending)**. Answer them, then **Regenerate**.
+- From the terminal: `python -m resume_builder queue list | add <job…> [--regenerate] | cancel <job…> | worker`.
+- Links (validated strictly in `src/jobsearch/launcher.py`; anything else is rejected with a short notification):
+  `hirescope://queue?job=<id>[&regenerate=1]`, `queue?list=bucket[&regenerate=1]`, `cancel?job=<id>`,
+  `interactive?job=<id>` (opens Terminal: `cd ~/Projects/hirescope && claude "/resume-builder <id>"`), plus the
+  Bucket, Mark Applied / stage and Resume Builder links described below.
 
 ### What gets checked
 - **Truth** (blocks "ready"): every bullet, skill, summary and talking point against the evidence ids it cites:

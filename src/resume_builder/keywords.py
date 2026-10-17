@@ -54,6 +54,8 @@ def record_answer(keyword: str, answer: str) -> None:
     d = answers()
     d[canonical(keyword).casefold()] = {"keyword": keyword, "answer": answer, "at": date.today().isoformat()}
     _save("keyword_answers.json", d)
+    from .questions import mark_answered          # closes the keyword's "Questions for you" entries in every job
+    mark_answered(keyword, "no" if answer == "no" else "yes")
 
 
 def _families(bank: Bank) -> dict[str, list[str]]:

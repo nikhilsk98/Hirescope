@@ -143,3 +143,13 @@ related_groups:
   jvm_languages: [Java, Kotlin, Scala]
   scripting_languages: [Python, Ruby, Perl]
   typed_web_languages: [JavaScript, TypeScript]
+# --- not part of any resume's input hash: everything below this line only says how builds are run --------------------
+# Background resume queue (src/resume_builder/queue.py; the dashboard's Generate Resume / Bucket / Resume Builder tab
+# queue builds through the hirescope:// launcher, a launchd worker runs them; see README → Zero-CLI resumes).
+resume_queue:
+  concurrency: 1            # builds at once (max 2); never the same job twice at once
+  retries: 1                # a failed build is retried this many times, then marked Failed with the reason
+  timeout_minutes: 45       # a build still running after this long is stopped and counts as a failure
+  batch_warn: 5             # "Generate resumes for all" asks first (count + usage warning) above this many jobs
+  claude: ~/.local/bin/claude
+  idle_exit_seconds: 30     # the worker exits this long after the queue empties (launchd starts it again on demand)

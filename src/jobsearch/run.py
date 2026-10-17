@@ -130,6 +130,11 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
     except Exception as e:  # noqa: BLE001 — the job run must not fail because of resume data
         log.warning("resume statuses not refreshed", extra={"error": str(e)[:200]})
     statuses.write_sync_js(paths.SYNC_JS, statuses.sync_payload(conn))   # after refresh_all: includes resume links
+    try:   # live.js / launcher.js: the open dashboard's queue, worker and launcher state (zero-CLI resumes)
+        from . import live
+        live.ensure_files(conn)
+    except Exception as e:  # noqa: BLE001
+        log.warning("live.js not written", extra={"error": str(e)[:200]})
     compute_similar(conn, Embedder(conn), shown, min_sim=cfg.prefs.scoring.similar_min)   # "More like this"
     jobs = db.open_jobs(conn)
     if paths.ENG_BLOGS.exists():

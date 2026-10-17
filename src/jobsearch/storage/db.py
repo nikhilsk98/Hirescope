@@ -266,6 +266,45 @@ MIGRATIONS: list[str] = [
     );
     ALTER TABLE applications ADD COLUMN resume TEXT;
     """,
+    # 9: zero-CLI resumes — the background resume queue, the Bucket (apply-list), keyword questions from --queue builds
+    """
+    CREATE TABLE resume_queue (
+        id INTEGER PRIMARY KEY,
+        job_pk INTEGER NOT NULL,
+        regenerate INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'queued',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        batch TEXT,
+        origin TEXT,
+        added_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        pid INTEGER,
+        message TEXT,
+        result TEXT
+    );
+    CREATE INDEX resume_queue_status ON resume_queue(status, id);
+    CREATE TABLE bucket (
+        job_pk INTEGER PRIMARY KEY,
+        job_key TEXT NOT NULL,
+        in_bucket INTEGER NOT NULL DEFAULT 1,
+        added_at TEXT,
+        updated_at TEXT NOT NULL,
+        snapshot TEXT
+    );
+    CREATE TABLE resume_questions (
+        id INTEGER PRIMARY KEY,
+        job_pk INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        keyword TEXT NOT NULL,
+        question TEXT NOT NULL,
+        options TEXT,
+        asked_at TEXT NOT NULL,
+        answered_at TEXT,
+        answer TEXT,
+        UNIQUE(job_pk, keyword)
+    );
+    """,
 ]
 
 

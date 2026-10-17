@@ -39,6 +39,18 @@ def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+# config/resume_builder.yaml: settings below this line (resume_queue) only say how builds are run, never what a resume
+# contains, so they are left out of every version's input hash (changing them never forces a rebuild)
+RUN_ONLY_MARK = "# --- not part of any resume's input hash"
+RUN_ONLY_KEYS = ("desktop_copy", "resume_queue")
+
+
+def config_hash(path: Path | None = None) -> str:
+    text = (path or CONFIG_FILE).read_text(encoding="utf-8")
+    i = text.find(RUN_ONLY_MARK)
+    return sha256_text(text[:i] if i >= 0 else text)
+
+
 @dataclass
 class Profile:
     name: str
@@ -72,8 +84,8 @@ class Settings:
     category_terms: dict[str, list[str]] = field(default_factory=dict)
 
     def hash(self) -> str:
-        # desktop_copy only says where finished PDFs are copied; changing it never invalidates a built version
-        return sha256_text(yaml.safe_dump({k: v for k, v in self.raw.items() if k != "desktop_copy"}, sort_keys=True))
+        # desktop_copy / resume_queue only say where finished PDFs go and how builds run: never invalidate a version
+        return sha256_text(yaml.safe_dump({k: v for k, v in self.raw.items() if k not in RUN_ONLY_KEYS}, sort_keys=True))
 
     def audience(self, track: str | None, level: str | None = None, yoe: float | None = None) -> str:
         """student (co-op / internship / new grad, rule 15) or experienced (mid-level and up, rule 16), from the

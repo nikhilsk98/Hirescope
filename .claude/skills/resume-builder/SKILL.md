@@ -1,9 +1,9 @@
 ---
 name: resume-builder
-description: Build a tailored, validated one-page LaTeX resume for a HireScope job from Nikhil's own evidence only. Use when the user runs /resume-builder <job_id> (optionally --regenerate, --profile backend|fullstack|cloud|ml) or /resume-builder --batch shortlisted.
+description: Build a tailored, validated one-page LaTeX resume for a HireScope job from Nikhil's own evidence only. Use when the user runs /resume-builder <job_id> (optionally --regenerate, --profile backend|fullstack|cloud|ml, --queue for a background queue build) or /resume-builder --batch shortlisted.
 ---
 
-# /resume-builder <job_id> [--regenerate] [--profile X]
+# /resume-builder <job_id> [--regenerate] [--profile X] [--queue]
 
 You are a senior software-engineering hiring manager, a professional technical resume writer and a resume-parsing
 reviewer. You do the judgment (requirement mapping, selection, rewriting, review) as **structured JSON**; the
@@ -112,6 +112,25 @@ scripts do everything deterministic. Run every command from the repo root with `
 6. **Evidence interview** (optional, when strong matches lack detail): `python -m resume_builder interview <job_id>`
    lists up to 5 questions. Ask Nikhil; save an answer only after Nikhil explicitly confirms it:
    `python -m resume_builder add-evidence --entry <id> --question "..." --answer "..." --confirm`.
+
+## Queue mode (`--queue`): a background build, nobody at the keyboard
+The dashboard's Generate Resume / Bucket / Resume Builder tab queue builds; the worker runs
+`claude -p "/resume-builder <id> --queue"` with stdin closed. In queue mode:
+- **Never ask anything and never wait for an answer.** Run `prepare <job_id> --queue [--regenerate]`: it saves the
+  brief's keyword questions to "Questions for you" (dashboard view, `python -m resume_builder questions`). Draft
+  **without** those keywords (truthfully: an unconfirmed keyword is simply not claimed). Never run `add-evidence`,
+  `add-tool` or `decline` (only Nikhil's own answers may be saved), never `--force` or `--discard-edits`.
+- Run every command exactly as `~/.venvs/hirescope/bin/python -m resume_builder …` from the repo root (no `cd`,
+  pipes or other programs: queue mode allows only those). Use the Read / Write / Edit tools for `_work/` files.
+- Steps 1 → 5 as usual (prepare, draft, review, truth pass, build). Skip step 6 (interview). If prepare prints
+  **REUSED**, stop: that version stands.
+- Before building, keep the draft at the baseline's bullet count and keep required bullets (the master's notes) at
+  their master length: the build's automatic repair can trim and drop optional content, but it can't reword, so a
+  required bullet that runs to 3 lines fails the build. A build that fails after its 3 attempts stays failed (the
+  worker retries the whole generation once, telling that run what failed — fix exactly that in the new draft), then
+  it's marked Failed with the reason; don't loop beyond that.
+- End with a short plain-text report (status, version, PDF path, open questions). The worker saves nothing extra:
+  the build already saved the version folder and the Desktop copy; the worker refreshes HireScope.
 
 ## Versions, locks and hand edits
 - `prepare` prints **REUSED** when the current version was built from the same job, inputs (master resume, additions,

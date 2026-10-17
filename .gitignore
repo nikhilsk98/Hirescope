@@ -24,3 +24,5 @@ dashboard/search.js
 .coverage
 htmlcov/
 dashboard/resumes.js
+dashboard/live.js
+dashboard/launcher.js
