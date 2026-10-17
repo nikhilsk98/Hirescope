@@ -814,3 +814,6 @@ JD, evaluation clause vs JD-irrelevant skills, approved self-reported skills).
 - Backfill: 33 PDFs in 12 resume folders.
 
 **Tests**: 639 passed (6 new; every test's Desktop is a temporary folder via `JOBSEARCH_DESKTOP_DIR`).
+- HPE v9 (2026-10-17, ready, 1 page): LLMs added to the Machine Learning row (the JD asks for GenAI / LLMs); AZ-900
+  restored (cloud role, fits); the freelance S3/SQS bullet says "duplicate-safe job handling" so "idempotency checks"
+  appears once (Accenture). Desktop copy updated automatically (v8 kept as _v8).
