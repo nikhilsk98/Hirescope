@@ -192,15 +192,24 @@ pbpaste | ./scripts/add_job.sh --company "Acme" --role "Backend Engineer" --past
 ./scripts/add_job.sh --pending        # import everything waiting (drop folder + files saved by the dashboard)
 ./scripts/add_job.sh --url https://…  # URL only: exactly ./scripts/add_url.sh (Add job by URL)
 ```
-- **Dashboard → "+ Add external job"** (sidebar, or ⌘K): company, role, location, job URL (optional), track, and the
-  JD pasted or as a file. The page can't write to disk, so it saves `hirescope-external-job-<Company>-<time>.json` to
-  your Downloads; the next run imports it, or run the command it shows (`./scripts/import_pending.sh`). Scheduled
+- **Dashboard → Resume Builder tab** (key `4`; the sidebar's "+ Add external job" and ⌘K open it): company, role,
+  location, job URL (optional), track, and the JD pasted or as a file (.txt, .md, .pdf, .docx) — or just the URL
+  (then Add job by URL reads the posting). **Save and build resume** saves
+  `hirescope-external-job-<Company>-<time>.json` to your Downloads and, in the same click, opens
+  `hirescope://external?file=<that file>`: the launcher imports exactly that file (dedupe as below: a job HireScope
+  already has keeps its ID, no copy) and queues its resume; the worker rescores and republishes the dashboard data
+  first (~30 s), then builds. Below the form: your external jobs with resume status, Preview / Download and **Mark
+  Applied**. When an external job's resume becomes READY it lands in My Applications at **Ready to apply** (the first
+  stage); Mark Applied moves it to Applied with today's date and the exact resume version
+  (`preferences.yaml → applications.auto_mark_applied_external: true` marks it Applied right away instead).
+  Terminal fallback: `./scripts/external_resume.sh "<file>"` (a name in ~/Downloads or `inputs/external_jobs/`, or a
+  path there; if the file isn't found it uses the newest pending external job and says so). Without the launcher the
+  saved file waits for the next run (or `./scripts/import_pending.sh`). Scheduled
   runs read ~/Downloads through the venv's Python, which macOS allows per program (tested under launchd on
   2026-10-14: Python could list, read and move files there while `/bin/ls` in the same job was denied). After a Python
   upgrade or `setup.sh` the permission can stop applying; the run summary then says "can't read ~/Downloads" — run
   `./scripts/import_pending.sh` yourself (see [Statuses, sync and feedback learning](#statuses-sync-and-feedback-learning)),
   or save the file to `inputs/external_jobs/`.
-  With only a URL it copies the Add job by URL command instead.
 - **Drop folder `inputs/external_jobs/`**: put any JD file there; the next run imports it. Company / role / URL /
   location / track come from a small header at the top of a text file (`Company: …`, `Role: …`, `URL: …`, blank line,
   then the JD) or from the file name (`Acme - Software Engineer Co-op.pdf`). Imported files move out of the folder
@@ -284,7 +293,9 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
 - **Applied Companies** tab: one row per company — number of applications, latest status (the stage of your most
   recent application there), latest applied date, sources, and every application with its link (click one for its
   drawer). CLI: `python -m jobsearch.apps companies`.
-- **Board**: Applied → Online Assessment → Interviewing → Offer, plus Rejected · Ghosted · Withdrawn. Drag cards, or
+- **Board**: Ready to apply → Applied → Online Assessment → Interviewing → Offer, plus Rejected · Ghosted · Withdrawn.
+  "Ready to apply" holds external jobs whose resume is READY (not applications yet: they don't count in stats,
+  follow-ups or Applied Companies). Drag cards, or
   focus one and press `[` / `]`. Every move is logged on the card's timeline with its date. Cards show the track, days
   since applying, next step, follow-up state, referral, and "Posting closed".
 - **Table**: sortable, searchable, stage filter, **Export CSV** (formula-safe).

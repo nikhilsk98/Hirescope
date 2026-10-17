@@ -31,6 +31,15 @@ def coop_job(n: int) -> dict:
                        "Pursuing a degree in computer science. Build REST APIs and data pipelines."}
 
 
+EXT_JD = """About the role
+DemoExt builds developer platforms (DEMO). Co-op, January to June 2027.
+
+Requirements
+- Pursuing a BS or MS in Computer Science
+- Python, Go, Kubernetes, AWS
+"""
+
+
 @pytest.fixture
 def demo_dashboard(conn, cfg, resume, embedder, greenhouse_payload, tmp_path):
     from jobsearch.config import Company
@@ -43,8 +52,25 @@ def demo_dashboard(conn, cfg, resume, embedder, greenhouse_payload, tmp_path):
         shutil.copy(paths.ROOT / "dashboard" / f, dash / f)
     write_data_js(dash / "data.js", db.open_jobs(conn), {"summary": {}, "repo_root": str(paths.ROOT)},
                   "America/New_York", resume.version_hash, 200, lambda j: 1)
+    # an external job (Resume Builder tab) whose resume is READY → "Ready to apply" in My Applications
+    from jobsearch import external
+    from jobsearch.tracker import ready_apps
+    from resume_builder import hirescope_bridge
+    ext = external.from_text(EXT_JD, company="DemoExt", role="Platform Engineer Co-op (DEMO)", track="coop_intern",
+                             origin="resume_builder")
+    pk = external.import_external(conn, cfg, ext).job_pk
+    from jobsearch.pipeline import RunSummary, score_all
+    score_all(conn, cfg, resume, embedder, RunSummary())
+    conn.execute("INSERT INTO resume_builds (job_pk, version, status, pdf_path, manifest_path, created_at, summary) VALUES "
+                 "(?,1,'ready',?,?,'2026-10-17T00:00:00+00:00','{}')", (pk, str(tmp_path / "v1" / "R.pdf"), str(tmp_path / "v1" / "manifest.json")))
+    conn.execute("INSERT INTO resume_status (job_pk, status, current_version, latest_version, updated_at) VALUES "
+                 "(?, 'ready', 1, 1, '2026-10-17T00:00:00+00:00')", (pk,))
+    conn.commit()
+    ready_apps.ensure(conn, auto_applied=False)
+    write_data_js(dash / "data.js", db.open_jobs(conn), {"summary": {}, "repo_root": str(paths.ROOT)},
+                  "America/New_York", resume.version_hash, 200, lambda j: 1)
     statuses.write_sync_js(dash / "sync.js", statuses.sync_payload(conn))
-    (dash / "resumes.js").write_text('window.RESUMES = {"generated_at": "x", "jobs": {}, "learn_it": [], "questions": [], "entries": []};\n')
+    hirescope_bridge.write_dashboard_data(conn, dash / "resumes.js")
     live.write(conn, dash / "live.js")
     live.write_launcher_js(True, dash / "launcher.js")
 
@@ -77,3 +103,7 @@ def test_setup_banner_without_the_launcher(demo_dashboard):
 
 def test_bucket_tab_add_remove_mark_applied_undo_generate_all(demo_dashboard):
     scenario(demo_dashboard, "bucket")
+
+
+def test_resume_builder_tab_form_external_list_ready_to_apply(demo_dashboard):
+    scenario(demo_dashboard, "builder")

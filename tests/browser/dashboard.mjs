@@ -11,9 +11,15 @@ const CAPTURE = `window.__links = []; window.__hsLaunch = (u) => window.__links.
 // run `action` and return the text of the file the page would download (nothing is saved)
 const DOWNLOAD = (action) => `(() => { let out = null; const oc = URL.createObjectURL, ok = HTMLAnchorElement.prototype.click;
   URL.createObjectURL = (b) => { out = b; return oc.call(URL, b); };
-  HTMLAnchorElement.prototype.click = function () { if (!this.hasAttribute("download")) return ok.call(this); };
+  HTMLAnchorElement.prototype.click = function () { if (!this.hasAttribute("download")) return ok.call(this); window.__dlName = this.getAttribute("download"); };
   try { ${action}; } finally { URL.createObjectURL = oc; HTMLAnchorElement.prototype.click = ok; }
   return out ? out.text() : null; })()`;
+// keep download stubs installed (for async handlers that download after an await); downloads go to window.__dl
+const STUB_DOWNLOADS = `(() => { window.__dl = []; const oc = URL.createObjectURL, ok = HTMLAnchorElement.prototype.click;
+  URL.createObjectURL = (b) => { window.__dlBlob = b; return oc.call(URL, b); };
+  HTMLAnchorElement.prototype.click = function () { if (!this.hasAttribute("download")) return ok.call(this);
+    const name = this.getAttribute("download"); window.__dlBlob.text().then((t) => window.__dl.push({ name, text: t })); };
+  return true; })()`;
 const text = (sel) => `(() => { const n = document.querySelector(${JSON.stringify(sel)}); return n ? n.textContent : null; })()`;
 
 const scenarios = {
@@ -103,7 +109,7 @@ const scenarios = {
     await p.sleep(200);
     check("Undo puts it back", await p.eval(`document.querySelector("#tab-bucket .count").textContent`) === "3");
     check("Undo sends stage=undo", /stage=undo&app=/.test(await p.eval(`window.__links[1]`)), await p.eval(`window.__links[1]`));
-    check("Undo removes the application", await p.eval(`Object.values(JSON.parse(localStorage.getItem("jobsearch.applications.v1") || "{}")).filter((a) => !a.deleted).length`) === 0);
+    check("Undo removes the application", await p.eval(`Object.values(JSON.parse(localStorage.getItem("jobsearch.applications.v1") || "{}")).filter((a) => !a.deleted && a.stage === "applied").length`) === 0);
     // Generate resumes for all: one link for every Bucket job without a resume
     await p.eval(`window.__links.length = 0`);
     await p.eval(`[...document.querySelectorAll(".page-toolbar button")].find((b) => /Generate resumes for all/.test(b.textContent)).click()`);
@@ -134,6 +140,54 @@ const scenarios = {
     await p.eval(`(document.querySelector("#list .card") || document.querySelector("#list tr[data-id]")).click()`); await p.sleep(400);
     check("panel opens", await p.eval(`document.querySelector("#panel").classList.contains("open")`));
     check("no links sent", (await p.eval(`window.__links.length`)) === 0);
+  },
+  async builder(p) {
+    await p.eval(CAPTURE + `; localStorage.setItem("jobsearch.launcherTip.v1", "true"); ` + STUB_DOWNLOADS);
+    await p.key("4"); await p.sleep(200);
+    check("Resume Builder page", await p.eval(`document.body.dataset.page`) === "builder" && await p.eval(`location.hash`) === "#builder");
+    check("tab count = external jobs", await p.eval(`document.querySelector("#tab-builder .count").textContent`) === "1");
+    const row = `document.querySelector("[data-ext-row]")`;
+    check("external job listed with resume status", /Resume: Ready/.test(await p.eval(`${row}.textContent`)));
+    check("Ready to apply in the list", /Ready to apply/.test(await p.eval(`${row}.textContent`)));
+    check("preview and download links", await p.eval(`${row}.querySelectorAll("a").length`) === 2);
+    // Mark Applied: Ready to apply → Applied (today, resume v1), one status link; Undo → back
+    await p.eval(`${row}.querySelector('button[aria-label^="Mark"]').click()`); await p.sleep(200);
+    const link = await p.eval(`window.__links[0] || ""`);
+    check("Mark Applied link records the version", /^hirescope:\/\/status\?job=\d+&stage=applied&app=ext-\d+&date=\d{4}-\d{2}-\d{2}&v=1$/.test(link), link);
+    check("now Applied", /Applied ✓/.test(await p.eval(`document.querySelector("[data-ext-row]").textContent`)));
+    await p.eval(`[...document.querySelectorAll("#toasts .toast button")].pop().click()`); await p.sleep(200);
+    check("Undo → Ready to apply again", /Ready to apply/.test(await p.eval(`document.querySelector("[data-ext-row]").textContent`)) && /stage=undo/.test(await p.eval(`window.__links[1]`)));
+    // My Applications board: Ready to apply is the first column
+    await p.eval(`(() => { const b = [...document.querySelectorAll(".view-btn")].find((x) => /My Applications/.test(x.textContent)); b.click(); })()`); await p.sleep(200);
+    await p.key("1"); await p.sleep(200);
+    const cols = await p.eval(`[...document.querySelectorAll(".board .col h3")].map((h) => h.firstChild.textContent)`);
+    check("board starts with Ready to apply", cols[0] === "Ready to apply" && cols[1] === "Applied", JSON.stringify(cols));
+    check("the external job sits there", /Platform Engineer Co-op/.test(await p.eval(`document.querySelector(".board .col").textContent`)));
+    // the form: validation, pasted JD → saved file + one external link, typing survives live updates
+    await p.key("4"); await p.sleep(150);
+    await p.eval(`window.__links.length = 0`);
+    await p.eval(`document.querySelector(".builder-form button[type=submit]").click()`); await p.sleep(100);
+    check("empty form: nothing sent", (await p.eval(`window.__links.length`)) === 0 && (await p.eval(`window.__dl.length`)) === 0);
+    await p.eval(`(() => { const f = document.querySelector(".builder-form"); f.elements.company.value = "DemoNew"; f.elements.role.value = "Backend Co-op (DEMO)";
+      f.elements.location.value = "Remote"; f.elements.jd.value = "DemoNew builds payments. Requirements: Python, SQL."; f.elements.track.value = "coop_intern"; })()`);
+    await p.eval(`document.querySelector(".builder-form button[type=submit]").click()`); await p.sleep(400);
+    const dl = await p.eval(`window.__dl[0]`);
+    const sent = await p.eval(`window.__links[0] || ""`);
+    check("saves the job file", dl && /^hirescope-external-job-DemoNew-\d{8}T\d{6}-[a-z0-9]+\.json$/.test(dl.name) && JSON.parse(dl.text).origin === "resume_builder" && JSON.parse(dl.text).jd_text.includes("payments"), dl && dl.name);
+    check("opens hirescope://external for that file", dl && sent === `hirescope://external?file=${encodeURIComponent(dl.name)}`, sent);
+    check("pending row shows Importing", /Importing/.test(await p.eval(`document.querySelector(".ext-table").textContent`)));
+    check("status banner", /Sent to the launcher/.test(await p.eval(`document.querySelector(".ext-status").textContent`)));
+    await p.eval(`document.querySelector(".builder-form").elements.company.value = "typing…"`);
+    await p.eval(`window.__hsLive({generated_at: "b1", queue: [], launcher: {at: new Date().toISOString().slice(0, 19) + "+00:00", action: "external", ok: true, message: "imported DemoNew — Backend Co-op (DEMO) (job 99); resume queued"}})`);
+    await p.sleep(150);
+    check("launcher answer shown", /imported DemoNew/.test(await p.eval(`document.querySelector(".ext-status").textContent`)));
+    check("typing survives a live update", await p.eval(`document.querySelector(".builder-form").elements.company.value`) === "typing…");
+    // URL only
+    await p.eval(`(() => { const f = document.querySelector(".builder-form"); f.reset(); f.elements.url.value = "https://jobs.demo.example/postings/7"; })()`);
+    await p.eval(`document.querySelector(".builder-form button[type=submit]").click()`); await p.sleep(400);
+    const dl2 = await p.eval(`window.__dl[1]`);
+    check("URL only: saved with the URL and no JD", dl2 && JSON.parse(dl2.text).url === "https://jobs.demo.example/postings/7" && !JSON.parse(dl2.text).jd_text);
+    check("URL only: one external link", (await p.eval(`window.__links.length`)) === 2);
   },
   async setup_banner(p) {
     check("setup banner when the launcher isn't installed", await p.eval(`!!document.querySelector(".setup-banner")`));

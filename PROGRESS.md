@@ -920,7 +920,8 @@ commit and a push.
       "Copy command" only under "…", setup banner (2026-10-17)
 - [x] 1 — Bucket tab (checkbox = add to Bucket; per-job + bucket actions; Mark Applied removes with Undo; export 6)
       (2026-10-17)
-- [ ] 2 — Resume Builder tab (form → saved file → hirescope://external → import + queue; "Ready to apply" stage)
+- [x] 2 — Resume Builder tab (form → saved file → hirescope://external → import + queue; "Ready to apply" stage)
+      (2026-10-17)
 - [ ] 3 — launcher: every link type, strict validation, silent except interactive, one-time browser tip
 - [ ] 4 — queue: statuses, concurrency, cancel, persistence, retry, --queue questions, notifications, panel, pause
 - [ ] 5 — Applications Excel on the Desktop (3 sheets, atomic write, open-in-Excel fallback, instant sync)
@@ -995,3 +996,24 @@ Desktop folder, no Terminal.
 - Tests: tests/test_bucket.py (7), headless-Chrome "bucket" scenario (tick 3 jobs from both tracks and the Similar
   list, Space, live count, Bucket page, sort, Mark Applied + Undo, Generate all, Remove, persistence across reload,
   export format 6, arrow-key tab navigation, no console errors).
+
+## Section 2 report (2026-10-17): Resume Builder tab
+- Fourth top tab (key 4, #builder; replaces the "Add external job" dialog; the sidebar button and ⌘K open it): form
+  (company, role, location, URL, track, pasted JD or a .txt/.md/.pdf/.docx file, or URL only) → saves
+  hirescope-external-job-*.json to Downloads and opens `hirescope://external?file=<name>` in the same click; a status
+  banner shows the launcher's answer (live.js); the form keeps your typing across live updates. Below: external jobs
+  with resume badge, Preview / Download, application stage, Mark Applied / Applied ✓, Generate / Regenerate / Cancel,
+  plus pending submissions ("Importing…" until the job is on the dashboard).
+- `src/jobsearch/external_resume.py` (launcher + `scripts/external_resume.sh`): file only directly inside ~/Downloads
+  or inputs/external_jobs/ (symlinks resolved first), waits up to 20 s for the browser's download, newest pending
+  external job when the file is missing (said so), import with the usual dedupe (existing job keeps its ID), URL only
+  → Add job by URL, archive, queue the resume, ask the worker to rescore + republish (31 s on the real data, timed on
+  a scratch copy) before building (the job package's ATS keywords come from scoring).
+- "Ready to apply" stage (first; Python + core.js; never counted in stats, follow-ups, Applied Companies):
+  `tracker/ready_apps.py` creates it when an external job's resume is READY (once; a removed one never comes back);
+  Mark Applied moves it to Applied with today's date and the exact version (Undo → back to Ready to apply);
+  `applications.auto_mark_applied_external` (false) marks Applied right away instead.
+- Tests: tests/test_resume_builder_tab.py (10: allowed paths incl. symlink / traversal, one-click import + queue,
+  dedupe to the existing ID, uploaded .docx, missing file → newest pending, URL only, Terminal fallback, bad links,
+  Ready to apply + Mark Applied + Undo + no re-creation, the setting, stats exclusion in Python and core.js, worker
+  publishes before building); headless-Chrome "builder" scenario.

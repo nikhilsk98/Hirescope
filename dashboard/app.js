@@ -714,6 +714,7 @@
       b.setAttribute("aria-selected", String(sel)); b.tabIndex = sel ? 0 : -1;
     }
     const n = bucketItems().length; const bc = $("#tab-bucket .count"); if (bc) bc.textContent = n.toLocaleString();
+    const xc = $("#tab-builder .count"); if (xc) xc.textContent = (externalJobs().length + extPending().length).toLocaleString();
     document.body.dataset.page = ui.page;
   }
   function switchPage(page) {
@@ -725,7 +726,7 @@
   const SPECIAL = { coverage: () => renderCoverage, skillgaps: () => renderSkillGaps, applications: () => renderApplications,
     followups: () => renderFollowups, stats: () => renderStatsView, runlog: () => renderRunLog, seasons: () => renderSeasons,
     manual: () => renderManualChecks };
-  const PAGES = { bucket: { title: "Bucket", render: () => renderBucket } };
+  const PAGES = { bucket: { title: "Bucket", render: () => renderBucket }, builder: { title: "Resume Builder", render: () => renderBuilder } };
   function renderList(keepScroll) {
     const st = tstate();
     if (PAGES[ui.page]) {
@@ -936,7 +937,7 @@
     if (!a || a.stage === to) return;
     saveApp(C.moveStage(a, to), `${a.company}: ${STAGE_LABEL[a.stage]} → ${STAGE_LABEL[to]}`);
   }
-  const STAGE_ORDER = [...OPEN_STAGES, ...CLOSED_STAGES];
+  const STAGE_ORDER = ["ready", ...OPEN_STAGES, ...CLOSED_STAGES];
   function shiftStage(a, dir) {
     const i = STAGE_ORDER.indexOf(a.stage); const to = STAGE_ORDER[Math.max(0, Math.min(STAGE_ORDER.length - 1, i + dir))];
     if (to === a.stage) return;
@@ -958,6 +959,7 @@
 
   async function markApplied(j) {
     const existing = appForJob(j);
+    if (existing && existing.stage === "ready") { applyReady(j, existing); return; }
     if (existing) { openDrawer(existing.id); toast("Already in My Applications"); return; }
     const warns = C.duplicateWarnings(j.company, j.title, keyOf(j), liveApps(), today(), appsCfg.same_company_window_days, null, appsCfg.near_duplicate_ratio);
     if (warns.length && !(await confirmDialog("Possible duplicate application", warns.map((w) => w.message), "Mark applied anyway"))) return;
@@ -1104,6 +1106,24 @@
     const S = (window.SYNC || {}).bucket || {};
     const synced = items.every((j) => S[j.id] && S[j.id].in);
     return generateJobs(jobs, regenerate, synced);
+  }
+
+  // an external job's application at "Ready to apply" → Applied today, with the resume version you are sending
+  function applyReady(j, a) {
+    const before = JSON.parse(JSON.stringify(a));
+    const ref = resumeRef(j) || (a.job || {}).resume || null;
+    const next = C.edit(C.moveStage(a, "applied"), { applied_date: today(), job: Object.assign({}, a.job || {}, { resume: ref }) });
+    apps[a.id] = next; saveApps(); syncJobStatus(next);
+    const bBefore = bucket[j.id] ? JSON.parse(JSON.stringify(bucket[j.id])) : null; const wasIn = inBucket(j.id);
+    if (wasIn) { bucket[j.id] = Object.assign({}, bucket[j.id], { in: false, updated_at: new Date().toISOString() }); saveBucket(); refreshBucket(j.id); }
+    launch(`hirescope://status?job=${j.id}&stage=applied&app=${a.id}&date=${next.applied_date}${ref ? `&v=${ref.version}` : ""}`, "Mark Applied");
+    toast(`Marked applied: ${j.company} (Ready to apply → Applied)`, () => {
+      apps[a.id] = Object.assign({}, before, { updated_at: new Date().toISOString() }); saveApps();
+      if (bBefore) { bucket[j.id] = Object.assign({}, bBefore, { updated_at: new Date().toISOString() }); saveBucket(); refreshBucket(j.id); }
+      launch(`hirescope://status?job=${j.id}&stage=undo&app=${a.id}`);
+      renderAll(true); if (pJob) renderActions();
+    });
+    renderAll(true); if (pJob) renderActions();
   }
 
   // ----- page -----
@@ -1564,7 +1584,7 @@
       ["Apply link", d.link_status || "not checked"],
       ["Source", `${j.source} · job ${j.job_id} · first seen ${fmtTime(j.first_seen)}`],
       d.external || (j.badges || []).includes("external") ? ["Added by you", el("span", null, el("span", { class: "chip info", text: "External" }), " ",
-        el("span", { class: "muted", text: d.external ? `${{ paste: "pasted JD", file: "JD file", drop: "drop folder", dashboard: "Add external job form", cli: "command line" }[d.external.origin] || d.external.origin}${d.external.file_name ? ` (${d.external.file_name})` : ""} · ${fmtTime(d.external.added_at)}` : "added by URL" }))] : null,
+        el("span", { class: "muted", text: d.external ? `${{ paste: "pasted JD", file: "JD file", drop: "drop folder", dashboard: "Add external job form", resume_builder: "Resume Builder tab", cli: "command line" }[d.external.origin] || d.external.origin}${d.external.file_name ? ` (${d.external.file_name})` : ""} · ${fmtTime(d.external.added_at)}` : "added by URL" }))] : null,
       sig.rules_would_hide ? ["Your rules", el("span", null, "Would have hidden this job (shown because you added it): ", (sig.rules_would_hide || []).join("; "))] : null,
     ])));
     out.append(el("div", { class: "section" }, el("h3", { text: "Flags (only when explicitly stated)" }), facts(["sponsorship", "citizenship", "clearance"].map((k) =>
@@ -1867,8 +1887,11 @@
     const fast = soon || liveActive() || Date.now() - lastLaunch < 60000;
     liveTimer = setTimeout(async () => { if (!liveBusy) { liveBusy = true; await reloadScript("live.js"); liveBusy = false; } pollLive(false); }, soon ? 1500 : fast ? 3000 : 20000);
   }
+  const liveSig = (d) => JSON.stringify([(d.queue || []).map((x) => [x.id, x.status, x.attempts, x.message]), d.launcher, d.excel, d.questions_open, d.sync_at,
+    (d.worker || {}).state]);
   window.__hsLive = (d) => {
     if (!d || String(d.generated_at || "") === liveSeen) return;
+    if (liveSig(d) === liveSig(LIVE)) { LIVE = d; liveSeen = String(d.generated_at || ""); return; }
     const before = new Map([...LIVE_BY_JOB].map(([k, v]) => [k, v.status + "|" + v.id]));
     const prevSync = LIVE.sync_at; LIVE = d; liveSeen = String(d.generated_at || ""); indexLive();
     const finished = [...LIVE_BY_JOB].filter(([k, v]) => before.has(k) && before.get(k) !== v.status + "|" + v.id && !["queued", "generating"].includes(v.status));
@@ -1997,72 +2020,124 @@
     toast((await copyText(cmd)) ? "Command copied — paste it in Terminal" : cmd);
   });
 
-  // ---------- add external job (saved as a file the next run imports; external.py) ----------
-  const EXT_KEY = "jobsearch.externalPending.v1";
-  const extPending = () => store.get(EXT_KEY, []).filter((x) => !JOBS.some((j) => j.company.toLowerCase() === x.company.toLowerCase() && C.tokenSortRatio(C.normTitle(j.title), C.normTitle(x.role)) >= 90));
-  function renderExtPending() {
-    const n = extPending(); store.set(EXT_KEY, n);
-    $("#ext-pending").textContent = n.length ? `${n.length} external job${n.length === 1 ? "" : "s"} saved, waiting for the next run (or ./scripts/import_pending.sh): ${n.map((x) => x.company).join(", ")}` : "";
-  }
-  const importCmd = () => `cd ${JSON.stringify(META.repo_root || ".")} && ./scripts/import_pending.sh`;   // statuses export + external jobs
-  let extForce = false;
-  function openAddExt(prefill) {
-    const d = $("#add-ext"); const f = $("#add-ext-form");
-    f.reset(); extForce = false; f.elements.track.value = ui.track;
-    for (const [k, v] of Object.entries(prefill || {})) if (f.elements[k] && k !== "file") f.elements[k].value = v;
-    $("#add-ext-warn").textContent = ""; $("#add-ext-done").textContent = ""; $("#add-ext-save").disabled = false;
-    d.showModal(); f.elements.company.focus();
-  }
-  function extWarn() {
-    const f = $("#add-ext-form"); const box = $("#add-ext-warn"); box.textContent = ""; extForce = false;
-    const v = (k) => f.elements[k].value.trim();
-    if (!v("company") || (!v("role") && !v("url"))) return null;
-    const dup = C.externalDuplicate(JOBS, { company: v("company"), role: v("role"), url: v("url") });
-    if (!dup) return null;
-    const force = el("input", { type: "checkbox", onchange: (e) => { extForce = e.target.checked; } });
-    box.append(el("div", { class: "banner warn" }, el("span", { text: `${dup.message}. ` }),
-      el("button", { class: "btn small x", type: "button", onclick: () => { $("#add-ext").close(); openPanel(dup.id); } }, "Open the existing job"),
-      el("label", { style: "margin-left:8px;font-size:12px" }, force, " It's a different job: add it anyway")));
-    return dup;
-  }
-  for (const k of ["company", "role", "url"]) $("#add-ext-form").elements[k].addEventListener("change", extWarn);
-  $("#add-ext-cancel").addEventListener("click", () => $("#add-ext").close());
-  $("#add-ext-open").addEventListener("click", () => openAddExt());
+  // ---------- Resume Builder tab: jobs found outside HireScope → saved, imported and built in one click ----------
+  // The page saves the job as hirescope-external-job-*.json (your Downloads) and opens hirescope://external?file=…;
+  // the launcher imports that file (dedupe: an existing job keeps its ID) and queues its resume. Without the launcher
+  // the file waits for the next run (or ./scripts/external_resume.sh "<file>").
+  const EXT_KEY = "jobsearch.externalPending.v1";   // [{company, role, file, saved_at}] until the job is on the dashboard
+  const extMatch = (j, x) => j.company.toLowerCase() === String(x.company || "").toLowerCase() && C.tokenSortRatio(C.normTitle(j.title), C.normTitle(x.role || "")) >= 90;
+  const extPending = () => store.get(EXT_KEY, []).filter((x) => !JOBS.some((j) => extMatch(j, x)) && Date.now() - Date.parse(x.saved_at || 0) < 7 * 864e5);
+  const externalJobs = () => JOBS.filter((j) => (j.badges || []).includes("external"));
   const b64 = (buf) => { let s2 = ""; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) s2 += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(s2); };
-  $("#add-ext-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const f = e.target; const v = (k) => f.elements[k].value.trim(); const file = f.elements.file.files[0];
+  let extForce = false; let extLast = null;     // the last submission (shown above the list until the queue picks it up)
+  let builderForm = null;                       // built once: live updates re-render the page without losing your typing
+  function renderBuilder(box) {
+    box.append(el("p", { class: "muted page-intro", text: "For jobs you found outside HireScope. Paste the job description (or choose a file, or give just the URL): " +
+      "HireScope saves the job, imports it (a job it already has keeps its ID — no copy), and builds the tailored resume in the background. No Terminal." }));
+    box.append(builderForm || (builderForm = buildForm()));
+    if (extLast) box.append(extStatus(extLast));
+    renderExternalList(box);
+  }
+  function buildForm() {
+    const f = el("form", { class: "side-card builder-form", autocomplete: "off", "aria-label": "Add an external job and build its resume" });
+    const field = (label, input, cls) => el("label", { class: cls || "" }, label, input);
+    const inp = (name, attrs) => el("input", Object.assign({ name, type: "text" }, attrs || {}));
+    const track = el("select", { name: "track" }, el("option", { value: "coop_intern", text: "Co-op / Intern" }), el("option", { value: "full_time", text: "Full-time" }));
+    track.value = ui.track;
+    const file = el("input", { name: "file", type: "file", accept: ".txt,.md,.pdf,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    const jd = el("textarea", { name: "jd", rows: 9, maxlength: 200000, placeholder: "Paste the full job description here…" });
+    const warn = el("div", { class: "builder-warn", "aria-live": "polite" });
+    f.append(el("div", { class: "form-grid" },
+      field("Company", inp("company", { maxlength: 200, required: false })), field("Role", inp("role", { maxlength: 300 })),
+      field("Location", inp("location", { maxlength: 200, placeholder: "e.g. Boston, MA / Remote" })), field("Job URL (optional)", inp("url", { type: "url", placeholder: "https://…" })),
+      field("Track", track), field("JD file (.txt, .md, .pdf, .docx)", file),
+      field("Job description (paste it, choose a file, or leave both empty and give the URL)", jd, "full")),
+      warn,
+      el("div", { class: "row-end" }, el("span", { class: "muted", style: "font-size:12px;margin-right:auto", text: LAUNCHER.installed ? "Builds in the background; the result lands in My Applications as “Ready to apply”." : "The launcher isn't installed: the job is saved to your Downloads for the next run." }),
+        el("button", { class: "btn primary", type: "submit" }, LAUNCHER.installed ? "Save and build resume" : "Save external job")));
+    const v = (k) => String(f.elements[k].value || "").trim();
+    const check = () => {
+      warn.textContent = ""; extForce = false;
+      if (!v("company") || (!v("role") && !v("url"))) return null;
+      const dup = C.externalDuplicate(JOBS, { company: v("company"), role: v("role"), url: v("url") });
+      if (!dup) return null;
+      const force = el("input", { type: "checkbox", onchange: (e) => { extForce = e.target.checked; } });
+      warn.append(el("div", { class: "banner info", style: "margin:8px 0 0" }, el("span", { text: `${dup.message}. Submitting builds that job's resume (no copy is added). ` }),
+        el("button", { class: "btn small x", type: "button", onclick: () => openJob(dup.id) }, "Open it"),
+        el("label", { style: "margin-left:8px;font-size:12px" }, force, " It's a different job: add it anyway")));
+      return dup;
+    };
+    for (const k of ["company", "role", "url"]) f.elements[k].addEventListener("change", check);
+    f.addEventListener("submit", (e) => { e.preventDefault(); submitExternal(f, check()); });
+    return f;
+  }
+  async function submitExternal(f, dup) {
+    const v = (k) => String(f.elements[k].value || "").trim(); const file = f.elements.file.files[0];
     const url = v("url");
     if (url && !safeUrl(url)) { toast("The job URL must start with http:// or https://"); return; }
-    if (!v("jd") && !file) {
-      if (url) {   // URL only: the Add job by URL command (it reads the posting itself)
-        const cmd = `cd ${JSON.stringify(META.repo_root || ".")} && ./scripts/add_url.sh ${JSON.stringify(url)}${v("company") ? ` --company ${JSON.stringify(v("company"))}` : ""}${v("role") ? ` --title ${JSON.stringify(v("role"))}` : ""}${v("track") ? ` --track ${v("track")}` : ""}`;
-        toast((await copyText(cmd)) ? "No JD given: copied the Add job by URL command — paste it in Terminal" : cmd); return;
-      }
-      toast("Paste the job description or choose a file"); return;
-    }
-    if (!v("company") || !v("role")) { toast("Company and role are required with a JD"); return; }
+    if (!v("jd") && !file && !url) { toast("Paste the job description, choose a file, or give the job URL"); return; }
+    if ((v("jd") || file) && (!v("company") || !v("role"))) { toast("Company and role are needed with a pasted JD or a file"); return; }
     if (file && !/\.(txt|md|pdf|docx)$/i.test(file.name)) { toast("JD files can be .txt, .md, .pdf or .docx"); return; }
     if (file && file.size > 10e6) { toast("That file is over 10 MB"); return; }
-    const dup = extWarn();
-    if (dup && !extForce) { toast("Looks like a job HireScope already has — open it, or tick “add it anyway”"); return; }
-    const payload = { kind: "hirescope_external_job", format: 1, created_at: new Date().toISOString(), company: v("company"), role: v("role"),
+    const payload = { kind: "hirescope_external_job", format: 1, origin: "resume_builder", created_at: new Date().toISOString(), company: v("company"), role: v("role"),
       location: v("location"), url, track: v("track"), jd_text: v("jd"), force: !!(dup && extForce) };
     if (file) payload.file = { name: file.name, type: file.type, b64: b64(await file.arrayBuffer()) };
-    const slug = v("company").replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "job";
-    const name = `hirescope-external-job-${slug}-${payload.created_at.replace(/[-:]/g, "").slice(0, 15)}.json`;
+    const slug = (v("company") || (url ? new URL(url).hostname : "job")).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "job";
+    const name = `hirescope-external-job-${slug}-${payload.created_at.replace(/[-:]/g, "").slice(0, 15)}-${Math.random().toString(36).slice(2, 6)}.json`;
     download(name, JSON.stringify(payload, null, 1), "application/json");
-    store.set(EXT_KEY, [...store.get(EXT_KEY, []), { company: payload.company, role: payload.role, saved_at: payload.created_at }]); renderExtPending();
-    const done = $("#add-ext-done"); done.textContent = "";
-    const cmd = importCmd();
-    done.append(el("div", { class: "banner info" }, el("div", null,
-      el("div", { text: `Saved ${name} to your Downloads. The next run imports it (scored, job package, “External” badge). To import it now, run in Terminal:` }),
-      el("code", { style: "display:block;margin:6px 0;user-select:all", text: cmd }),
-      el("button", { class: "btn small", type: "button", onclick: async () => toast((await copyText(cmd)) ? "Command copied — paste it in Terminal, then reload this page" : cmd) }, "Copy command"))));
-    $("#add-ext-save").disabled = true;
-    toast(`Saved external job: ${payload.company} — ${payload.role}`);
-  });
-  renderExtPending();
+    store.set(EXT_KEY, [...store.get(EXT_KEY, []).slice(-30), { company: payload.company || (url ? new URL(url).hostname : ""), role: payload.role || "(from the URL)", file: name, saved_at: payload.created_at }]);
+    extLast = { name, company: payload.company, role: payload.role, url, at: payload.created_at, sent: false };
+    if (LAUNCHER.installed) {
+      const sent = await launch(`hirescope://external?file=${encodeURIComponent(name)}`, "Build resume");
+      extLast.sent = !!sent;
+      if (sent) { f.reset(); toast(`Saved and queued: ${payload.company || url} — importing, then building in the background`); }
+    } else toast(`Saved ${name} to your Downloads`);
+    renderList(true); renderTopTabs();
+  }
+  function extStatus(x) {
+    const cmd = `cd ${JSON.stringify(META.repo_root || ".")} && ./scripts/external_resume.sh ${JSON.stringify(x.name)}`;
+    const ack = LIVE.launcher && String(LIVE.launcher.at || "") >= String(x.at || "").slice(0, 19) && LIVE.launcher.action === "external" ? LIVE.launcher : null;
+    const lines = [el("b", { text: `${x.company || x.url} — ${x.role || "from the URL"}` }), " · saved as ", el("code", { class: "mono", text: x.name })];
+    const msg = !LAUNCHER.installed ? "Waiting for the next run (or run the command below in Terminal)." : !x.sent ? "Not sent to the launcher." :
+      ack ? (ack.ok ? ack.message : `Launcher: ${ack.message || "failed"}`) : "Sent to the launcher — importing…";
+    return el("div", { class: `banner ${ack && !ack.ok ? "err" : "info"} ext-status`, "aria-live": "polite" }, el("div", null, el("div", null, lines), el("div", { text: msg }),
+      el("div", { style: "margin-top:6px" }, el("button", { class: "btn small", type: "button", onclick: async () => toast((await copyText(cmd)) ? "Command copied — paste it in Terminal" : cmd) }, "Copy Terminal fallback"))));
+  }
+  function renderExternalList(box) {
+    const jobs = externalJobs().sort((a, b) => String(b.first_seen || "").localeCompare(String(a.first_seen || "")));
+    const pend = extPending();
+    box.append(el("h3", { class: "section-head", text: `Your external jobs (${jobs.length + pend.length})` }));
+    if (!jobs.length && !pend.length) { box.append(el("div", { class: "empty", text: "No external jobs yet. Add one above: its resume builds on its own and shows up here." })); return; }
+    const body = el("tbody");
+    for (const x of pend) {
+      const it = (LIVE.queue || []).find((q) => q.company && extMatch({ company: q.company, title: q.title || "" }, x));
+      body.append(el("tr", null, el("td", { class: "role" }, el("b", { text: x.role }), el("div", { class: "muted", text: x.company })),
+        el("td", { class: "muted", text: "—" }), el("td", { class: "nowrap", text: fmtDate(String(x.saved_at).slice(0, 10)) }),
+        el("td", null, it ? resumeBadge(it.status === "done" ? (it.result === "ready_questions" ? "ready_q" : "ready") : it.status === "generating" ? "generating" : it.status === "failed" ? "failed" : "queued", it.message || "")
+          : el("span", { class: "muted", text: LAUNCHER.installed ? "Importing…" : "Waiting for the next run" })),
+        el("td", { class: "muted", text: "on the dashboard after the import" }), el("td")));
+    }
+    for (const j of jobs) {
+      const rs = resumeStatus(j); const r = resumeOf(j); const app = appForJob(j); const v = r && r.current;
+      const busy = rs === "queued" || rs === "generating";
+      body.append(el("tr", { "data-ext-row": j.id },
+        el("td", { class: "role" }, el("button", { class: "link-btn row-title", type: "button", onclick: () => openJob(j.id) }, j.title), el("div", { class: "muted", text: j.company })),
+        el("td", null, el("span", { class: `chip ${trackOf(j)}`, text: TRACKS[trackOf(j)] })),
+        el("td", { class: "nowrap", text: j.first_seen ? fmtDate(j.first_seen.slice(0, 10)) : "" }),
+        el("td", null, rs ? resumeBadge(rs, resumeTitle(j)) : el("span", { class: "muted", text: "No resume yet" }),
+          v && !busy ? el("div", { class: "small-links" }, el("a", { href: v.pdf, target: "_blank", rel: "noopener" }, `Preview v${v.version}`), " · ",
+            el("a", { href: v.pdf, download: v.pdf_name || "resume.pdf" }, "Download")) : null),
+        el("td", null, app ? el("span", { class: `chip ${app.stage === "ready" ? "warn" : "info"}`, text: STAGE_LABEL[app.stage] }) : el("span", { class: "muted", text: "—" })),
+        el("td", { class: "row-actions" },
+          busy ? el("button", { class: "btn small ghost", type: "button", onclick: () => cancelBuild(j) }, "Cancel")
+            : el("button", { class: "btn small", type: "button", onclick: () => queueResume(j, HAS_RESUME.includes(rs)) }, HAS_RESUME.includes(rs) ? "Regenerate" : "Generate Resume"),
+          app && app.stage !== "ready" ? el("button", { class: "btn small ghost", type: "button", onclick: () => openDrawer(app.id) }, "Applied ✓")
+            : el("button", { class: "btn small" + (app ? " primary" : ""), type: "button", onclick: () => markApplied(j), "aria-label": `Mark ${j.title} at ${j.company} applied` }, "Mark Applied"))));
+    }
+    box.append(el("div", { class: "table-wrap" }, el("table", { class: "grid ext-table", "aria-label": "External jobs" },
+      el("thead", null, el("tr", null, ["Role", "Track", "Added", "Resume", "Application", "Actions"].map((h) => el("th", { scope: "col", text: h })))), body)));
+  }
+  $("#add-ext-open").addEventListener("click", () => switchPage("builder"));
 
   // ---------- saved views (per track: filters + sort + search + salary + view) ----------
   function loadSavedView(sv) {
@@ -2159,7 +2234,7 @@
       { kind: "Action", label: "Open the Bucket", sub: `${bucketItems().length} jobs`, run: () => switchPage("bucket") },
       { kind: "Action", label: "Generate resumes for all Bucket jobs", run: () => generateAll(false) },
       { kind: "Action", label: "Add application", run: () => openAddApp() },
-      { kind: "Action", label: "Add external job", run: () => openAddExt() },
+      { kind: "Action", label: "Resume Builder: add an external job", run: () => switchPage("builder") },
       { kind: "Action", label: "Switch to Co-op / Internships", run: () => switchTrack("coop_intern") },
       { kind: "Action", label: "Switch to Full-time", run: () => switchTrack("full_time") },
       { kind: "Action", label: "Toggle light / dark theme", run: () => $("#theme").click() },
@@ -2335,6 +2410,7 @@
       case "1": switchTrack("coop_intern"); break;
       case "2": switchTrack("full_time"); break;
       case "3": switchPage("bucket"); break;
+      case "4": switchPage("builder"); break;
       default: return;
     }
   });

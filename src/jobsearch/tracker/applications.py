@@ -13,14 +13,21 @@ from datetime import date, timedelta
 
 from rapidfuzz import fuzz
 
-STAGES = ("applied", "oa", "interviewing", "offer", "rejected", "ghosted", "withdrawn")
-STAGE_LABELS = {"applied": "Applied", "oa": "Online Assessment", "interviewing": "Interviewing", "offer": "Offer",
-                "rejected": "Rejected", "ghosted": "Ghosted", "withdrawn": "Withdrawn"}
+# "ready" (Ready to apply) comes first: an external job whose tailored resume is READY, not applied yet. It never
+# counts as an application in stats, Applied Companies or follow-ups.
+STAGES = ("ready", "applied", "oa", "interviewing", "offer", "rejected", "ghosted", "withdrawn")
+STAGE_LABELS = {"ready": "Ready to apply", "applied": "Applied", "oa": "Online Assessment", "interviewing": "Interviewing",
+                "offer": "Offer", "rejected": "Rejected", "ghosted": "Ghosted", "withdrawn": "Withdrawn"}
 ACTIVE = ("applied", "oa", "interviewing", "offer")
 RESPONSES = ("oa", "interviewing", "offer", "rejected")   # the company answered
 NEAR_DUPLICATE = 85   # default only; callers pass preferences applications.near_duplicate_ratio
 CSV_COLUMNS = ("company", "title", "track", "stage", "applied_date", "days_since_applied", "next_step",
                "next_step_date", "follow_up", "contact", "referral", "source", "link", "package", "notes")
+
+
+def is_applied(a: dict) -> bool:
+    """A real application (not deleted, past "Ready to apply")."""
+    return not a.get("deleted") and a.get("stage") != "ready"
 
 
 def _d(s: str | None) -> date | None:
@@ -75,7 +82,8 @@ def duplicate_warnings(company: str, title: str, job_key: str | None, apps: list
             continue
         if job_key and a.get("job_key") == job_key:
             out.append({"kind": "same_job", "app_id": a["id"],
-                        "message": f"You already applied to this posting on {a.get('applied_date') or '?'}"})
+                        "message": "This posting is already in My Applications (Ready to apply)" if a.get("stage") == "ready"
+                        else f"You already applied to this posting on {a.get('applied_date') or '?'}"})
             continue
         if " ".join((a.get("company") or "").casefold().split()) != ck:
             continue
@@ -114,7 +122,7 @@ def furthest(app: dict) -> str:
 
 
 def track_stats(apps: list[dict], today: date, weeks: int = 12) -> dict:
-    live = [a for a in apps if not a.get("deleted")]
+    live = [a for a in apps if is_applied(a)]
     start = today - timedelta(days=today.weekday()) - timedelta(weeks=weeks - 1)   # Monday, `weeks` ago
     per_week = [0] * weeks
     for a in live:
@@ -148,7 +156,7 @@ def outcome_breakdown(apps: list[dict], dim) -> list[dict]:
     """Response rates grouped by `dim(app)` (source, company tier, role type, score label)."""
     groups: dict[str, list] = {}
     for a in apps:
-        if not a.get("deleted"):
+        if is_applied(a):
             groups.setdefault(str(dim(a) or "Unknown"), []).append(furthest(a))
     rows = []
     for k, outs in sorted(groups.items(), key=lambda kv: -len(kv[1])):
@@ -185,7 +193,7 @@ def applied_companies(apps: list[dict]) -> list[dict]:
     latest application's stage ("latest status"), dates, sources, tracks and every application's link."""
     groups: dict[str, list[dict]] = {}
     for a in apps:
-        if not a.get("deleted"):
+        if is_applied(a):
             groups.setdefault(_ck(a.get("company")), []).append(a)
     rows = []
     for items in groups.values():

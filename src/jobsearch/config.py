@@ -156,6 +156,9 @@ class Applications(BaseModel):
     ghosted_after_days: int = 30                 # suggest "Ghosted" (you confirm; never automatic)
     same_company_window_days: int = 30           # duplicate guard: other applications at the company this recent
     near_duplicate_ratio: int = 85               # duplicate guard: title similarity (0-100) that counts as the same role
+    # an external job (Resume Builder tab / Add external job) whose resume becomes READY lands in My Applications at
+    # "Ready to apply"; true marks it Applied right away instead (dated that day, with that resume version)
+    auto_mark_applied_external: bool = False
 
 
 class Scoring(BaseModel):

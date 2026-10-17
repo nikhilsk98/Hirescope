@@ -5,9 +5,11 @@
   else root.HSCore = factory();
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
-  const STAGES = ["applied", "oa", "interviewing", "offer", "rejected", "ghosted", "withdrawn"];
-  const STAGE_LABELS = { applied: "Applied", oa: "Online Assessment", interviewing: "Interviewing", offer: "Offer",
+  // "ready" (Ready to apply): an external job whose resume is READY, not applied yet; never counted as an application
+  const STAGES = ["ready", "applied", "oa", "interviewing", "offer", "rejected", "ghosted", "withdrawn"];
+  const STAGE_LABELS = { ready: "Ready to apply", applied: "Applied", oa: "Online Assessment", interviewing: "Interviewing", offer: "Offer",
     rejected: "Rejected", ghosted: "Ghosted", withdrawn: "Withdrawn" };
+  const applied = (a) => !a.deleted && a.stage !== "ready";
   const ACTIVE = ["applied", "oa", "interviewing", "offer"];
   const RESPONSES = ["oa", "interviewing", "offer", "rejected"];
   const NEAR_DUPLICATE = 85;   // default only; the page passes preferences applications.near_duplicate_ratio
@@ -56,7 +58,7 @@
     const out = []; const recent = []; const ck = ckey(company); const w = windowDays ?? 30; const near = nearRatio ?? NEAR_DUPLICATE;
     for (const a of apps) {
       if (a.deleted || a.id === excludeId) continue;
-      if (jobKey && a.job_key === jobKey) { out.push({ kind: "same_job", app_id: a.id, message: `You already applied to this posting on ${a.applied_date || "?"}` }); continue; }
+      if (jobKey && a.job_key === jobKey) { out.push({ kind: "same_job", app_id: a.id, message: a.stage === "ready" ? "This posting is already in My Applications (Ready to apply)" : `You already applied to this posting on ${a.applied_date || "?"}` }); continue; }
       if (ckey(a.company) !== ck) continue;
       if (tokenSortRatio(normTitle(a.title), normTitle(title)) >= near) {
         out.push({ kind: "near_duplicate", app_id: a.id, message: `Similar role at ${a.company}: “${a.title}” (applied ${a.applied_date || "?"})` }); continue;
@@ -87,7 +89,7 @@
 
   function trackStats(apps, today, weeks) {
     const W = weeks || 12;
-    const live = apps.filter((a) => !a.deleted);
+    const live = apps.filter(applied);
     const t = day(today); const dow = (new Date(t * 864e5).getUTCDay() + 6) % 7;   // Monday = 0
     const start = t - dow - 7 * (W - 1);
     const perWeek = new Array(W).fill(0);
@@ -104,7 +106,7 @@
   }
   function outcomeBreakdown(apps, dim) {
     const groups = new Map();
-    for (const a of apps) if (!a.deleted) { const k = String(dim(a) ?? "Unknown") || "Unknown"; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(furthest(a)); }
+    for (const a of apps) if (applied(a)) { const k = String(dim(a) ?? "Unknown") || "Unknown"; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(furthest(a)); }
     return [...groups.entries()].sort((x, y) => y[1].length - x[1].length).map(([k, outs]) => {
       const n = outs.length, resp = outs.filter((o) => o !== "no response").length;
       return { group: k, n, responses: resp, response_rate: r1((100 * resp) / n), interviews: outs.filter((o) => o === "interview" || o === "offer").length, offers: outs.filter((o) => o === "offer").length };
@@ -168,7 +170,7 @@
   const ck = (s) => String(s || "").toLowerCase().split(/\s+/).filter(Boolean).join(" ");
   function appliedCompanies(apps) {
     const groups = new Map();
-    for (const a of apps) if (!a.deleted) { const k = ck(a.company); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(a); }
+    for (const a of apps) if (applied(a)) { const k = ck(a.company); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(a); }
     const rows = [];
     for (const items0 of groups.values()) {
       const key = (a) => `${a.applied_date || ""}\u0000${a.updated_at || ""}`;
@@ -204,6 +206,6 @@
     return best ? { id: best.j.id, company: best.j.company, title: best.j.title, kind: "same_role", message: `Same company and role already on the dashboard: ${best.j.company} — ${best.j.title}` } : null;
   }
 
-  return { STAGES, STAGE_LABELS, ACTIVE, CSV_COLUMNS, appliedCompanies, normUrl, externalDuplicate, followUp, lastActivity, ghostSuggestion, duplicateWarnings, tokenSortRatio, normTitle,
+  return { STAGES, STAGE_LABELS, ACTIVE, applied, CSV_COLUMNS, appliedCompanies, normUrl, externalDuplicate, followUp, lastActivity, ghostSuggestion, duplicateWarnings, tokenSortRatio, normTitle,
     firstResponse, furthest, trackStats, outcomeBreakdown, toCsv, newApp, moveStage, logFollowUp, edit, mergeApp, day, iso };
 });

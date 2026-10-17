@@ -356,6 +356,32 @@ def after_build(conn, pk: int) -> None:
             log.warning("after build: %s failed", what, extra={"job": pk, "error": str(e)[:200]})
 
 
+def publish_dashboard() -> str:
+    """Jobs added from the Resume Builder tab: score every stored job and rewrite the dashboard data (data.js, details,
+    sync.js), as import_pending.sh does. Their builds wait for this: the job package's ATS keywords come from scoring.
+    Skipped (left pending) while a HireScope run holds the run lock; that run publishes anyway."""
+    from jobsearch.add_url import rescore_and_publish
+    from jobsearch.config import load_config
+    from jobsearch.extract.resume import parse_resume
+    from jobsearch.ops.lock import Locked, RunLock
+    from jobsearch.run import setup_logging
+    lock = RunLock(hs_paths.STATE_DIR / "run.lock", stale_hours=3, what="dashboard publish (resume queue)")
+    try:
+        lock.acquire()
+    except Locked:
+        return "skipped"
+    conn = connect()
+    try:
+        cfg = load_config(hs_paths.PREFERENCES)
+        rescore_and_publish(conn, cfg, parse_resume(hs_paths.RESUME, cfg.synonyms), setup_logging(False))
+        db.set_meta(conn, "publish_pending", "")
+        conn.commit()
+        return "published"
+    finally:
+        conn.close()
+        lock.release()
+
+
 def notify(title: str, message: str) -> None:
     try:
         from jobsearch.ops.notify import notify as _n
@@ -471,6 +497,15 @@ class Worker:
         self.paused = run_lock_held()
         if self.paused:
             return
+        if db.get_meta(conn, "publish_pending"):      # new external jobs: scored + on the dashboard before their builds
+            self._write_live(conn, "publishing")
+            try:
+                if publish_dashboard() == "skipped":
+                    return
+            except Exception as e:  # noqa: BLE001 — builds still run (with fewer keywords); logged
+                log.warning("dashboard publish failed", extra={"error": str(e)[:200]})
+                db.set_meta(conn, "publish_pending", "")
+                conn.commit()
         busy = {r["item"]["job_pk"] for r in self.running.values()}
         free = self.s["concurrency"] - len(self.running)
         if free <= 0:
@@ -500,7 +535,8 @@ class Worker:
                 log.info("queue recovered after a restart", extra={"items": n})
             while True:
                 retry_locked(self.tick, conn)
-                queued = conn.execute("SELECT COUNT(*) FROM resume_queue WHERE status='queued'").fetchone()[0]
+                queued = conn.execute("SELECT COUNT(*) FROM resume_queue WHERE status='queued'").fetchone()[0] + \
+                    bool(db.get_meta(conn, "publish_pending"))
                 state = "paused" if self.paused and queued else "running" if self.running or queued else "idle"
                 retry_locked(self._write_live, conn, state)
                 if not self.running and not queued:

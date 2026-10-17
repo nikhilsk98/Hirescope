@@ -4,6 +4,8 @@
     hirescope://queue?job=<id>[,<id>…][&regenerate=1]   queue resume builds (the background worker runs them)
     hirescope://queue?list=bucket[&regenerate=1]        every Bucket job without a current READY resume (all of them
                                                         with regenerate)
+    hirescope://external?file=<saved file>              Resume Builder tab: import that external job (dedupe: an
+                                                        existing job keeps its ID) and queue its resume
     hirescope://cancel?job=<id>                         cancel a queued or running build
     hirescope://bucket?job=<id>[,<id>…]&op=add|remove   the Bucket (your apply-list)
     hirescope://status?job=<id>&stage=<stage>[&app=<application id>&date=YYYY-MM-DD&v=<resume version>]
@@ -78,6 +80,15 @@ def _date(v: str) -> str:
     return v
 
 
+def _file(v: str) -> str:
+    from .external_resume import FileRefused, allowed_path
+    try:
+        allowed_path(v)
+    except FileRefused as e:
+        raise LinkError(str(e)) from None
+    return v
+
+
 def _version(v: str) -> int:
     if not re.match(r"^\d{1,4}$", v):
         raise LinkError("v must be a resume version number")
@@ -90,6 +101,7 @@ ACTIONS: dict[str, dict] = {
     "cancel": {"job": lambda v: _one_or_many(v, False)},
     "interactive": {"job": lambda v: _one_or_many(v, False)},
     "bucket": {"job": lambda v: _one_or_many(v, True), "op": _choice("add", "remove")},
+    "external": {"file": _file},
     "status": {"job": lambda v: _one_or_many(v, False), "app": _app, "stage": _choice(*STAGES), "date": _date,
                "v": _version},
 }
@@ -130,7 +142,8 @@ def parse(url: str) -> tuple[str, dict]:
 
 
 def validate(action: str, p: dict) -> dict:
-    need = {"cancel": ["job"], "interactive": ["job"], "bucket": ["job", "op"], "status": ["stage"]}.get(action, [])
+    need = {"cancel": ["job"], "interactive": ["job"], "bucket": ["job", "op"], "status": ["stage"],
+            "external": ["file"]}.get(action, [])
     for k in need:
         if k not in p:
             raise LinkError(f"{action} needs {k}")
@@ -241,7 +254,19 @@ def do_status(conn, p: dict) -> str:
     return f"application {app_id}: {stage}" + ("" if changed else " (unchanged)")
 
 
-HANDLERS = {"queue": do_queue, "cancel": do_cancel, "interactive": do_interactive, "bucket": do_bucket,
+def do_external(conn, p: dict) -> str:
+    from .config import load_config
+    from .external import ExternalError
+    from .external_resume import FileRefused, import_and_queue
+    try:
+        out = import_and_queue(conn, load_config(paths.PREFERENCES), p["file"])
+    except (FileRefused, ExternalError, ValueError) as e:
+        raise LinkError(str(e)) from None
+    _after(conn, "external job")
+    return f"{out['note']}; {out['message']}" if out["note"] else out["message"]
+
+
+HANDLERS = {"external": do_external, "queue": do_queue, "cancel": do_cancel, "interactive": do_interactive, "bucket": do_bucket,
             "status": do_status}
 
 

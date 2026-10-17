@@ -315,7 +315,7 @@ table.grid tr.in-bucket td:first-child { box-shadow: inset 3px 0 0 var(--accent)
 
 /* ---------- My Applications ---------- */
 .helpers { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--sp-3); margin-bottom: var(--sp-3); }
-.board { display: grid; grid-template-columns: repeat(4, minmax(170px, 1fr)) repeat(3, minmax(136px, .7fr)); gap: var(--sp-3); overflow-x: auto; padding-bottom: var(--sp-2); align-items: start; }
+.board { display: grid; grid-template-columns: repeat(5, minmax(160px, 1fr)) repeat(3, minmax(130px, .7fr)); gap: var(--sp-3); overflow-x: auto; padding-bottom: var(--sp-2); align-items: start; }
 .col { min-height: 160px; padding: var(--sp-2); border-radius: var(--r-lg); background: var(--surface-2); border: 1px solid var(--border); display: flex; flex-direction: column; gap: var(--sp-2);
   transition: border-color var(--dur), background var(--dur); }
 .col.closed { background: color-mix(in srgb, var(--surface-2) 60%, var(--bg)); }
@@ -479,3 +479,14 @@ table.manual-table tr.due-row td:first-child { box-shadow: inset 3px 0 0 var(--s
 .p-title-row { display: flex; align-items: flex-start; gap: 0; }
 .p-title-row .bucket-cb { margin-top: 6px; }
 @media (max-width: 760px) { .tab-sep { display: none; } .row-actions .btn { padding: 0 8px; } }
+
+/* ---------- Resume Builder page ---------- */
+.page-intro { margin: 0 0 var(--sp-3); max-width: 860px; }
+.builder-form { padding: var(--sp-4); margin-bottom: var(--sp-4); }
+.builder-form .form-grid { margin-bottom: var(--sp-2); }
+.builder-form textarea { min-height: 150px; }
+.ext-status { margin: 0 0 var(--sp-4); }
+.section-head { font-size: var(--fs-md); margin: var(--sp-4) 0 var(--sp-2); }
+.small-links { font-size: var(--fs-xs); margin-top: 2px; }
+.ext-table td { vertical-align: middle; }
+.ext-table .row-title { font-weight: 600; text-align: left; padding: 0; color: var(--text); }

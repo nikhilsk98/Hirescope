@@ -129,6 +129,12 @@ def publish(conn, cfg, resume, summary: dict, coverage: list[dict], watch, log_f
         refresh_all(paths.DB)
     except Exception as e:  # noqa: BLE001 — the job run must not fail because of resume data
         log.warning("resume statuses not refreshed", extra={"error": str(e)[:200]})
+    try:   # external jobs whose resume is READY → My Applications "Ready to apply"
+        from .tracker import ready_apps
+        if line := ready_apps.ensure(conn):
+            log.info(line)
+    except Exception as e:  # noqa: BLE001
+        log.warning("ready-to-apply applications not updated", extra={"error": str(e)[:200]})
     statuses.write_sync_js(paths.SYNC_JS, statuses.sync_payload(conn))   # after refresh_all: includes resume links
     try:   # live.js / launcher.js: the open dashboard's queue, worker and launcher state (zero-CLI resumes)
         from . import live
