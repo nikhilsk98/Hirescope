@@ -135,6 +135,8 @@ class Backups(BaseModel):
 class Schedule(BaseModel):
     full_times: list[str] = ["08:00", "18:00"]   # launchd full runs (local time)
     quick_hours: float = 2.5                     # quick checks (My Companies + tier 1) between full runs; 0 = off
+    source_timeout_minutes: float = 10           # one source may take this long (awake time); then failed, run moves on
+    quick_time_limit_minutes: float = 15         # a quick check stops waiting for sources after this long; 0 = no limit
 
 
 class ManualChecks(BaseModel):

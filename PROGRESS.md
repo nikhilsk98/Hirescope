@@ -853,3 +853,16 @@ reuse, web-sockets → Socket.IO).
   lost result; the result pattern now matches "cutting" as well as "cut".
 
 **Tests**: 645 passed.
+
+## Quick-check time limits (2026-10-17)
+- Why the 01:52 quick check ran 30+ min: commit ac2a344 changed `skills_synonyms.yaml` / `ats_keywords.yaml`, so the
+  extraction fingerprint changed and the quick check re-extracted all ~123k stored jobs inline (regex-bound, ~7 min
+  interactively, 20+ min under the LaunchAgent's `ProcessType=Background` / `Nice=10`), plus 10 min of Mac sleep. No
+  source hung (no sockets open; the stack was in `re`). Run 95's 81-min quick check was lid-closed sleep.
+- Quick checks no longer re-extract stored jobs; the next full run does (logged).
+- `schedule.source_timeout_minutes` (10): a source still fetching after this long (awake time) is recorded as failed
+  and the run moves on. `schedule.quick_time_limit_minutes` (15, 0 = off): a quick check stops waiting for sources,
+  records running ones as failed and queued ones as skipped, then scores and publishes. Abandoned fetch threads are
+  not joined at exit.
+
+**Tests**: 3 new (source timeout, quick deadline, extraction_stale).

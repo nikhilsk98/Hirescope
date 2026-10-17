@@ -185,6 +185,8 @@ health:
 schedule:
   full_times: ["08:00", "18:00"]   # launchd full runs, local time
   quick_hours: 2.5                 # quick checks (My Companies + tier 1) every N hours; 0 = off
+  source_timeout_minutes: 10       # a source still fetching after this long (awake time) is recorded as failed
+  quick_time_limit_minutes: 15     # quick checks stop waiting for sources after this long and score what they have; 0 = no limit
 backups:
   dir: null                        # default data.nosync/backups; e.g. "~/Library/Mobile Documents/com~apple~CloudDocs/HireScope"
   keep: 14                         # daily backups kept

@@ -4,12 +4,14 @@ from __future__ import annotations
 import argparse
 import faulthandler
 import json
+import os
 import signal
 import logging
 import logging.handlers
 import sqlite3
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 import yaml
@@ -22,7 +24,8 @@ from .match.semantic import Embedder
 from .output.dashboard import coverage_rows, eng_blogs, select_visible, write_data_js
 from .output.h1b import load_h1b, match_companies
 from .output.links import check_links
-from .pipeline import compute_similar, ensure_extraction_current, run
+from . import pipeline
+from .pipeline import compute_similar, ensure_extraction_current, extraction_stale, run
 from .watchlist import WatchlistError, load_watchlist, resolve
 from .storage import db
 from .tracker import feedback, referrals, statuses
@@ -219,6 +222,10 @@ def _main(args, log_file: Path) -> int:
     except WatchlistError as e:
         log.error("%s", e)
         return 2
+    sched = cfg.prefs.schedule
+    deadline = None   # quick checks: stop waiting for sources after the limit (monotonic: awake time on macOS)
+    if args.quick and sched.quick_time_limit_minutes:
+        deadline = time.monotonic() + sched.quick_time_limit_minutes * 60
     log.info("resume %s (version %s): %d skills; %d seed companies, %d My Companies",
              args.resume, resume.version_hash, len(resume.skills), len(cfg.companies), len(watch))
 
@@ -274,7 +281,11 @@ def _main(args, log_file: Path) -> int:
         log.info("feedback learning: %s", learned.describe()["status"])
     db.record_resume_version(conn, resume.version_hash, str(args.resume))
     last_fetch = None
-    ensure_extraction_current(conn, cfg)   # re-extracts only when extraction code or config changed
+    if args.quick and extraction_stale(conn):
+        # re-extracting every stored job takes ~7 min interactively and 20+ under launchd's background priority
+        log.info("extraction code/config changed: re-extracting stored jobs waits for the next full run")
+    else:
+        ensure_extraction_current(conn, cfg)   # re-extracts only when extraction code or config changed
     client = HttpClient(host_intervals={"myworkdayjobs.com": 0.5, "githubusercontent.com": 0.2,
                                          "boards-api.greenhouse.io": 0.25, "api.lever.co": 0.5,
                                          "api.ashbyhq.com": 0.5, "api.smartrecruiters.com": 0.35,
@@ -286,7 +297,8 @@ def _main(args, log_file: Path) -> int:
     try:
         summary = run(conn, cfg, resume, [] if args.rescore else None, client, Embedder(conn), jd_dir, watch=watch,
                       only_company=args.company, only_source=args.source, force_all=args.all,
-                      workers=args.workers, watchlist_only=args.watchlist, learned=learned, quick=args.quick)
+                      workers=args.workers, watchlist_only=args.watchlist, learned=learned, quick=args.quick,
+                      source_timeout=sched.source_timeout_minutes * 60 or None, deadline=deadline)
         conn.commit()
         links = None
         if not args.no_link_check and not args.dry_run and not args.rescore and not args.quick:
@@ -371,4 +383,10 @@ def _main(args, log_file: Path) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    rc = main()
+    if pipeline.ABANDONED:   # a timed-out fetch thread is still running: exit without joining it
+        logging.shutdown()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(rc)
+    sys.exit(rc)

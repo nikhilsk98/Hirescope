@@ -10,7 +10,8 @@ import json
 import re
 import logging
 import sqlite3
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -46,6 +47,8 @@ WORKERS = 16
 # Each source family gets its own worker pool so a slow shared host (e.g. api.smartrecruiters.com, where
 # every request waits for the per-host rate limiter) can never hold every worker (head-of-line blocking).
 # Workday tenants each have their own host, so that family gets the most workers.
+POLL_SECONDS = 5.0      # how often the fetch loop checks source timeouts and the quick-check deadline
+ABANDONED = 0           # fetch threads left running after a timeout (run.py exits without waiting for them)
 POOL_SIZES = {"greenhouse": 3, "lever": 2, "ashby": 2, "smartrecruiters": 2, "workday": 6, "amazon": 1,
               "netflix": 1, "simplify": 2, "jsonld": 3, "jsonld_sitemap": 1}
 
@@ -202,10 +205,15 @@ def reextract_all(conn, cfg: Config) -> int:
     return n
 
 
+def extraction_stale(conn) -> bool:
+    """True when the extraction code or config changed since stored jobs were last extracted."""
+    return db.get_meta(conn, "extraction") != extraction_fingerprint()
+
+
 def ensure_extraction_current(conn, cfg: Config, force: bool = False) -> int:
-    fp = extraction_fingerprint()
-    if not force and db.get_meta(conn, "extraction") == fp:
+    if not force and not extraction_stale(conn):
         return 0
+    fp = extraction_fingerprint()
     n = reextract_all(conn, cfg)
     if db.get_meta(conn, "extract_version") != EXTRACT_VERSION:
         from .adapters.canonical import canonical_key
@@ -349,8 +357,12 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
         client: HttpClient, embedder: Embedder, jd_dir: Path | None = paths.JD_DIR, *,
         watch: list[WatchItem] | None = None, only_company: str | None = None, only_source: str | None = None,
         force_all: bool = False, workers: int = WORKERS, watchlist_only: bool = False,
-        learned=None, quick: bool = False) -> RunSummary:
-    """companies=None -> use cfg.companies with tier scheduling; a list -> check exactly those."""
+        learned=None, quick: bool = False, source_timeout: float | None = None,
+        deadline: float | None = None) -> RunSummary:
+    """companies=None -> use cfg.companies with tier scheduling; a list -> check exactly those.
+    source_timeout: seconds one source may take (awake time) before it is recorded as failed and the run moves on;
+    deadline: time.monotonic() value after which the run stops waiting for sources (quick checks) and scores what
+    it has. A source still running is abandoned (its thread finishes on its own; ABANDONED counts them)."""
     summary = RunSummary()
     watch = watch or []
     if companies is not None:
@@ -435,21 +447,66 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
 
     scale = max(1, workers) / WORKERS
     pools: dict[str, ThreadPoolExecutor] = {}
+    begun: dict[int, float] = {}       # item index -> time.monotonic() when its fetch started (awake time on macOS)
+
+    def timed(i: int, item):
+        begun[i] = time.monotonic()
+        return work(item)
+
+    def give_up(item, why: str) -> None:
+        p, company, via = item
+        cls = ADAPTERS.get(company.source)
+        label = cls(client).source_label(company) if cls else company.source
+        multi = bool(cls and cls.capabilities.multi_company)
+        summary.outcomes.append(_store(conn, cfg, Fetched(p, company, via, None, why, label, True, multi), jd_dir))
+        conn.commit()
+
+    global ABANDONED
+    abandoned = 0
     try:
-        futures = []
-        for item in jobs_to_run:
+        pending = {}
+        for i, item in enumerate(jobs_to_run):
             fam = item[1].source
             if fam not in pools:
                 pools[fam] = ThreadPoolExecutor(max_workers=max(1, round(POOL_SIZES.get(fam, 2) * scale)),
                                                 thread_name_prefix=fam)
-            futures.append(pools[fam].submit(work, item))
-        for fut in as_completed(futures):
-            f = fut.result()
-            summary.outcomes.append(_store(conn, cfg, f, jd_dir))
-            conn.commit()
+            pending[pools[fam].submit(timed, i, item)] = (i, item)
+        while pending:
+            done, _ = wait(pending, timeout=POLL_SECONDS, return_when=FIRST_COMPLETED)
+            for fut in done:
+                pending.pop(fut)
+                summary.outcomes.append(_store(conn, cfg, fut.result(), jd_dir))
+                conn.commit()
+            now = time.monotonic()
+            if source_timeout:
+                for fut, (i, item) in list(pending.items()):
+                    if i in begun and now - begun[i] > source_timeout and not fut.done():
+                        pending.pop(fut)
+                        abandoned += 1
+                        log.warning("source timed out: %s after %.0f min; moving on", item[1].name, source_timeout / 60)
+                        give_up(item, f"timed out after {source_timeout / 60:g} min (schedule.source_timeout_minutes)")
+            if deadline is not None and now >= deadline and pending:
+                waiting = [it for f, (i, it) in pending.items() if f.cancel()]
+                for fut in [f for f in pending if f.done() and not f.cancelled()]:
+                    pending.pop(fut)
+                    summary.outcomes.append(_store(conn, cfg, fut.result(), jd_dir))
+                    conn.commit()
+                started = [it for f, (i, it) in pending.items() if not f.cancelled()]
+                log.warning("quick-check time limit reached: %d source(s) still running were abandoned, %d not "
+                            "started wait for the next run", len(started), len(waiting))
+                for item in started:
+                    abandoned += 1
+                    give_up(item, "quick-check time limit reached while this source was running "
+                                  "(schedule.quick_time_limit_minutes)")
+                for p, company, _ in waiting:
+                    summary.skipped.append(SourceOutcome(company.name, company.source, False, status="skipped",
+                                                         origin=company.origin, tier=company.tier,
+                                                         notes=["not checked: quick-check time limit reached"]))
+                break
     finally:
-        for pool in pools.values():
-            pool.shutdown(wait=True)
+        ABANDONED += abandoned
+        for pool in pools.values():   # never wait for an abandoned (timed-out) fetch
+            pool.shutdown(wait=not abandoned, cancel_futures=True)
 
     score_all(conn, cfg, resume, embedder, summary, learned)
     return summary

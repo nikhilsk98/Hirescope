@@ -203,3 +203,70 @@ def test_304_keeps_counting_missing_jobs_and_never_reopens_closed(conn, cfg, res
     open_now, every = go()                             # 304 again: closed stays closed, the rest stay open
     assert every["1003"] == "closed" and set(open_now) == {"1001", "1002"}
     assert conn.execute("SELECT repost_count FROM jobs WHERE job_id='1003'").fetchone()[0] == 0
+
+
+def _blocking(greenhouse_payload, release):
+    """Greenhouse handler: board "democo" answers at once; any "slow*" board blocks until `release` is set."""
+    def handler(request):
+        board = request.url.path.split("/")[3]
+        if board.startswith("slow"):
+            release.wait(10)
+        return httpx.Response(200, json=greenhouse_payload)
+    return handler
+
+
+def test_source_timeout_records_failure_and_moves_on(conn, cfg, resume, embedder, greenhouse_payload, tmp_path,
+                                                     monkeypatch):
+    import threading
+    import time
+    from jobsearch import pipeline
+    monkeypatch.setattr(pipeline, "POLL_SECONDS", 0.05)
+    monkeypatch.setattr(pipeline, "ABANDONED", 0)
+    release = threading.Event()
+    co = [Company(name="DemoCo", source="greenhouse", board="democo"),
+          Company(name="SlowCo", source="greenhouse", board="slowco")]
+    t = time.monotonic()
+    try:
+        s = run(conn, cfg, resume, co, mock_client(_blocking(greenhouse_payload, release)), embedder, tmp_path,
+                source_timeout=0.3).as_dict()
+    finally:
+        release.set()
+    assert time.monotonic() - t < 5                       # never waited for the blocked source
+    assert s["sources_ok"] == 1 and s["new"] == 3
+    assert [(f["company"], "timed out after" in f["error"]) for f in s["failures"]] == [("SlowCo", True)]
+    assert pipeline.ABANDONED == 1
+    st = {r["company"]: r["status"] for r in conn.execute("SELECT company, status FROM source_status")}
+    assert st == {"DemoCo": "ok", "SlowCo": "failed"}
+
+
+def test_quick_deadline_abandons_running_and_skips_waiting_sources(conn, cfg, resume, embedder, greenhouse_payload,
+                                                                   tmp_path, monkeypatch):
+    import threading
+    import time
+    from jobsearch import pipeline
+    monkeypatch.setattr(pipeline, "POLL_SECONDS", 0.05)
+    monkeypatch.setattr(pipeline, "ABANDONED", 0)
+    release = threading.Event()
+    co = [Company(name="DemoCo", source="greenhouse", board="democo"),
+          Company(name="SlowA", source="greenhouse", board="slowa"),
+          Company(name="SlowB", source="greenhouse", board="slowb")]
+    try:   # workers=1: one greenhouse worker, so SlowB is still queued when the time limit hits
+        s = run(conn, cfg, resume, co, mock_client(_blocking(greenhouse_payload, release)), embedder, tmp_path,
+                workers=1, deadline=time.monotonic() + 0.4)
+    finally:
+        release.set()
+    d = s.as_dict()
+    assert d["sources_ok"] == 1 and d["new"] == 3          # what finished in time is stored and scored
+    assert [(f["company"], "time limit" in f["error"]) for f in d["failures"]] == [("SlowA", True)]
+    assert [(o.company, o.status, o.notes) for o in s.skipped] == [
+        ("SlowB", "skipped", ["not checked: quick-check time limit reached"])]
+    assert pipeline.ABANDONED == 1
+
+
+def test_extraction_stale_tracks_fingerprint(conn, cfg):
+    from jobsearch.pipeline import ensure_extraction_current, extraction_stale
+    assert extraction_stale(conn)
+    ensure_extraction_current(conn, cfg)
+    assert not extraction_stale(conn)
+    db.set_meta(conn, "extraction", "older")
+    assert extraction_stale(conn)
