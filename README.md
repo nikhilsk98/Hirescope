@@ -580,7 +580,9 @@ the next request build a new version.
   (same folder names as `generated_resumes/`): the current version as `Nikhil_Shivakumar_Resume_<Company>.pdf`
   (overwritten when a newer version becomes current), every other READY version beside it as `…_<Company>_v<N>.pdf`;
   the default resume in `Default/Nikhil_Shivakumar_Resume.pdf`. Only PDFs, only versions that passed every check;
-  other files you put in those folders are left alone. Re-sync (or backfill) anytime: `./scripts/sync_desktop_resumes.sh`
+  other files you put in those folders are left alone. Each job ID has its own folder, so two jobs at the same
+  company never share a PDF. The sync also removes stray copies: hash-suffixed (`…_19fc85.pdf`), `(1)` or `copy`
+  files in a job folder, and any resume PDF elsewhere in the folder that is byte-identical to one of its copies. Re-sync (or backfill) anytime: `./scripts/sync_desktop_resumes.sh`
   (`--force` copies even when turned off). Settings: `desktop_copy.enabled` / `desktop_copy.dir` in
   `config/resume_builder.yaml` (not part of the settings hash, so changing them never forces a rebuild). If macOS
   blocks the Desktop (Privacy & Security → Files and Folders), the build still succeeds, the resume stays in

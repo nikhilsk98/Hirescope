@@ -242,3 +242,24 @@ def test_a_stopped_build_does_not_block_the_next_generation(rb_env):
         mp.setattr(render, "split_template", boom)
         assert cli.main(["build", str(rb_env.job)]) == 2
     assert cli.main(["prepare", str(rb_env.job), "--regenerate"]) == 0          # not "in progress"
+
+
+def test_job_folder_and_reuse_are_keyed_by_the_exact_job_id(rb_env):
+    """Job 4877 never picks up job 34877's folder ("…_34877" ends in "4877"), and a version is reused only for the
+    job its manifest names."""
+    import json
+    from resume_builder import pipeline, versions
+    root = versions.resumes_root()
+    other = root / "Hewlett-Packard-Enterprise" / "Cloud-Developer-Intern_34877"
+    other.mkdir(parents=True)
+    d = pipeline.job_dir("Hewlett Packard Enterprise", 4877, "Cloud Engineer Intern")
+    assert d.name == "Cloud-Engineer-Intern_4877" and d != other
+    assert pipeline.job_dir("Hewlett Packard Enterprise", 34877, "Renamed Title") == other
+    v = other / "v1"
+    v.mkdir()
+    (v / "R.pdf").write_bytes(b"%PDF")
+    (v / "manifest.json").write_text(json.dumps({"version": 1, "status": "ready", "job_pk": 34877,
+                                                 "dedupe_key": "k", "files": {"pdf": "R.pdf"}}))
+    (other / "current.json").write_text(json.dumps({"version": 1, "status": "ready", "pdf": "R.pdf"}))
+    assert versions.reusable(other, "k", 34877)
+    assert versions.reusable(other, "k", 67496) is None

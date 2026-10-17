@@ -8,6 +8,9 @@ Same folder names as data.nosync/generated_resumes. Only PDFs of versions that p
 reports or build files; failed versions never. Mirrored whenever a version becomes current (build, regenerate,
 `default`, rollback, mark-reviewed) and by `python -m resume_builder sync-desktop` (scripts/sync_desktop_resumes.sh).
 Only files named like the resume PDFs are ever replaced or removed there; anything else in the folder is left alone.
+No hash suffixes: stray copies in a job folder ("<stem>_19fc85.pdf", "<stem> (1).pdf", "<stem> copy.pdf", left by
+whatever copied them there) are removed, and a resume PDF elsewhere in the folder is removed only when it is
+byte-identical to one of the copies this sync owns (a unique file is never deleted).
 A Desktop that macOS won't let us write (privacy permission) never fails a build: the resume stays in data.nosync and
 a message says how to allow it.
 """
@@ -77,8 +80,14 @@ def wanted(job_dir: Path) -> dict[str, Path]:
     return out
 
 
+# a resume copy we own: <stem>.pdf, <stem>_v<N>.pdf, and stray copies of it (<stem>_19fc85.pdf with a short hex id,
+# "<stem> (1).pdf", "<stem> copy.pdf") that something other than this sync left in a job folder
+_COPY_SUFFIX = r"(?:_v\d+|_[0-9a-f]{6,8}| \(\d+\)| copy(?: \d+)?)?"
+RESUME_PDF = re.compile(r"[A-Za-z][A-Za-z'-]*_[A-Za-z][A-Za-z'-]*_Resume(?:[_ ].*)?\.pdf", re.I)
+
+
 def _managed(name: str, stems: set[str]) -> bool:
-    return any(re.fullmatch(rf"{re.escape(s)}(?:_v\d+)?\.pdf", name) for s in stems)
+    return any(re.fullmatch(rf"{re.escape(s)}{_COPY_SUFFIX}\.pdf", name) for s in stems)
 
 
 def sync_job(job_dir: Path, folder: Path) -> dict:
@@ -135,6 +144,29 @@ def job_dirs() -> list[Path]:
     return out
 
 
+def remove_duplicates(folder: Path) -> list[tuple[Path, Path]]:
+    """Resume PDFs anywhere in the Desktop folder that are not one of the copies this sync owns (a job folder's
+    current / _v<N> PDF) but are byte-identical to one: removed. A resume PDF with unique content is never removed."""
+    if not folder.is_dir():
+        return []
+    owned: dict[str, Path] = {}
+    for jd in job_dirs():
+        dest = target_dir(jd, folder)
+        for name in wanted(jd):
+            if (dest / name).is_file():
+                owned.setdefault(_sha(dest / name), dest / name)
+    keep = {target_dir(jd, folder) / n for jd in job_dirs() for n in wanted(jd)}
+    out = []
+    for p in sorted(folder.rglob("*.pdf")):
+        if p in keep or not RESUME_PDF.fullmatch(p.name):
+            continue
+        q = owned.get(_sha(p))
+        if q:
+            p.unlink()
+            out.append((p, q))
+    return out
+
+
 def sync_all(settings=None, force: bool = False) -> tuple[int, list[str]]:
     """Mirror every job (backfill / re-sync). (exit code, lines to print). `force` runs even when disabled."""
     enabled, folder = settings_of(settings)
@@ -150,6 +182,9 @@ def sync_all(settings=None, force: bool = False) -> tuple[int, list[str]]:
                 lines.append(f"  copied   {res['dir'].relative_to(folder) / n}")
             for n in res["removed"]:
                 lines.append(f"  removed  {res['dir'].relative_to(folder) / n}")
+        dups = remove_duplicates(folder)
+        removed += len(dups)
+        lines += [f"  removed  {p.relative_to(folder)} (duplicate of {q.relative_to(folder)})" for p, q in dups]
     except OSError as e:
         if e.errno in (errno.EPERM, errno.EACCES):
             return 1, [blocked_message(folder, e)]

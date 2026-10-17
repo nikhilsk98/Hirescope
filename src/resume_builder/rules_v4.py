@@ -144,7 +144,8 @@ def jd_relevant_skill(analysis: dict | None, name: str) -> bool:
     from .jd_analysis import _CATEGORY_TERMS
     c = canonical(re.sub(r"\s*\(.*\)$", "", name))
     v = vocab()
-    return any(c in (*v.implies.get(t, ()), *_CATEGORY_TERMS.get(t, ())) for t in jd_terms(analysis))
+    terms = jd_terms(analysis) | _text_terms(jd_text(analysis))             # incl. the JD's own wording
+    return any(c in (*v.implies.get(t, ()), *_CATEGORY_TERMS.get(t, ())) for t in terms)
 
 
 def _clients(bank: Bank, eid: str) -> dict[str, tuple[str, set[str]]]:
@@ -231,12 +232,13 @@ def named_in(text: str, name: str) -> bool:
 
 
 def extended_ok(analysis: dict | None, name: str, bank: Bank, bullets_text: str) -> bool:
-    """Rule 53 + 85: an extended skill is listed when the JD names it; an extended ML skill also when the JD asks for
+    """Rule 53 + 85: an extended skill is listed when the JD names it (or an umbrella term it satisfies: the JD's
+    "web-sockets" → Socket.IO, config/ats_keywords.yaml implies); an extended ML skill also when the JD asks for
     machine learning and a bullet on the page names it (rule 85); an extended cloud platform (GCP) also when the JD
     asks for cloud."""
     if not analysis:
         return False
-    if mentions(analysis, name):
+    if jd_relevant_skill(analysis, name):    # named, or an umbrella term it satisfies (JD "web-sockets" → Socket.IO)
         return True
     cat = skill_category(bank, name).casefold()
     jt = jd_text(analysis)

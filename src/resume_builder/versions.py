@@ -222,9 +222,10 @@ def dedupe_key(job_pk: int, package_hash: str, input_hashes: dict, settings_hash
     return hashlib.sha256(blob.encode()).hexdigest()
 
 
-def reusable(job_dir: Path, key: str) -> dict | None:
+def reusable(job_dir: Path, key: str, job_pk: int | None = None) -> dict | None:
     """The current version when it was built from the same job, inputs and settings, passed every check, and has
-    not been edited by hand since (an edited version must be rebuilt to match its PDF)."""
+    not been edited by hand since (an edited version must be rebuilt to match its PDF). Reuse is per job ID: the key
+    includes it, and the version's own manifest must name the same job."""
     cur = current(job_dir)
     if not cur:
         return None
@@ -234,6 +235,8 @@ def reusable(job_dir: Path, key: str) -> dict | None:
     except (OSError, ValueError):
         return None
     if m.get("dedupe_key") != key or m.get("status") not in ("ready", "reviewed"):
+        return None
+    if job_pk is not None and int(m.get("job_pk") or -1) != int(job_pk):
         return None
     if detect_edits(vdir)["edited"]:
         return None

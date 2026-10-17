@@ -84,7 +84,7 @@ categories:
     jQuery: []
     Bootstrap: []
     Sass: [scss]
-    WebSockets: [websocket]
+    WebSockets: [websocket, web-sockets, web-socket, web sockets]
     OAuth: [oauth2, oauth 2.0]
     JWT: [json web tokens]
     Single-Page Applications: [SPA, SPAs]
@@ -136,6 +136,7 @@ implies:
   CI/CD: [Jenkins, GitHub Actions, GitLab CI]
   Containerization: [Docker]
   REST: [REST APIs, RESTful]
+  WebSockets: [Socket.io]
 
 # Generic words never treated as keywords (they appear in nearly every JD).
 stoplist: [team, teams, teammates, passion, passionate, fast-paced, fast paced, dynamic, motivated, self-starter,

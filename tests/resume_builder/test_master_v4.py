@@ -668,3 +668,11 @@ def test_self_reported_skill_the_jd_does_not_name_needs_approval(v4env):
     assert not [p for p in rules_v4.problems(c, b, s, a) if "'Go'" in p]
     c.notes.approved_skills = ["Go", "LightGBM"]                         # approval covers self-reported only
     assert any("approved_skills: 'LightGBM'" in p for p in rules_v4.problems(c, b, s, a))
+
+
+def test_web_sockets_in_the_jd_makes_socket_io_eligible():
+    a = {"role": "Cloud Engineer Intern", "keywords": [], "requirements": [], "preferred": [], "mentioned": [],
+         "required": ["Knowledge of Java or associated libraries, web-sockets, and other cloud networking protocols."],
+         "responsibilities": []}
+    assert rules_v4.jd_relevant_skill(a, "Socket.IO")
+    assert not rules_v4.jd_relevant_skill({**a, "required": ["Java and SQL"]}, "Socket.IO")

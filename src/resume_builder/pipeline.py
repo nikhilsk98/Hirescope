@@ -82,7 +82,8 @@ def job_dir(company: str, pk: int, title: str | None = None, root: Path | None =
     root = (root or rc.resumes_dir())
     pk = int(pk)
     existing = sorted(root.glob(f"*/*_{pk}")) if root.exists() else []
-    existing = [d for d in existing if d.is_dir()]
+    # the whole trailing number must be this job ID: job 4877 never picks up "…_34877" (another job's folder)
+    existing = [d for d in existing if d.is_dir() and re.search(r"_(\d+)$", d.name).group(1) == str(pk)]
     d = existing[0] if existing else root / hs_slug(company) / f"{hs_slug(title or 'Job', 50)}_{pk}"
     rr = root.resolve() if root.exists() else root.absolute()
     if not d.absolute().resolve().is_relative_to(rr):
@@ -439,7 +440,7 @@ def prepare(ref: str, profile: str | None = None, db_path: Path | None = None, r
         key = versions.dedupe_key(job["id"], analysis["package_hash"], hashes, settings.hash(),
                                   analysis["profile"]["picked"], versions.locks_hash(locks))
         if not regenerate:
-            hit = versions.reusable(jd_dir, key)
+            hit = versions.reusable(jd_dir, key, job["id"])
             if hit:
                 return {"reused": hit, "job_dir": str(jd_dir), "analysis": analysis, "work": str(work),
                         "bank_warnings": bank.warnings}

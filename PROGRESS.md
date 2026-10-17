@@ -817,3 +817,19 @@ JD, evaluation clause vs JD-irrelevant skills, approved self-reported skills).
 - HPE v9 (2026-10-17, ready, 1 page): LLMs added to the Machine Learning row (the JD asks for GenAI / LLMs); AZ-900
   restored (cloud role, fits); the freelance S3/SQS bullet says "duplicate-safe job handling" so "idempotency checks"
   appears once (Accenture). Desktop copy updated automatically (v8 kept as _v8).
+
+## HPE Cloud Engineer Intern + per-job hardening (2026-10-17)
+- HPE "Cloud Engineer Intern" (requisition 1213629) was already in HireScope as job 67496; v1 built (ready, 1 page,
+  `Cloud-Engineer-Intern_67496/`): B2B full-stack Java, Lambda/S3/EventBridge imports, S3/SQS pipeline, Socket.IO
+  real-time updates, CI/CD; Accenture + Rescho Java/Spring Boot/REST; DASH differential testing; no ML bullets (VibeSpace
+  left out); Spring MVC and Linux self-reported (confirmed by Nikhil); Vue.js/Nuxt.js, C, Angular out.
+- Per-job isolation: the job folder lookup matched `*_<pk>` (job 4877 would have found `…_34877`); now the whole
+  trailing number must equal the job ID. Reuse also checks that the version's manifest names the same job.
+- JD "web-sockets" → WebSockets, satisfied by Socket.IO (ats_keywords implies); extended skills count an umbrella term
+  the JD asks for; `jd_relevant_skill` also reads the JD's own wording.
+- Desktop sync: removes stray hash-suffixed / "(1)" / "copy" resume PDFs in job folders and byte-identical resume
+  copies elsewhere in the folder (unique files kept). The `_19fc85` / `_6c3c2d` / `_d596e6` / `_440baa` files were not
+  on this Mac (Desktop, Downloads, Documents, Spotlight) and HireScope never names files that way.
+
+**Tests**: 642 passed (two HPE jobs in separate Desktop folders + stray/duplicate cleanup, exact job-ID folder and
+reuse, web-sockets → Socket.IO).

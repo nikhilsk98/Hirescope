@@ -113,3 +113,28 @@ def test_backfill_and_sync_command(rb_env, capsys):
     assert (_desk() / "Acme" / "Cloud-Developer-Intern_123" / PDF).exists()
     assert (_desk() / "Default" / "Demo_Candidate_Resume.pdf").exists() and not (_desk() / "Bose").exists()
     assert cli.main(["sync-desktop"]) == 0 and "0 copied" in capsys.readouterr().out          # idempotent
+
+
+def test_two_jobs_same_company_never_share_a_folder_and_stray_copies_go(rb_env):
+    a = _job("Hewlett-Packard-Enterprise", "Cloud-Developer-Intern_34877")
+    b = _job("Hewlett-Packard-Enterprise", "Cloud-Engineer-Intern_67496")
+    pa = _version(a, 1, "ready", pdf="Demo_Candidate_Resume_HPE.pdf")
+    _version(b, 1, "ready", pdf="Demo_Candidate_Resume_HPE.pdf")
+    (b / "v1" / "Demo_Candidate_Resume_HPE.pdf").write_bytes(b"%PDF-1.5 engineer")
+    versions.set_current(a, 1, "build")
+    versions.set_current(b, 1, "build")
+    hpe = _desk() / "Hewlett-Packard-Enterprise"
+    da, db_ = hpe / "Cloud-Developer-Intern_34877", hpe / "Cloud-Engineer-Intern_67496"
+    assert (da / "Demo_Candidate_Resume_HPE.pdf").read_bytes() == b"%PDF-1.5 v1"
+    assert (db_ / "Demo_Candidate_Resume_HPE.pdf").read_bytes() == b"%PDF-1.5 engineer"
+    # stray copies: hash-suffixed / "(1)" in a job folder, an identical loose copy, and a unique file
+    for n in ("Demo_Candidate_Resume_HPE_19fc85.pdf", "Demo_Candidate_Resume_HPE (1).pdf"):
+        (da / n).write_bytes(pa.joinpath("Demo_Candidate_Resume_HPE.pdf").read_bytes())
+    (hpe / "Demo_Candidate_Resume_HPE_6c3c2d.pdf").write_bytes(b"%PDF-1.5 v1")
+    (hpe / "Demo_Candidate_Resume_HPE_unique.pdf").write_bytes(b"%PDF-1.5 something else")
+    code, lines = desktop.sync_all()
+    assert code == 0
+    assert sorted(p.name for p in da.iterdir()) == ["Demo_Candidate_Resume_HPE.pdf"]
+    assert not (hpe / "Demo_Candidate_Resume_HPE_6c3c2d.pdf").exists()
+    assert (hpe / "Demo_Candidate_Resume_HPE_unique.pdf").exists()                  # unique content: kept
+    assert any("duplicate of" in ln for ln in lines)
