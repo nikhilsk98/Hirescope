@@ -497,6 +497,12 @@ class Worker:
         self.paused = run_lock_held()
         if self.paused:
             return
+        try:                                        # links saved while a run held the database
+            from jobsearch import launcher
+            if launcher.spooled():
+                launcher.drain_spool(self.db_path)
+        except Exception as e:  # noqa: BLE001
+            log.warning("spooled links not applied", extra={"error": str(e)[:200]})
         if db.get_meta(conn, "publish_pending"):      # new external jobs: scored + on the dashboard before their builds
             self._write_live(conn, "publishing")
             try:
@@ -535,8 +541,9 @@ class Worker:
                 log.info("queue recovered after a restart", extra={"items": n})
             while True:
                 retry_locked(self.tick, conn)
+                from jobsearch import launcher as _launcher
                 queued = conn.execute("SELECT COUNT(*) FROM resume_queue WHERE status='queued'").fetchone()[0] + \
-                    bool(db.get_meta(conn, "publish_pending"))
+                    bool(db.get_meta(conn, "publish_pending")) + len(_launcher.spooled())
                 state = "paused" if self.paused and queued else "running" if self.running or queued else "idle"
                 retry_locked(self._write_live, conn, state)
                 if not self.running and not queued:

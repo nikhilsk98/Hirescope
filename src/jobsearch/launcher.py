@@ -45,6 +45,7 @@ from .storage import db
 
 log = logging.getLogger("jobsearch.launcher")
 MAX_URL = 8000
+BUSY_MS, BUSY_TRIES = 4000, 4          # ~20 s at most on a database a run is writing, then the link is spooled
 MAX_JOBS = 100
 _DIGITS = re.compile(r"^\d{1,9}$")
 _JOBS = re.compile(r"^\d{1,9}(?:,\d{1,9}){0,%d}$" % (MAX_JOBS - 1))
@@ -354,19 +355,67 @@ def _redact(url: str) -> str:
     return re.sub(r"(text=)[^&]*", r"\1…", url)[:300]
 
 
-def handle(url: str, db_path: Path | None = None) -> str:
+# --- busy database: a HireScope run can hold SQLite's write lock for minutes. A link waits ~20 s at most, then is
+# saved here (in order) and applied as soon as the database is free (the worker drains it; so does the next link).
+def spool_dir() -> Path:
+    return paths.STATE_DIR / "launcher_spool"
+
+
+def spool(url: str) -> Path:
+    d = spool_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f')}-{os.getpid()}.link"
+    p.write_text(url, encoding="utf-8")
+    return p
+
+
+def spooled() -> list[Path]:
+    d = spool_dir()
+    return sorted(d.glob("*.link")) if d.is_dir() else []
+
+
+def drain_spool(db_path: Path | None = None) -> int:
+    """Apply saved links in order; stop at the first one that still finds the database busy. Returns how many ran."""
+    import sqlite3
+    n = 0
+    for p in spooled():
+        try:
+            handle(p.read_text(encoding="utf-8"), db_path, from_spool=True)
+        except sqlite3.OperationalError:
+            break
+        except LinkError:
+            pass                        # logged by handle; a link that can no longer apply is dropped
+        p.unlink(missing_ok=True)
+        n += 1
+    return n
+
+
+def handle(url: str, db_path: Path | None = None, from_spool: bool = False) -> str:
     """Validate and run one link. Returns a one-line summary; raises LinkError for a bad link."""
-    from resume_builder.queue import retry_locked
+    import sqlite3
+    from resume_builder.queue import kick, retry_locked
     at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     try:
         action, params = parse(url)
     except LinkError as e:
         _log_line({"at": at, "link": _redact(url or ""), "ok": False, "error": str(e)})
         raise
+    if not from_spool and spooled():
+        if drain_spool(db_path) == 0 and spooled():     # still busy: keep this link behind the waiting ones
+            spool(url)
+            return "HireScope is busy (a run is writing); saved — it applies as soon as the run finishes"
     conn = db.connect(db_path or paths.DB)
+    conn.execute(f"PRAGMA busy_timeout = {BUSY_MS}")
     try:
         try:
-            msg = retry_locked(HANDLERS[action], conn, params)
+            msg = retry_locked(HANDLERS[action], conn, params, tries=BUSY_TRIES)
+        except sqlite3.OperationalError as e:
+            if from_spool or ("locked" not in str(e) and "busy" not in str(e)):
+                raise
+            spool(url)
+            kick()
+            _log_line({"at": at, "link": _redact(url), "ok": True, "message": "spooled (database busy)"})
+            return "HireScope is busy (a run is writing); saved — it applies as soon as the run finishes"
         except LinkError as e:
             _log_line({"at": at, "link": _redact(url), "ok": False, "error": str(e)})
             raise

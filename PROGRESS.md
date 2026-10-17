@@ -1124,3 +1124,10 @@ Low (left as is): the native file input's look; the faint ⌘K hint.
   Test Engineering Co-op (62484, v1), LineVision (124710, v3) → regenerated through the queue (results below).
 - Tests: tests/resume_builder/test_in_progress.py (17: every variant caught, ordinary text passes, the in-progress DEMO
   project renders without a label, a label anywhere fails the build with the message).
+
+## Launcher vs. a running HireScope run (2026-10-17, found while queueing the section 8 regenerations)
+- A quick check started at 05:21 and held SQLite's write lock; the queue link waited ~90 s for it (it went through,
+  and the worker correctly sat paused while the run lock was held). A longer write could have made the link fail with
+  "database is locked" and lose the click. Now a link waits ~20 s at most (busy_timeout 4 s × 4 tries), then is saved to
+  data.nosync/state/launcher_spool/ and applied in order as soon as the database is free (the worker drains the spool
+  when no run holds the lock; so does the next link). Test: a held write lock → two links spooled → applied in order.

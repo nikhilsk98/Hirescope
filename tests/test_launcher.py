@@ -101,3 +101,26 @@ def test_launcher_app_passes_the_link_as_one_quoted_argument():
     assert 'quoted form of theURL' in src and 'do shell script "/bin/zsh " & quoted form of' in src
     sh = (paths.ROOT / "scripts" / "launcher.sh").read_text()
     assert 'jobsearch.launcher "$1"' in sh and "eval" not in sh
+
+
+def test_busy_database_spools_links_and_applies_them_in_order(monkeypatch):
+    """A HireScope run holding SQLite's write lock: links wait briefly, are saved, and apply in order afterwards."""
+    from jobsearch import bucket
+    conn = db.connect(paths.DB)
+    a = insert_job(conn, paths.DATA / "jd", company="DemoCorp", title="Backend Engineer Intern", job_id="sp-1")
+    conn.close()
+    monkeypatch.setattr(launcher, "BUSY_MS", 50)
+    monkeypatch.setattr(launcher, "BUSY_TRIES", 2)
+    import sqlite3
+    holder = sqlite3.connect(str(paths.DB), timeout=0.1)
+    holder.execute("BEGIN IMMEDIATE")                         # what a run's write transaction looks like
+    assert "saved" in launcher.handle(f"hirescope://bucket?job={a}&op=add")
+    assert "saved" in launcher.handle(f"hirescope://bucket?job={a}&op=remove")
+    assert len(launcher.spooled()) == 2
+    holder.rollback()
+    holder.close()
+    assert launcher.drain_spool() == 2 and launcher.spooled() == []
+    c = db.connect(paths.DB)
+    assert not bucket.in_bucket(c, a)                         # add, then remove: the order held
+    assert bucket.entries(c)[str(a)]["in"] is False
+    c.close()
