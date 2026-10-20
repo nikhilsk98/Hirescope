@@ -91,6 +91,10 @@ def effective_track(job: dict) -> str:
     return job.get("track_override") or job.get("track") or FULL_TIME
 
 
+# employers' test requisitions left public ("Full Stack Software Engineer (TEST REQ - DO NOT APPLY)", Walmart 2026-10-20)
+NOT_A_POSTING = re.compile(r"\b(?:do not apply|test req(?:uisition)?|test posting|test job|dummy (?:job|posting|req))\b", re.I)
+
+
 def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime | None = None) -> RuleResult:
     now = now or datetime.now(timezone.utc)
     res = RuleResult(track=effective_track(job))
@@ -100,6 +104,8 @@ def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime 
         (res.reasons if mode == "hard" else res.soft_issues).append(reason)
 
     norm = job["normalized_title"]
+    if NOT_A_POSTING.search(job.get("title") or ""):
+        res.reasons.append("Not a real posting (a test requisition: the title says not to apply)")
     if prefs.company_tiers.is_excluded(job["company"]):
         res.reasons.append(f"Company '{job['company']}' is in excluded companies")
 
@@ -282,6 +288,8 @@ def quick_relevant(title: str, location: str | None, prefs: Preferences, rules: 
     excluded level, and not clearly outside the US. Errs on the side of fetching."""
     from ..extract.locations import normalize_location
     from ..extract.track import classify_track
+    if NOT_A_POSTING.search(title or ""):
+        return False
     norm = normalize_title(title, rules)
     track = classify_track(title).track
     if match_title(norm, track, prefs, rules).kind == "none":

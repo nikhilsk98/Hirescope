@@ -9,6 +9,7 @@ from jobsearch import secrets
 from jobsearch.adapters import hn_hiring as hn
 from jobsearch.adapters.aggregator import AggregatorAdapter
 from jobsearch.adapters.base import FetchContext, safe_url
+from jobsearch.adapters import linkedin_alerts as li
 from jobsearch.adapters.linkedin_alerts import LinkedInAlertsAdapter, parse_alert
 from jobsearch.config import Company
 from jobsearch.pipeline import plan, run
@@ -168,7 +169,7 @@ def test_hn_adapter_fetches_only_new_posts():
     skipped_cache = next(iter(res.pages.values()))["payload"]
     calls.clear()
     res2 = a.fetch(co, FetchContext(known={"101": "x", "103": "x"},
-                                    pages={"hn_hiring:skipped:901": {"payload": skipped_cache}}))
+                                    pages={"hn_hiring:skipped:v2:901": {"payload": skipped_cache}}))
     assert res2.jobs == [] and res2.seen_ids == {"101", "103"}
     assert not [c for c in calls if "/item/10" in c]         # nothing re-fetched
 
@@ -263,3 +264,41 @@ def test_add_url_never_fetches_linkedin_apple_meta():
               "https://www.metacareers.com/profile/job_details/1092606640401919/"):
         raw, how = resolve(u, mock_client(handler), None)
         assert raw is None and "paste the JD" in how
+
+
+@pytest.mark.parametrize("text,title,loc", [
+    ("DemoLearn (Remote US) — Full-Stack Software Engineer<p>We build learning tools.", "Full-Stack Software Engineer", "Remote (US)"),
+    ("DemoCo | Remote (US) | Full-time | https://democo.example/jobs<p>Roles:<p>* Sr Software Engineer (Backend)<p>* Frontend Engineer",
+     "Sr Software Engineer (Backend), Frontend Engineer", "Remote (US)"),
+    ("DemoRobots | Software Engineers (Elixir) | Boston, MA | Onsite", "Software Engineers (Elixir)", "Boston, MA"),
+    ("DemoGlobal | Software Engineer | London, Paris, New York, NY or Remote", "Software Engineer", "London · Paris · New York, NY · Remote"),
+])
+def test_hn_posts_with_plurals_dashes_body_roles_and_city_lists(text, title, loc):
+    p = hn.parse_post({"text": text, "time": 1})
+    assert (p["title"], p["location"]) == (title, loc)
+
+
+def test_linkedin_alert_layouts_found_in_the_audit():
+    """2026-10-20: "Company · Location" on one line; one link wrapping the whole card; a salary line in plain text;
+    a look-alike sender."""
+    one_line = """<html><body><a href="https://www.linkedin.com/comm/jobs/view/4100000001/?t=1">Backend Engineer (DEMO)</a>
+<p>DemoCo · Boston, MA (Hybrid)</p></body></html>"""
+    jobs = li.parse_alert(alert(html=one_line))
+    assert [(j["title"], j["company"], j["location"]) for j in jobs] == [("Backend Engineer (DEMO)", "DemoCo", "Boston, MA (Hybrid)")]
+    card = """<html><body>
+<a href="https://www.linkedin.com/comm/jobs/view/4100000002/?t=2"><div>Platform Engineer (DEMO)</div><div>Beta Labs</div><div>Remote</div></a>
+<a href="https://www.linkedin.com/comm/jobs/view/4100000003/?t=3"><div>Data Engineer I (DEMO)</div><div>Gamma Co</div><div>Austin, TX</div></a>
+</body></html>"""
+    jobs = li.parse_alert(alert(html=card))
+    assert [(j["title"], j["company"], j["location"]) for j in jobs] == [
+        ("Platform Engineer (DEMO)", "Beta Labs", "Remote"), ("Data Engineer I (DEMO)", "Gamma Co", "Austin, TX")]
+    text = """Software Engineer I (DEMO)
+DemoCo
+Boston, MA
+$120K-$150K / year
+View job: https://www.linkedin.com/comm/jobs/view/4100000004/?t=4
+"""
+    jobs = li.parse_alert(alert(text=text))
+    assert [(j["title"], j["company"], j["location"]) for j in jobs] == [("Software Engineer I (DEMO)", "DemoCo", "Boston, MA")]
+    assert li.is_alert(alert(text="x", sender="LinkedIn <jobalerts-noreply@linkedin.com>"))
+    assert not li.is_alert(alert(text="x", sender="jobalerts-noreply@linkedin.com.evil.example"))

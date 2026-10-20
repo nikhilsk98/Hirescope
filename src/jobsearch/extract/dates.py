@@ -77,7 +77,9 @@ _GRAD_BY = re.compile(rf"{_GRAD_CTX}[^.\n]{{0,40}}?\b(?P<op>by|before|no later t
                       rf"(?:\s*,?\s*or\s+(?:by\s+)?{_when('b')})?", re.I)   # "by December 2026 or Summer 2027"
 _GRAD_AFTER = re.compile(rf"{_GRAD_CTX}[^.\n]{{0,40}}?\b(?P<op>after|or later|on or after|no earlier than|"
                          rf"starting)\s+{_when('a')}|{_GRAD_CTX}[^.\n]{{0,40}}?{_when('c')}\s+or later", re.I)
-_GRAD_IN = re.compile(rf"(?:{_GRAD_CTX}|new grad\w*)[^.\n]{{0,30}}?\b(?:in|of|date of|:)?\s*{_when('a')}\b", re.I)
+_OR_WHEN = rf"(?:\s*(?:,|/|\bor\b)\s*(?:{_MON}\s*/\s*)?{{w}})?"     # "December 2026 or May/June 2027"
+_GRAD_IN = re.compile(rf"(?:{_GRAD_CTX}|new grad\w*)[^.\n]{{0,30}}?\b(?:in|of|date of|:)?\s*{_when('a')}\b"
+                      + _OR_WHEN.format(w=_when("b")) + _OR_WHEN.format(w=_when("c")), re.I)
 _CLASS_OF = re.compile(r"\bclass of\s+(?P<y>20\d\d)\b", re.I)
 
 
@@ -116,8 +118,11 @@ def parse_grad_windows(text: str) -> list[Window]:
         add(m, _ym(y - 1, 12), _ym(y, 8))   # "Class of 2027": Dec 2026 - Aug 2027 graduates
     for m in _GRAD_IN.finditer(text):
         if m.group("am") or m.group("as"):
-            add(m, _point(m.group("am"), m.group("as"), m.group("ay"), "start"),
-                _point(m.group("am"), m.group("as"), m.group("ay"), "end"))
+            end = _point(m.group("am"), m.group("as"), m.group("ay"), "end")
+            for p in ("b", "c"):           # "or" alternatives: the window runs to the latest one
+                if m.group(f"{p}y"):
+                    end = max(end, _point(m.group(f"{p}m"), m.group(f"{p}s"), m.group(f"{p}y"), "end"))
+            add(m, _point(m.group("am"), m.group("as"), m.group("ay"), "start"), end)
     return out
 
 

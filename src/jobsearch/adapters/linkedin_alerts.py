@@ -29,7 +29,8 @@ SENDERS = ("jobalerts-noreply@linkedin.com", "jobs-noreply@linkedin.com", "jobs-
 JOB_LINK = re.compile(r"https?://(?:[a-z]+\.)?linkedin\.com/(?:comm/)?jobs/view/(\d{6,})[^\s\"'<>)]*", re.I)
 NOISE = re.compile(r"^(view job|apply|easy apply|actively recruiting|promoted|be an early applicant|\d+ (?:company )?"
                    r"(?:alumni|connections?|school alumni)|new|see all jobs|unsubscribe|manage alerts?|your job alert.*|"
-                   r"this company is actively hiring|\d+ applicants?|.*ago)$", re.I)
+                   r"this company is actively hiring|\d+ applicants?|.*ago|top applicant|"
+                   r"[$€£][\d,.]+\s*[kK]?.*|.*\b(?:per (?:year|hour)|/\s*(?:yr|hr|year|hour))\b.*)$", re.I)   # salary lines
 DEFAULT_DAYS = 21
 
 
@@ -55,10 +56,20 @@ def _html_lines(htm: str) -> list[str]:
     """HTML -> text lines, with each job link kept on its own line as 'LINK <url>' right after its anchor text."""
     htm = re.sub(r"(?is)<(script|style|head)\b.*?</\1>", " ", htm)
     htm = re.sub(r"(?is)<a\b[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>",
-                 lambda m: f"\n{m.group(2)}\nLINK {html.unescape(m.group(1))}\n", htm)
+                 lambda m: f"\n{ASTART}\n{m.group(2)}\nLINK {html.unescape(m.group(1))}\n", htm)
     htm = re.sub(r"(?i)<br\s*/?>|</(p|div|td|tr|li|h\d|table)>", "\n", htm)
     txt = html.unescape(re.sub(r"<[^>]+>", " ", htm))
     return [" ".join(x.split()) for x in txt.splitlines() if x.strip()]
+
+
+ASTART = "ASTART\u2063"     # where an anchor's own text begins (a card may be one link around title/company/place)
+
+
+def _company_place(company: str, place: str | None) -> tuple[str, str | None]:
+    """"DemoCo · Boston, MA (Hybrid)" on one line -> ("DemoCo", "Boston, MA (Hybrid)")."""
+    if " · " in company and not place:
+        company, place = (x.strip() for x in company.split(" · ", 1))
+    return company, place
 
 
 def _clean(line: str) -> str:
@@ -78,10 +89,19 @@ def parse_alert(msg: Message) -> list[dict]:
             m = JOB_LINK.match(ln[5:])
             if not m or m.group(1) in jobs:
                 continue
+            start = max((k for k in range(max(i - 6, 0), i) if lines[k] == ASTART), default=None)
+            inside = [c for c in (_clean(x) for x in lines[start + 1:i]) if c and not NOISE.match(c)] \
+                if start is not None else []
+            if len(inside) >= 2:          # the link wraps the whole card: title, company[, location]
+                company, place = _company_place(inside[1], inside[2] if len(inside) > 2 else None)
+                jobs[m.group(1)] = {"job_id": m.group(1), "title": inside[0], "company": company, "location": place}
+                continue
             # anchor text (title, sometimes an image alt) is just above; company and location follow
-            title = _clean(lines[i - 1]) if i else ""
+            title = inside[0] if inside else (_clean(lines[i - 1]) if i and lines[i - 1] != ASTART else "")
             after = []
             for x in lines[i + 1:i + 8]:
+                if x == ASTART:
+                    continue
                 if x.startswith("LINK "):
                     if after:
                         break
@@ -92,8 +112,8 @@ def parse_alert(msg: Message) -> list[dict]:
                 if len(after) == 2:
                     break
             if title and not NOISE.match(title) and after:
-                jobs[m.group(1)] = {"job_id": m.group(1), "title": title, "company": after[0],
-                                    "location": after[1] if len(after) > 1 else None}
+                company, place = _company_place(after[0], after[1] if len(after) > 1 else None)
+                jobs[m.group(1)] = {"job_id": m.group(1), "title": title, "company": company, "location": place}
     if text and not jobs:
         block: list[str] = []
         for raw in text.splitlines():
@@ -102,9 +122,10 @@ def parse_alert(msg: Message) -> list[dict]:
             if m:
                 body = [x for x in block if not NOISE.match(x)]
                 if len(body) >= 2 and m.group(1) not in jobs:
-                    jobs[m.group(1)] = {"job_id": m.group(1), "title": body[-3] if len(body) >= 3 else body[-2],
-                                        "company": body[-2] if len(body) >= 3 else body[-1],
-                                        "location": body[-1] if len(body) >= 3 else None}
+                    title, company, place = (body[-3], body[-2], body[-1]) if len(body) >= 3 else (body[-2], body[-1], None)
+                    if len(body) == 2 or " · " in body[-1] and len(body) >= 2:      # "Company · Location" line
+                        title, (company, place) = body[-2], _company_place(body[-1], None)
+                    jobs[m.group(1)] = {"job_id": m.group(1), "title": title, "company": company, "location": place}
                 block = []
             elif ln and not set(ln) <= set("-=_ "):
                 block.append(ln)
@@ -114,8 +135,9 @@ def parse_alert(msg: Message) -> list[dict]:
 
 
 def is_alert(msg: Message) -> bool:
-    sender = (msg.get("From") or "").lower()
-    return any(s in sender for s in SENDERS)
+    """From one of LinkedIn's job-alert addresses exactly (not "…@linkedin.com.example.org")."""
+    from email.utils import parseaddr
+    return parseaddr(msg.get("From") or "")[1].strip().lower() in SENDERS
 
 
 class LinkedInAlertsAdapter(Adapter):

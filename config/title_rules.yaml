@@ -22,6 +22,8 @@ abbreviations:
   ng: new graduate
   coop: co op
   mts: member of technical staff
+  "sw engineer": software engineer     # "SW Engineer I - Full Stack" (not a bare "sw": street addresses like "SW 7th St")
+  "sw developer": software developer
 
 # Full-time track: a title containing any of these phrases (or a close fuzzy match) is a match,
 # with or without a level ("Software Engineer", "Software Engineer II", "Backend Engineer, Payments").
@@ -48,6 +50,11 @@ core_titles:
   - aws developer
   - cloud aws developer           # "Cloud/AWS Developer" normalizes to this
   - member of technical staff     # common SWE title at AI labs; "staff" here is not a level
+  - engineer software             # "Engineer I - Software", "Engineer, Software" (Northrop, Vermeer)
+  - analytics engineer            # data roles (audit 2026-10-20: titled only these ways)
+  - data warehouse engineer
+  - data platform engineer
+  - data engineering
 
 related_titles:
   - product engineer
@@ -70,12 +77,21 @@ related_titles:
   - web engineer
   - integration engineer
   - build and release engineer
+  - artificial intelligence engineer           # "AI Engineer 1 - Graduate", "Applied AI Engineer (New Grad)"
+  - applied artificial intelligence engineer
+  - forward deployed engineer                  # "Forward Deployed Engineer (New Grad)" (software, customer-facing)
+  - forward deployed software engineer
+  - android developer
+  - ios developer
+  - mobile developer
+  - programmer analyst
 
 # Co-op/Intern track: an intern/co-op title matches when it also contains one of these words
 # ("Software Engineering Co-op", "SDE Intern", "Spring 2027 Co-op - Backend").
 coop_role_words: [software, developer, software development, sde, swe, backend, frontend,
   full stack, web, cloud, platform, programming, programmer, computer science,
-  infrastructure, devops, data engineering, machine learning]
+  infrastructure, devops, data engineering, machine learning, application development, applications development,
+  mobile, ios, android, compiler, artificial intelligence engineer, artificial intelligence engineering]
 
 # rapidfuzz token_sort_ratio threshold (0-100) for fuzzy title matches
 fuzzy_threshold: 90
@@ -127,7 +143,7 @@ contrast_profiles:
 tech_hint_words: [software, 'develop(er|ers|ment engineer\w*)', 'programm\w*', cloud, devops, devsecops, platform,
   'full[- ]?stack', backend, 'back[- ]end', frontend, 'front[- ]end', web, 'data engineer\w*', mts, technical staff,
   technology, 'application(s)?', java, python, '\.?net', salesforce, sde, swe, sre, site reliability,
-  infrastructure, automation, integration, ios, android, mobile, coding, computer science, it]
+  infrastructure, automation, integration, ios, android, mobile, coding, computer science, it, artificial intelligence]
 
 # --- Free-text job posts (Hacker News Who's Hiring): a header segment naming one of these is a role --------
 posting_role_words: [software, 'engineer(ing)?', developer, swe, sde, programmer, 'full[- ]?stack', 'front[- ]?end',

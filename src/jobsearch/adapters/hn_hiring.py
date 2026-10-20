@@ -28,7 +28,7 @@ def _role_re() -> re.Pattern:
     """A header segment naming a software role: config/title_rules.yaml -> posting_role_words."""
     from ..config import load_title_rules
     words = load_title_rules().posting_role_words
-    return re.compile(r"\b(" + "|".join(words) + r")\b", re.I) if words else re.compile(r"(?!)")
+    return re.compile(r"\b(" + "|".join(words) + r")s?\b", re.I) if words else re.compile(r"(?!)")   # "Engineers"
 NOT_ROLE = re.compile(r"\b(remote|onsite|on-site|hybrid|full[- ]?time|part[- ]?time|contract|visa|salary|equity|"
                       r"\$|€|£|https?://|www\.)", re.I)
 LOCATION = re.compile(r"\b(remote|onsite|on-site|hybrid|usa?|united states|new york|nyc|san francisco|sf|bay area|"
@@ -47,13 +47,41 @@ def comment_text(raw_html: str) -> tuple[str, list[str]]:
     return "\n".join(ln.strip() for ln in t.splitlines() if ln.strip()), links
 
 
+_BULLET = re.compile(r"^\s*(?:[-*•·▪]|\d+[.)])\s+")
+_ROLE_NOUN = re.compile(r"\b(engineer|engineers|developer|developers|intern|interns|internship|co-?op|programmer|sre|swe|"
+                        r"scientist)\b", re.I)
+
+
+def body_roles(lines: list[str], limit: int = 8) -> list[str]:
+    """Role lines in a post's body (bullets or short lines naming a role: "* Sr Software Engineer (Backend)")."""
+    out = []
+    for ln in lines[:30]:
+        t = _BULLET.sub("", ln).strip(" :")
+        t = re.split(r"\s+[-–—:]\s+(?=https?://)|\s+https?://", t)[0].strip()
+        if not t or len(t) > 90 or not _ROLE_NOUN.search(t) or not _role_re().search(t):
+            continue
+        if len(ln) > 90 and not _BULLET.match(ln):
+            continue
+        out.append(t)
+        if len(out) >= limit:
+            break
+    return list(dict.fromkeys(out))
+
+
+def split_places(seg: str) -> list[str]:
+    """"London, Paris, New York, Remote" -> each place; "Boston, MA" stays one."""
+    parts = re.split(r"\s+or\s+|\s*/\s*|\s*&\s*|\s*;\s*|,(?!\s*[A-Z]{2}\b)\s*", seg)
+    return [p.strip() for p in parts if p.strip()]
+
+
 def parse_post(item: dict) -> dict | None:
     """One top-level comment -> {company, title, location, remote, apply_url, text} or None (not a software role)."""
     if not item or item.get("deleted") or item.get("dead") or not item.get("text"):
         return None
     text, links = comment_text(item["text"])
     header = text.split("\n", 1)[0]
-    segs = [s.strip() for s in re.split(r"\s+\|\s+|\s*\|\s*", header) if s.strip()]
+    # "Company | Role | Location" or "Company (Remote US) — Full-Stack Software Engineer"
+    segs = [s.strip() for s in re.split(r"\s*\|\s*|\s+[—–]\s+", header) if s.strip()]
     if len(segs) < 2:
         return None
     company = re.sub(r"\s*\((?:YC|yc)[^)]*\)\s*$", "", segs[0]).strip()
@@ -68,11 +96,18 @@ def parse_post(item: dict) -> dict | None:
             roles.append(s)
         elif LOCATION.search(s) or re.search(r"remote|onsite|hybrid", s, re.I):
             locs.append(s)
+    if "(" in segs[0] and (m := re.search(r"\(([^)]*(?:remote|onsite|hybrid|us|usa)[^)]*)\)", segs[0], re.I)):
+        locs.append(m.group(1))                       # "PrairieLearn (Remote US)"
+        company = re.sub(r"\s*\([^)]*\)\s*$", "", company).strip()
+    if not roles:                                     # "Company | Remote (US) | Full-time | URL", roles listed below
+        roles = body_roles(text.split("\n")[1:])
     if not roles:
         return None
+    locs = [x for s in locs for x in split_places(s)]
     title = ", ".join(dict.fromkeys(roles))[:160]
     remote = any(re.search(r"\bremote\b", s, re.I) for s in locs)
-    loc = " · ".join(s for s in locs if not re.fullmatch(r"(?i)(remote|onsite|on-site|hybrid)( \(.*\))?", s.strip()))
+    loc = " · ".join(s for s in locs if not re.fullmatch(r"(?i)(remote|onsite|on-site|hybrid)(\s*\(?(us|usa|united "
+                                                        r"states)\)?)?( \(.*\))?", s.strip()))
     if remote:
         loc = " · ".join(x for x in (loc, "Remote" if not re.search(r"(?i)\b(us|usa|united states)\b", " ".join(locs))
                                      else "Remote (US)") if x)
@@ -101,7 +136,8 @@ class HNHiringAdapter(Adapter):
         jobs: list[RawJob] = []
         seen: set[str] = set()
         skipped = 0
-        cache_key = f"hn_hiring:skipped:{thread.get('id')}"   # non-software posts: never fetched twice
+        cache_key = f"hn_hiring:skipped:v2:{thread.get('id')}"   # non-software posts: never fetched twice (v2: the
+        # parser reads plurals, dash headers and roles listed in the body, so older verdicts are re-checked)
         not_sw = set(json.loads((ctx.pages.get(cache_key) or {}).get("payload") or "[]"))
         new = [k for k in kids if str(k) not in ctx.known and k not in not_sw]
         capped = len(new) > MAX_NEW_PER_RUN

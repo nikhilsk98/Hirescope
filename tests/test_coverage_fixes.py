@@ -100,3 +100,57 @@ def test_eightfold_and_myworkdaysite_posting_keys():
     assert canonical_key("https://demo.eightfold.ai/careers/job/77?domain=demo.example") == "eightfold:demo.example:77"
     assert canonical_key("https://wd1.myworkdaysite.com/recruiting/baird/BairdCareers/job/Milwaukee/Intern_R20261024-1") == \
         "workday:baird:intern_r20261024"
+
+
+# --- over-filtering false negatives (audit 2026-10-20) ------------------------------------------------------------
+import pytest  # noqa: E402
+
+from jobsearch.extract.dates import parse_grad_windows  # noqa: E402
+from jobsearch.extract.levels import map_level  # noqa: E402
+from jobsearch.extract.normalize import normalize_title  # noqa: E402
+from jobsearch.extract.requirements import parse_yoe  # noqa: E402
+from jobsearch.match.rules import NOT_A_POSTING, quick_relevant  # noqa: E402
+
+
+@pytest.mark.parametrize("title,ok", [
+    ("AI Engineer 1 - Graduate", True), ("Applied AI Engineer (New Grad)", True), ("Forward Deployed Engineer (New Grad)", True),
+    ("SW Engineer I – Full Stack", True), ("Analytics Engineer", True), ("Engineer, Software", True),
+    ("AI Engineer Co-Op", True), ("Internship – Application Development", True), ("Compiler Engineer Intern/Co-op", True),
+    ("Mobile Engineering Intern 2027", True), ("Associate Android Developer", True), ("Entry Level Programmer Analyst", True),
+    ("Mechanical Engineer Intern", False), ("Electrical Engineering Co-op", False), ("Sales Manager", False),
+    ("Store Associate, SW 7th St", False),
+])
+def test_titles_the_audit_found_missing(cfg, title, ok):
+    from jobsearch import paths
+    from jobsearch.config import load_config
+    real = load_config(paths.CONFIG.parent / "inputs" / "preferences.example.yaml")
+    assert quick_relevant(title, "Boston, MA", real.prefs, real.title_rules) is ok
+
+
+def test_graduation_or_alternatives_use_the_latest():
+    assert [(w.start, w.end) for w in parse_grad_windows("Graduating in December 2026 or May/June 2027")] == [("2026-12", "2027-06")]
+    assert [(w.start, w.end) for w in parse_grad_windows("graduation in Fall 2026 or Spring 2027")] == [("2026-08", "2027-05")]
+
+
+@pytest.mark.parametrize("title,level", [
+    ("Software Engineer, Fleet Management", "unknown"), ("Backend Software Engineer Graduate - Data Lifecycle Management", "entry"),
+    ("Software Engineering Fellow", "unknown"), ("Technical Fellow", "staff_plus"), ("Distinguished Engineer", "staff_plus"),
+    ("Management Consultant", "manager"), ("Engineering Manager", "manager"),
+])
+def test_management_and_fellow_levels(cfg, title, level):
+    assert map_level(normalize_title(title, cfg.title_rules), "DemoCo", None).level == level
+
+
+@pytest.mark.parametrize("text,lo,hi", [
+    ("Up to 7 years of professional experience", 0, 7), ("With over 20 years of research experience, we lead…", None, None),
+    ("Bachelor's degree plus 4 additional years of experience in data engineering", 4, None),
+    ("3+ years of software experience", 3, None),
+])
+def test_years_of_experience_parsing(text, lo, hi):
+    y = parse_yoe(text)
+    assert (y.min, y.max) == (lo, hi)
+
+
+def test_test_requisitions_are_not_postings():
+    assert NOT_A_POSTING.search("Full Stack Software Engineer (TEST REQ - DO NOT APPLY)")
+    assert not NOT_A_POSTING.search("Software Engineer in Test") and not NOT_A_POSTING.search("Test Automation Engineer")

@@ -83,8 +83,12 @@ _YOE_PATTERNS = [
     # "minimum of 2 years", "at least 3 years"
     re.compile(rf"\b(?:minimum(?: of)?|at least|min\.?)\s*{_N}\s*\+?\s*years?", re.I),
     # "3+ years", "5 years of"
-    re.compile(rf"\b{_N}\s*\+?\s*(?:years?|yrs?)\b(?:\s+of)?", re.I),
+    re.compile(rf"\b{_N}\s*\+?\s*(?:(?:additional|more|relevant|plus)\s+)?(?:years?|yrs?)\b(?:\s+of)?", re.I),
 ]
+_UP_TO = re.compile(r"\b(?:up to|no more than|at most|maximum of|less than|fewer than)\s*$", re.I)
+# a sentence about the company, not the candidate ("With over 20 years of research…", "Founded in…")
+_COMPANY_HISTORY = re.compile(r"\byears? old\b|\bfounded\b|\bago\b|\b(?:with|for) over\b|\blaunched\b|"
+                              r"\bsince (?:19|20)\d\d\b|\bin business\b|\bour history\b", re.I)
 _YOE_CONTEXT = re.compile(r"experience|industry|professional|working|engineering|building|developing|software", re.I)
 
 
@@ -109,7 +113,7 @@ def parse_yoe(lines: list[str] | str) -> YOE:
         lines = [ln for ln in re.split(r"\n|(?<=[.;])\s+", lines) if ln.strip()]
     best: YOE | None = None
     for line in lines:
-        if not _YOE_CONTEXT.search(line) or re.search(r"\byears? old\b|\bfounded\b|\bago\b", line, re.I):
+        if not _YOE_CONTEXT.search(line) or _COMPANY_HISTORY.search(line):
             continue
         for i, pat in enumerate(_YOE_PATTERNS):
             m = pat.search(line)
@@ -117,6 +121,8 @@ def parse_yoe(lines: list[str] | str) -> YOE:
                 continue
             lo = _n(m.group(1))
             hi = _n(m.group(2)) if i == 0 else None
+            if i == 2 and _UP_TO.search(line[:m.start()]):     # "up to 7 years": a ceiling, not a minimum
+                lo, hi = 0.0, lo
             if lo > 20:
                 break
             if best is None or lo < best.min:

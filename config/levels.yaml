@@ -51,11 +51,11 @@ generic:   # first match wins, so order matters
   - {pattern: '\b(lmts|pmts|lead member of technical staff|principal member of technical staff)\b', level: staff_plus}
   - {pattern: '\b(smts|senior member of technical staff)\b', level: senior}
   - {pattern: '\b(amts|associate member of technical staff)\b', level: entry}
-  - {pattern: '\b(distinguished|fellow)\b', level: staff_plus}
+  - {pattern: '\b(distinguished|(technical|senior|corporate) fellow)\b', level: staff_plus}   # not a "Software Engineering Fellow" program
   - {pattern: '\b(principal|staff)\b', level: staff_plus}
   - {pattern: '\barchitect\b', level: staff_plus}
   - {pattern: '\b(director|head of|vp|vice president|chief)\b', level: manager}
-  - {pattern: '\b(engineering manager|manager|management)\b', level: manager}
+  - {pattern: '\b(engineering manager|manager)\b|^management\b', level: manager}   # not "…Engineer, Fleet Management"
   - {pattern: '\b(senior|sr)\b', level: senior}
   - {pattern: '\blead\b', level: senior}
   - {pattern: '\b(new graduate|university graduate|college graduate|early career|entry level|junior|graduate|associate|apprenticeship|rotational)\b', level: entry}
