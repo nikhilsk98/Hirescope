@@ -138,3 +138,21 @@ def test_two_jobs_same_company_never_share_a_folder_and_stray_copies_go(rb_env):
     assert not (hpe / "Demo_Candidate_Resume_HPE_6c3c2d.pdf").exists()
     assert (hpe / "Demo_Candidate_Resume_HPE_unique.pdf").exists()                  # unique content: kept
     assert any("duplicate of" in ln for ln in lines)
+
+
+def test_older_versions_naming_the_client_are_not_mirrored(rb_env, monkeypatch):
+    """Rule 39 (v4.8): an older READY version from before the rule (its PDF names Accenture's client) is not copied,
+    and the copy an earlier sync left is removed; the current version is always there."""
+    import subprocess
+    monkeypatch.setattr(desktop.subprocess, "run", lambda cmd, **k: subprocess.CompletedProcess(
+        cmd, 0, stdout=Path(cmd[1]).read_text(errors="replace")))
+    j = _job()
+    old = _version(j, 1, "ready")
+    (old / PDF).write_bytes(b"%PDF-1.5 v1 Associate Software Developer | Client: Macquarie Bank")
+    _version(j, 2, "ready")
+    versions.set_current(j, 1, "test")    # still current: kept (the only copy until it is regenerated)
+    assert sorted(p.name for p in (_desk() / "Acme" / "Cloud-Developer-Intern_123").glob("*.pdf")) == \
+        sorted([PDF, PDF.replace(".pdf", "_v2.pdf")])
+    versions.set_current(j, 2, "test")    # the regenerated version: the old one isn't mirrored any more
+    assert sorted(p.name for p in (_desk() / "Acme" / "Cloud-Developer-Intern_123").glob("*.pdf")) == [PDF]
+    assert b"v2" in (_desk() / "Acme" / "Cloud-Developer-Intern_123" / PDF).read_bytes()

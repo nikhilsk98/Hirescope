@@ -2,6 +2,7 @@
 
   <dir>/<Company>/<Role>_<JobID>/<First>_<Last>_Resume_<Company>.pdf      the current (last READY) version
   <dir>/<Company>/<Role>_<JobID>/<First>_<Last>_Resume_<Company>_v<N>.pdf  every other READY / reviewed version
+                                                                          (not one that names Accenture's client, rule 39)
   <dir>/Default/<First>_<Last>_Resume.pdf                                  the default resume (generated_resumes/_default)
 
 Same folder names as data.nosync/generated_resumes. Only PDFs of versions that passed every check; never .tex,
@@ -21,6 +22,7 @@ import hashlib
 import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
 from . import config as rc
@@ -76,8 +78,26 @@ def wanted(job_dir: Path) -> dict[str, Path]:
         if m.get("status") not in OK_STATUS or not pdf.is_file() or pdf.suffix != ".pdf":
             continue
         n = int(vdir.name[1:])
+        if n != cur and names_client(pdf):     # an older version from before rule 39 (v4.8): not attachable any more
+            continue
         out[pdf.name if n == cur else f"{pdf.stem}_v{n}.pdf"] = pdf
     return out
+
+
+_NAMED: dict[tuple[str, int], bool] = {}
+
+
+def names_client(pdf: Path) -> bool:
+    """Whether the PDF's text names Accenture's client (resume rule 39). Older versions that do are not mirrored."""
+    from jobsearch.output.employer_facing import never_named
+    k = (str(pdf), pdf.stat().st_mtime_ns)
+    if k not in _NAMED:
+        try:
+            text = subprocess.run(["pdftotext", str(pdf), "-"], capture_output=True, text=True, timeout=30).stdout
+        except (OSError, subprocess.SubprocessError):
+            text = ""
+        _NAMED[k] = bool(never_named(text))
+    return _NAMED[k]
 
 
 # a resume copy we own: <stem>.pdf, <stem>_v<N>.pdf, and stray copies of it (<stem>_19fc85.pdf with a short hex id,

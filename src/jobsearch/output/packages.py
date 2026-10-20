@@ -14,6 +14,8 @@ import re
 
 import yaml
 
+from .employer_facing import scrub
+
 PACKAGE_FORMAT = 2   # 2: adds the "ATS keywords" section
 FRONT_MATTER_KEYS = ["package_format", "company", "title", "job_id", "apply_url", "source", "posted_date",
                      "fetched_at", "resume_version_hash", "score", "label"]
@@ -52,9 +54,9 @@ def render_package(job: dict, jd_text: str, resume_hash: str) -> str:
 
     evidence = []
     for e in bd.get("evidence") or []:
-        evidence.append(f"JD: {e['jd']}\n  Resume ({e['section']}): {e['resume']}")
+        evidence.append(f"JD: {e['jd']}\n  Resume ({e['section']}): {scrub(e['resume'])}")
     for sk, line in (bd.get("skill_evidence") or {}).items():
-        evidence.append(f"{sk}: {line}")
+        evidence.append(f"{sk}: {scrub(line)}")    # resume lines: a package may be shared (resume rule 39)
 
     kw = job.get("keywords") or {}
     kw_lines = []
@@ -66,7 +68,7 @@ def render_package(job: dict, jd_text: str, resume_hash: str) -> str:
             if k["status"] == "synonym":
                 line += f" | resume says {k['resume_term']}"
             if k.get("evidence"):
-                line += f" | evidence ({k['evidence_section']}): {k['evidence']}"
+                line += f" | evidence ({k['evidence_section']}): {scrub(k['evidence'])}"
             kw_lines.append(line)
 
     flags = job.get("flags") or {}

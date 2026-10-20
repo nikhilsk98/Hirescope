@@ -40,6 +40,9 @@ scripts do everything deterministic. Run every command from the repo root with `
   carries no "In Progress" label (its line ends at "Northeastern University"; hard rule v4.7: no "In Progress",
   "in-progress", "Ongoing" or "WIP" anywhere on a resume — the build fails on the PDF text) but keeps design verbs only
   ("Designing", "Architecting"; never "Building" or "Built") and no results (rules 11, 50, 51).
+- Never name Accenture's client (hard rule 39, v4.8): the title line is "Associate Software Developer" only, bullets say
+  "a banking client" / "a banking client's"; the same for anything an employer sees (a cover letter or application
+  answer you're asked to write). The build fails when the PDF text contains "Macquarie".
 - One metric of each kind per resume (rule 8). Oracle is skill-only; Node.js stays out of Accenture bullets (12). No
   compliance claims (13). No performance numbers at Rescho (14). Skills: core always; extended / self-reported only when
   the JD mentions them (self-reported ≤ 4, never in a bullet), or a self-reported item Nikhil explicitly approves for

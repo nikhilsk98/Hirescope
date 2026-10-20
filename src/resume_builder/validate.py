@@ -25,6 +25,11 @@ IN_PROGRESS = re.compile(r"\bin[\s\-‐‑–]*progress\b|\bon[\s\-‐‑]?going
                          r"\bWIP\b|\bunder\s+development\b|\bcurrently\s+in\s+development\b", re.I)
 
 
+# Hard rule (rule 39, v4.8): Accenture's client is never named on a resume (the same list keeps it out of everything
+# else an employer may see). Checked on the PDF's own text, like the label rule above.
+from jobsearch.output.employer_facing import NEVER_NAMED, never_named  # noqa: E402,F401
+
+
 def in_progress_labels(text: str) -> list[str]:
     """Every "In Progress"-style status label in resume text (case-insensitive; "WIP" only in capitals or brackets)."""
     out = []
@@ -181,6 +186,10 @@ def validate_pdf(pdf: Path, expected: list[tuple[str, str]], expected_links: lis
               f"the resume says {', '.join(repr(x) for x in dict.fromkeys(labels))}: no project or entry may carry an "
               "\"In Progress\" / \"Ongoing\" / \"WIP\" label (rules 50–51); in-progress work shows only through design "
               "verbs (\"Designing\", \"Architecting\")" if labels else "")
+        named = never_named("\n".join(texts))
+        r.add("no_client_name", not named,
+              f"the resume names {', '.join(repr(x) for x in named)}: Accenture's client is never named on a resume; "
+              "write \"a banking client\" (rule 39)" if named else "")
         r.add("min_font_size", not sizes or min(sizes) >= min_pt - 0.05,
               f"smallest text {min(sizes) if sizes else '-'}pt (minimum {min_pt}pt)")
         r.add("clipping", not edge, f"text outside the page: {', '.join(edge[:5])}")

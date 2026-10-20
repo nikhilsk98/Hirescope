@@ -608,6 +608,11 @@ pending) / Failed**. Each finished build is saved by the build itself (version f
 - **No status labels** (hard rule, rules 50–51 v4.7): the PDF's own text may not contain "In Progress" or a
   variant ("in-progress", "(in progress)", "Ongoing", "WIP", "work in progress", "under development"); the build fails
   with a message naming it. In-progress work (VibeSpace) shows only through design verbs ("Designing", "Architecting").
+- **Accenture's client is never named** (hard rule, rule 39 v4.8): the PDF's own text may not contain "Macquarie"
+  (the content is checked before LaTeX too); the title line is "Associate Software Developer" only and bullets say "a
+  banking client" / "a banking client's". Employer-facing output follows the same rule: job packages replace the name
+  in the resume lines they quote, and the Desktop folder no longer keeps older versions that name it (the current one
+  always stays). Internal notes (the master's Client note, build reports) may keep it.
 - **Truth** (blocks "ready"): every bullet, skill, summary and talking point against the evidence ids it cites:
   numbers exactly as written (15+ may become 15, never 20), technologies (no AWS for GCP, no new tools), no ownership
   (led, managed, spearheaded…) or scale (large-scale, millions, enterprise…) or outcomes the evidence doesn't state.

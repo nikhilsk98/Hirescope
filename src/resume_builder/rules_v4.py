@@ -449,6 +449,15 @@ def problems(c, bank: Bank, settings, analysis: dict | None, after_repair: bool 
             b.id = f"{eid}:new{abs(hash(b.text)) % 10000}"
     bullets = list(c.all_bullets())
 
+    # rule 39 (v4.8, hard): Accenture's client is never named — not in a bullet, a title or an entry line
+    from jobsearch.output.employer_facing import never_named
+    for _s, eid, b in bullets:
+        if never_named(b.text):
+            out.append(f"{b.id}: names Accenture's client; write \"a banking client\" / \"a banking client's\" (rule 39)")
+    for ex in [*c.experience, *c.projects]:
+        if never_named(" ".join(str(getattr(ex, k, "") or "") for k in ("title", "tech"))):
+            out.append(f"{ex.entry_id}: its heading names Accenture's client; the title is the role only (rule 39)")
+
     # rule 4: usable evidence only; extended bank bullets only when the JD calls for them
     for _s, eid, b in bullets:
         for ev in b.evidence_ids:
