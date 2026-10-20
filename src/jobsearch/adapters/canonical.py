@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 from urllib.parse import parse_qs, urlparse
 
+# Eightfold sites in config/companies.yaml: host -> the domain= value their job ids belong to
+EIGHTFOLD_DOMAINS = {"apply.careers.microsoft.com": "microsoft.com", "careers.qualcomm.com": "qualcomm.com"}
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 
 
@@ -47,6 +49,8 @@ def canonical_key(url: str | None) -> str | None:
         return f"ashby:{m.group(0)}"
     if host.endswith("myworkdayjobs.com") or host.endswith("myworkdaysite.com"):
         tenant = host.split(".")[0]
+        if host.endswith("myworkdaysite.com") and (t := re.match(r"^/(?:[a-z]{2}-[A-Z]{2}/)?recruiting/([^/]+)/", path)):
+            tenant = t.group(1)                # wd1.myworkdaysite.com/recruiting/{tenant}/{site}/job/…
         if m := re.search(r"/job/(?:[^/]+/)*([^/?#]+)", path):
             return workday_key(tenant, m.group(1))
     if "smartrecruiters.com" in host and (m := re.search(r"/(\d{6,})", path)):
@@ -67,8 +71,19 @@ def canonical_key(url: str | None) -> str | None:
         return f"paylocity:{m.group(1)}"
     if "/JobDetail/" in path and (m := re.search(r"/JobDetail/(?:[^/]+/)?(\d+)/?$", path)):
         return f"avature:{host}:{m.group(1)}"
+    # Eightfold career sites (the eightfold adapter's key needs the site's domain= value)
+    if (m := re.match(r"^/careers/job/(\d+)", path)) and (dom := (qs.get("domain") or [None])[0] or EIGHTFOLD_DOMAINS.get(host)):
+        return f"eightfold:{dom}:{m.group(1)}"
     # Jibe career sites (the jibe adapter's key): the site's own job page, or the same page linked with ?icims=1
     if (m := re.match(r"^(?:/[a-z]{2}(?:-[a-z]{2})?)?/careers-home/jobs/(\d+)", path)) or \
             ("icims" in qs and (m := re.match(r"^/jobs/(\d+)", path))):
         return f"jibe:{host.removeprefix('www.')}:{m.group(1)}"
     return None
+
+
+def normalized(key: str | None) -> str | None:
+    """A stored key in today's form (older Workday keys kept the "-1" repost suffix)."""
+    if key and key.startswith("workday:") and key.count(":") >= 2:
+        _, tenant, slug = key.split(":", 2)
+        return workday_key(tenant, slug)
+    return key

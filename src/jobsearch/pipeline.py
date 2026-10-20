@@ -125,6 +125,20 @@ def jd_hash(text: str) -> str:
     return hashlib.sha256(" ".join(text.split()).encode()).hexdigest()[:20]
 
 
+_SIMPLIFY_SPONSOR = {"does not offer sponsorship": ("sponsorship", "No sponsorship"),
+                     "offers sponsorship": ("sponsorship", "Sponsorship available"),
+                     "u.s. citizenship is required": ("citizenship", "US citizenship required")}
+
+
+def _listing_flags(flags: dict, simplify: str | None) -> dict:
+    """The JD decides; a SimplifyJobs listing's own sponsorship field fills a flag the JD left unstated (a listing
+    without a JD yet: "U.S. Citizenship is Required" still hides it)."""
+    hit = _SIMPLIFY_SPONSOR.get(" ".join(str(simplify or "").casefold().split()))
+    if hit and flags.get(hit[0], {}).get("value") == "Not stated":
+        flags[hit[0]] = {"value": hit[1], "evidence": f"SimplifyJobs listing: {simplify}"}
+    return flags
+
+
 def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None, official: bool = True) -> db.JobRecord:
     rules = cfg.title_rules
     norm = normalize_title(raw.title, rules)
@@ -162,7 +176,7 @@ def to_record(raw: RawJob, cfg: Config, jd_dir: Path | None, official: bool = Tr
         yoe_required=yoe.min, yoe_max=yoe.max, yoe_evidence=yoe.evidence,
         degree=parse_degree("\n".join(reqs.minimum) or text),
         grad_years=parse_grad_years(f"{raw.title}\n{text}"),
-        flags=extract_flags(text, raw.title),
+        flags=_listing_flags(extract_flags(text, raw.title), raw.extra.get("simplify_sponsorship")),
         extra={**raw.extra, **({"yoe_preferred": y.min, "yoe_preferred_evidence": y.evidence} if y.min is not None
                                else {}), **({"has_jd": False} if not text else {}),
                **({"employment_type_raw": raw.employment_type} if raw.employment_type else {})},
@@ -530,6 +544,8 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
     from .adapters.canonical import canonical_key
     if m := db.merge_canonical_duplicates(conn, canonical_key):
         log.info("merged %d duplicate postings (same employer ATS posting)", m)
+    if m := db.split_wrong_merges(conn):
+        log.info("detached %d listings that were joined to a different posting", m)
     score_all(conn, cfg, resume, embedder, summary, learned)
     return summary
 

@@ -423,11 +423,41 @@ def find_fuzzy(conn, rec: JobRecord) -> int | None:
     ).fetchall()
     loc = _location_key(rec.location)
     for r in rows:
-        same_loc = not loc or not r["location"] or _location_key(r["location"]) == loc \
-            or fuzz.token_set_ratio(_location_key(r["location"]), loc) >= 90
-        if same_loc and fuzz.token_sort_ratio(r["normalized_title"], rec.normalized_title) >= FUZZY_TITLE_THRESHOLD:
+        exact = r["normalized_title"] == rec.normalized_title
+        # an unknown location only matches the same title exactly (different requisitions share roles)
+        same_loc = (_location_key(r["location"]) == loc or fuzz.token_set_ratio(_location_key(r["location"]), loc) >= 90) \
+            if loc and r["location"] else exact
+        if same_loc and (exact or fuzz.token_sort_ratio(r["normalized_title"], rec.normalized_title) >= FUZZY_TITLE_THRESHOLD) \
+                and not _other_posting(conn, r["id"], rec.canonical_key):
             return r["id"]
     return None
+
+
+def _other_posting(conn, pk: int, key: str | None) -> bool:
+    """The job is a different posting than `key`: it (or one of its listings) carries another ATS posting key."""
+    if not key:
+        return False
+    keys = {k for (k,) in conn.execute("SELECT canonical_key FROM job_sources WHERE job_pk=? AND canonical_key IS NOT "
+                                       "NULL UNION SELECT canonical_key FROM jobs WHERE id=? AND canonical_key IS NOT "
+                                       "NULL", (pk, pk))}
+    from ..adapters.canonical import normalized
+    return bool(keys) and normalized(key) not in {normalized(k) for k in keys}
+
+
+def split_wrong_merges(conn) -> int:
+    """Listings joined to a job whose posting key they contradict (an earlier fuzzy match of a different requisition:
+    P&G's internship under an Analytics Manager role) are detached; the next fetch stores them as their own job.
+    Returns listings detached."""
+    rows = conn.execute("SELECT s.rowid, s.canonical_key AS sk, j.canonical_key AS jk FROM job_sources s JOIN jobs j "
+                        "ON j.id = s.job_pk WHERE j.job_status != 'closed' AND s.canonical_key IS NOT NULL AND "
+                        "j.canonical_key IS NOT NULL AND s.canonical_key != j.canonical_key").fetchall()
+    from ..adapters.canonical import normalized
+    bad = [r["rowid"] for r in rows if r["sk"].split(":")[0] == r["jk"].split(":")[0]
+           and normalized(r["sk"]) != normalized(r["jk"])]
+    for rowid in bad:
+        conn.execute("DELETE FROM job_sources WHERE rowid=?", (rowid,))
+    conn.commit()
+    return len(bad)
 
 
 def find_by_canonical(conn, rec: JobRecord) -> int | None:

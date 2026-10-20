@@ -36,14 +36,7 @@ log = logging.getLogger("jobsearch.add_url")
 SOURCE = "added_url"
 
 
-# Sites whose terms forbid automated access (docs/experimental_big_tech.md) or that we never scrape (LinkedIn):
-# their pages are never fetched; add the job with a pasted JD instead.
-NO_FETCH_HOSTS = ("linkedin.com", "apple.com", "metacareers.com", "facebook.com", "meta.com")
-
-
-def no_fetch(url: str) -> bool:
-    host = (urlparse(url).hostname or "").lower()
-    return any(host == h or host.endswith("." + h) for h in NO_FETCH_HOSTS)
+from .adapters.util import NO_FETCH_HOSTS, no_fetch  # noqa: F401,E402  (sites never fetched; re-exported)
 
 
 class UnreadableURL(ValueError):

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from ..config import Company
@@ -24,10 +25,13 @@ from ..extract.track import COOP, FULL_TIME
 from .base import Adapter, Capabilities, FetchContext, FetchResult, NotModified, RawJob, SourceError
 from .canonical import canonical_key
 from .detect import from_url
-from .util import parse_dt
+from .util import parse_dt, unreadable
 
 log = logging.getLogger(__name__)
-ENRICH_SOURCES = {"greenhouse", "lever", "ashby", "workday", "smartrecruiters"}
+# employer ATSs whose adapter can read one posting by URL (fetch_one); any other employer page is tried for schema.org
+# JobPosting data (robots.txt respected), e.g. Jibe sites like careers.amd.com
+ENRICH_SOURCES = {"greenhouse", "lever", "ashby", "workday", "smartrecruiters", "rippling", "workable", "eightfold",
+                  "jobvite", "oracle_cloud", "bamboohr", "jazzhr", "paylocity"}
 
 
 def strip_tracking(url: str | None) -> str | None:
@@ -37,6 +41,16 @@ def strip_tracking(url: str | None) -> str | None:
     q = [(k, v) for k, v in parse_qsl(u.query, keep_blank_values=True)
          if not k.lower().startswith("utm_") and k.lower() not in ("ref", "source", "src", "gh_src")]
     return urlunparse(u._replace(query=urlencode(q)))
+
+
+def _edited_since(raw: RawJob, detail_at: str | None) -> bool:
+    """Simplify changed the listing after its JD was last fetched (e.g. its terms: Summer 2026 → N/A)."""
+    if not (raw.updated_at and detail_at):
+        return False
+    try:
+        return raw.updated_at > datetime.fromisoformat(detail_at)
+    except ValueError:
+        return False
 
 
 class SimplifyAdapter(Adapter):
@@ -65,7 +79,7 @@ class SimplifyAdapter(Adapter):
             raise SourceError(f"{company.name}: unexpected response shape from {url}")
 
         from .registry import ADAPTERS  # local import: registry imports this module
-        enrichers = {n: ADAPTERS[n](self.http) for n in ENRICH_SOURCES if n in ADAPTERS}
+        enrichers = {n: ADAPTERS[n](self.http) for n in (*ENRICH_SOURCES, "jsonld") if n in ADAPTERS}
         jobs, to_enrich = [], []
         for x in data:
             if not (x.get("active") and x.get("is_visible", True) and x.get("id") and x.get("title")):
@@ -80,7 +94,7 @@ class SimplifyAdapter(Adapter):
                 source_url=url,
                 apply_url=link,
                 location=" | ".join(locs) if locs else None,
-                description=None if x["id"] in ctx.known else "",
+                description=None if x["id"] in ctx.known else "",     # None: keep the stored JD
                 posted_date=parse_dt(x.get("date_posted")),
                 updated_at=parse_dt(x.get("date_updated")),
                 canonical_key=canonical_key(link),
@@ -91,13 +105,17 @@ class SimplifyAdapter(Adapter):
             )
             ats = (raw.canonical_key or "").split(":")[0]
             board = (from_url(link) or {}).get("board", "")
+            # a JD is wanted for a new listing, a known one never enriched (a capped run left it), one older than the
+            # refresh window, or one Simplify edited since (terms, title): re-read and re-stored whole
+            want_jd = raw.description == "" or ctx.needs_detail(raw.job_id) or _edited_since(raw, ctx.known.get(raw.job_id))
             if (ats, board.casefold()) in ctx.covered:
                 pass  # the employer's own board is fetched this run; that adapter supplies the JD
-            elif raw.description == "" and ats in enrichers and ctx.want(raw.title, raw.location):
-                to_enrich.append((raw, ats))
+            elif want_jd and link and ctx.want(raw.title, raw.location) and not unreadable(link):
+                to_enrich.append((raw, ats if ats in enrichers else "jsonld"))
             jobs.append(raw)
-        # newest first, capped per run; the rest are enriched on later runs
-        to_enrich.sort(key=lambda t: -(t[0].posted_date.timestamp() if t[0].posted_date else 0))
+        # never-enriched first, then newest; capped per run; the rest are enriched on later runs
+        to_enrich.sort(key=lambda t: (bool(ctx.known.get(t[0].job_id)),
+                                      -(t[0].posted_date.timestamp() if t[0].posted_date else 0)))
         capped = len(to_enrich) > ctx.max_details
         to_enrich = to_enrich[:ctx.max_details]
 
@@ -116,11 +134,12 @@ class SimplifyAdapter(Adapter):
                     continue
                 enriched += 1
                 raw.description = full.description or ""
+                raw.terms = list(dict.fromkeys([*raw.terms, *(full.terms or [])]))
                 raw.location = full.location or raw.location
                 raw.posted_date = full.posted_date or raw.posted_date
                 raw.employment_type = full.employment_type
                 raw.extra.update({k: v for k, v in full.extra.items() if k == "deadline"})
-        notes = [f"JD pulled from employer ATS for {enriched} new listings" + (f" ({failed} failed)" if failed else "")]
+        notes = [f"JD pulled from employer ATS for {enriched} listings" + (f" ({failed} failed)" if failed else "")]
         partial = None
         if capped:
             notes.append(f"JD enrichment capped at {ctx.max_details} newest listings; the rest are enriched on later runs")
