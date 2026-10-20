@@ -51,13 +51,17 @@ _UNDER_DATA = {
 }
 
 
+_REPO_ROOT = ROOT
+
+
 def __getattr__(name: str):
     if name in _UNDER_DATA:
         return DATA.joinpath(*_UNDER_DATA[name])
     if name == "SYNC_JS":                 # SQLite -> dashboard: your statuses and applications
         return DASHBOARD / "sync.js"
     if name == "EXTERNAL_INBOX":          # drop folder: JD files of jobs found outside HireScope (the next run imports)
-        return ROOT / "inputs" / "external_jobs"
+        env = os.environ.get("JOBSEARCH_EXTERNAL_INBOX")      # tests and runs against a copy: never the real folder
+        return Path(env).expanduser() if env and ROOT == _REPO_ROOT else ROOT / "inputs" / "external_jobs"
     raise AttributeError(name)
 
 

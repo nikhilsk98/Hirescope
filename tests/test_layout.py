@@ -103,3 +103,11 @@ def test_migration_script_moves_an_old_layout(tmp_path):
     c.close()
     again = run()
     assert again.returncode == 0 and "already" in again.stdout                # idempotent
+
+
+def test_tests_never_write_to_the_real_drop_folder():
+    """The drop folder is the repo's inputs/external_jobs/: tests (and runs against a copy) use a stand-in, so a DEMO
+    JD can't be imported into the real database by the next run."""
+    from jobsearch import paths
+    assert paths.EXTERNAL_INBOX != paths.ROOT / "inputs" / "external_jobs"
+    assert "sandbox" in str(paths.EXTERNAL_INBOX)

@@ -86,6 +86,7 @@ def data_sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr(_p, "DASHBOARD", tmp_path / "sandbox" / "dashboard")
     monkeypatch.setenv("JOBSEARCH_EXCEL_PATH", str(tmp_path / "sandbox" / "Desktop" / "HireScope Applications.xlsx"))
     monkeypatch.setenv("JOBSEARCH_DOWNLOADS_DIR", str(tmp_path / "sandbox" / "Downloads"))
+    monkeypatch.setenv("JOBSEARCH_EXTERNAL_INBOX", str(tmp_path / "sandbox" / "inputs" / "external_jobs"))   # not the repo's
     monkeypatch.setenv("HIRESCOPE_NO_KICK", "1")
     monkeypatch.setenv("HIRESCOPE_NO_NOTIFY", "1")
     monkeypatch.setenv("HIRESCOPE_NO_LSOF", "1")
