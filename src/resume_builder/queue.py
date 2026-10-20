@@ -18,12 +18,13 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import signal
 import sqlite3
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from jobsearch import paths as hs_paths
@@ -300,6 +301,41 @@ def _abandon_stale_work(conn, item: dict) -> None:
         (work / "state.json").write_text(json.dumps(st, indent=1), encoding="utf-8")
 
 
+PAUSE_KEY = "queue_paused_until"
+_LIMIT = re.compile(r"\b(?:session|usage|weekly|daily) limit\b|\blimit reached\b|rate[- ]limited", re.I)
+_RESETS = re.compile(r"resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:\(([A-Za-z_]+/[A-Za-z_]+)\))?", re.I)
+
+
+def usage_limit_until(reason: str | None, now_: datetime | None = None) -> datetime | None:
+    """When a build stopped on Claude's usage limit ("You've hit your session limit · resets 7:40am
+    (America/New_York)"): the reset time (+2 min), else 30 minutes from now. None for any other failure."""
+    if not reason or not _LIMIT.search(reason):
+        return None
+    from zoneinfo import ZoneInfo
+    now_ = now_ or datetime.now(timezone.utc)
+    m = _RESETS.search(reason)
+    if not m:
+        return now_ + timedelta(minutes=30)
+    tz = ZoneInfo(m.group(4)) if m.group(4) else datetime.now().astimezone().tzinfo
+    h, mi = int(m.group(1)) % 12 + (12 if (m.group(3) or "").lower() == "pm" else 0), int(m.group(2) or 0)
+    if not m.group(3) and int(m.group(1)) >= 12:
+        h = int(m.group(1))
+    local = now_.astimezone(tz)
+    at = local.replace(hour=h, minute=mi, second=0, microsecond=0)
+    if at <= local:
+        at += timedelta(days=1)
+    return (at + timedelta(minutes=2)).astimezone(timezone.utc)
+
+
+def paused_until(conn) -> datetime | None:
+    v = db.get_meta(conn, PAUSE_KEY)
+    try:
+        t = datetime.fromisoformat(v) if v else None
+    except ValueError:
+        t = None
+    return t if t and t > datetime.now(timezone.utc) else None
+
+
 def outcome(conn, item: dict, started: str, rc_: int | None, log_file: Path | None) -> tuple[bool, str, int | None]:
     """(success, reason / summary, version) for a finished build: success = the job's current version is READY and
     was built after the item started (or prepare reused a still-valid version)."""
@@ -404,8 +440,10 @@ class Worker:
         return connect(self.db_path)
 
     def _write_live(self, conn, state: str) -> None:
+        until = paused_until(conn)
         db.set_meta(conn, "queue_worker", json.dumps({"pid": os.getpid(), "state": state, "paused": self.paused,
-                                                       "heartbeat": now()}))
+                                                       "heartbeat": now(), "limit_until": until.isoformat(
+                                                           timespec="seconds") if until else None}))
         conn.commit()
         try:
             from jobsearch import live
@@ -467,6 +505,18 @@ class Worker:
             after_build(conn, pk)
             notify("Resume ready" + (" (questions pending)" if pending else ""), f"{name} — v{version}")
             return
+        if (until := usage_limit_until(why)) is not None:
+            # Claude's usage limit, not the resume: wait for the reset and build it then (the attempt doesn't count)
+            db.set_meta(conn, PAUSE_KEY, until.isoformat(timespec="seconds"))
+            retry_locked(_exec, conn, "UPDATE resume_queue SET status='queued', pid=NULL, attempts=MAX(attempts-1, 0), "
+                         "message=? WHERE id=?", (f"waiting for Claude's usage limit to reset ({until:%H:%M %Z})", iid))
+            try:
+                hirescope_bridge.set_status(pk, "queued", "waiting for Claude's usage limit to reset",
+                                            db_path=_db_path(conn))
+            except Exception:  # noqa: BLE001
+                pass
+            log.info("usage limit reached; builds wait", extra={"job": pk, "item": iid, "until": until.isoformat()})
+            return
         if item["attempts"] <= self.s["retries"]:
             retry_locked(_exec, conn, "UPDATE resume_queue SET status='queued', pid=NULL, message=? WHERE id=?",
                          (f"retrying (attempt {item['attempts'] + 1} of {self.s['retries'] + 1}): {why}"[:500], iid))
@@ -520,6 +570,8 @@ class Worker:
                 log.warning("dashboard publish failed", extra={"error": str(e)[:200]})
                 db.set_meta(conn, "publish_pending", "")
                 conn.commit()
+        if paused_until(conn):                         # Claude's usage limit: nothing new starts before the reset
+            return
         busy = {r["item"]["job_pk"] for r in self.running.values()}
         free = self.s["concurrency"] - len(self.running)
         if free <= 0:

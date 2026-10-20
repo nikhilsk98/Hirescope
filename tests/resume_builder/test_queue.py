@@ -24,6 +24,9 @@ if mode == "sleep":
 if mode == "fail":
     print("Error: DEMO build failed on purpose", flush=True)
     sys.exit(3)
+if mode == "limit":
+    print("You've hit your session limit · resets 7:40am (America/New_York)", flush=True)
+    sys.exit(1)
 n = 1
 while os.path.isdir(os.path.join(job_dir, f"v{n}")):
     n += 1
@@ -862,3 +865,33 @@ def test_worker_main_installs_sigterm_and_runs(monkeypatch):
     with pytest.raises(SystemExit) as e:
         queue._sigterm(15, None)
     assert e.value.code == 0
+
+
+def test_usage_limit_is_a_wait_not_a_failure():
+    from datetime import datetime, timezone
+    from resume_builder.queue import usage_limit_until
+    now_ = datetime(2026, 10, 20, 9, 38, tzinfo=timezone.utc)                      # 05:38 in New York
+    t = usage_limit_until("You've hit your session limit · resets 7:40am (America/New_York)", now_)
+    assert t == datetime(2026, 10, 20, 11, 42, tzinfo=timezone.utc)                # 07:40 EDT + 2 minutes
+    assert usage_limit_until("Usage limit reached", now_) == datetime(2026, 10, 20, 10, 8, tzinfo=timezone.utc)
+    assert usage_limit_until("bullet_length: bullets over 2 lines", now_) is None
+
+
+def test_a_usage_limit_waits_for_the_reset_and_keeps_both_attempts(qenv):
+    """Claude's usage limit is not the resume's fault: the item goes back in the queue (no attempt used) and nothing
+    starts before the reset, so 20 queued builds don't all fail within two minutes (2026-10-20)."""
+    qenv.use("limit", qenv.a)
+    queue.add(qenv.conn, [qenv.a, qenv.b])
+    w = queue.Worker(poll=0.05)
+    w.tick(qenv.conn)
+    w.running[next(iter(w.running))]["proc"].wait()
+    w.tick(qenv.conn)                                   # finishes item a: back to queued, paused
+    it = qenv.conn.execute("SELECT * FROM resume_queue WHERE job_pk=?", (qenv.a,)).fetchone()
+    assert it["status"] == "queued" and it["attempts"] == 0 and "usage limit" in it["message"]
+    assert queue.paused_until(qenv.conn) is not None
+    w.tick(qenv.conn)
+    assert not w.running                                # b doesn't start before the reset
+    qenv.conn.execute("DELETE FROM meta WHERE key=?", (queue.PAUSE_KEY,))
+    qenv.use("ok", qenv.a)
+    w.tick(qenv.conn)
+    assert w.running                                    # after the reset the queue goes on
