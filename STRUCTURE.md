@@ -38,7 +38,7 @@ hirescope/
     ├── job_packages/<Company>/  job packages saved on disk (external jobs' packages are rewritten each run)
     ├── external_jobs/<Company>/ original PDF / DOCX of imported external jobs (_imported/: drop-folder files after import)
     ├── applications/            saved JD copies for your applications
-    ├── imports/                 dashboard exports that were imported (external/: imported "Add external job" files)
+    ├── imports/                 dashboard exports that were imported (statuses/, external/: moved out of Downloads)
     ├── generated_resumes/
     │   ├── <Company>/<Role>_<JobID>/
     │   │   ├── v1/, v2/, …      Nikhil_<Last>_Resume_<Company>.pdf, main.tex, content.tex, content.json,

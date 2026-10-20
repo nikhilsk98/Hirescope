@@ -288,7 +288,8 @@ def _merge_app(conn, app_id: str, a: dict, exported: str, apps_dir: Path | None,
 
 
 def import_newest(conn, directory: Path | list[Path], apps_dir: Path | None, archive_dir: Path | None = None) -> ImportResult:
-    """Import the newest export in `directory` (one folder or several) unless that exact file was imported already."""
+    """Import the newest export in `directory` (one folder or several) unless that exact file was imported already,
+    then (with `archive_dir`) move it and any older exports into `archive_dir`/statuses."""
     dirs = directory if isinstance(directory, list) else [directory]
     path = newest_export(dirs)
     if path is None:
@@ -300,6 +301,7 @@ def import_newest(conn, directory: Path | list[Path], apps_dir: Path | None, arc
     st = path.stat()
     sig = f"{path.name}:{st.st_mtime_ns}:{st.st_size}"
     if db.get_meta(conn, "statuses_import") == sig:
+        _archive(path, dirs, archive_dir)
         return ImportResult(file=str(path), skipped_reason="already imported")
     try:
         payload = load_export(path)
@@ -307,14 +309,34 @@ def import_newest(conn, directory: Path | list[Path], apps_dir: Path | None, arc
         return ImportResult(file=str(path), skipped_reason=f"unreadable: {e}")
     res = merge(conn, payload, apps_dir)
     res.file = str(path)
-    if archive_dir is not None:   # keep a copy with the run's data (covered by backups)
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(path, archive_dir / f"statuses-{res.exported_at[:19].replace(':', '')}.json")
     db.set_meta(conn, "statuses_import", sig)
     db.set_meta(conn, "statuses_imported_at", db.utcnow())
     conn.commit()
     log.info("imported statuses from %s: %s", path, {k: v for k, v in res.as_dict().items() if v and k != "file"})
+    _archive(path, dirs, archive_dir)
     return res
+
+
+def _archive(path: Path, dirs: list[Path], archive_dir: Path | None) -> None:
+    """Move the imported export and every older one out of the import folders into `archive_dir`/statuses (covered by
+    backups), so ~/Downloads doesn't collect "(1)", "(2)" copies and an older leftover is never picked up as newest."""
+    if archive_dir is None:
+        return
+    dest = archive_dir / "statuses"
+    cutoff = path.stat().st_mtime
+    for p in [p for d in dirs if access(d) == "ok" for p in d.glob(EXPORT_GLOB) if p.is_file()]:
+        try:
+            if p.stat().st_mtime > cutoff:    # saved after the one imported: the next run's
+                continue
+            dest.mkdir(parents=True, exist_ok=True)
+            stamp = datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).strftime("%Y%m%dT%H%M%S")
+            target, n = dest / f"{stamp}_{p.name}", 1
+            while target.exists():
+                n += 1
+                target = dest / f"{stamp}_{n}_{p.name}"
+            shutil.move(str(p), target)
+        except OSError as e:     # e.g. ~/Downloads not writable for a scheduled job: the signature prevents re-import
+            log.info("left %s in place (%s)", p, e)
 
 
 # --- every job marked applied is in My Applications ---------------------------------------------------------

@@ -206,13 +206,56 @@ def test_import_newest_file_once(conn, tmp_path):
                                                                           "updated_at": "2026-10-12T00:00:00Z"}})))
     import os
     os.utime(old, (1_700_000_000, 1_700_000_000))
-    r = statuses.import_newest(conn, d, None, tmp_path / "imports")
+    r = statuses.import_newest(conn, d, None)
     assert r.file.endswith("(1).json") and r.statuses_applied == 1
-    assert list((tmp_path / "imports").iterdir())
     assert statuses.import_newest(conn, d, None).skipped_reason == "already imported"
     assert statuses.import_newest(conn, tmp_path / "missing", None).skipped_reason.startswith("no ")
     (d / "jobsearch-statuses (2).json").write_text("{not json")
     assert statuses.import_newest(conn, d, None).skipped_reason.startswith("unreadable")
+
+
+def test_import_moves_imported_and_older_exports_out_of_downloads(conn, tmp_path):
+    import os
+    _job(conn)
+    d, imports = tmp_path / "Downloads", tmp_path / "imports"
+    d.mkdir()
+    for i, (name, status) in enumerate((("jobsearch-statuses.json", "skipped"), ("jobsearch-statuses (1).json", "shortlisted"),
+                                        ("jobsearch-statuses (2).json", "applied"))):
+        f = d / name
+        f.write_text(json.dumps(_export(statuses={"DemoCo::greenhouse::1": {"status": status,
+                                                                            "updated_at": f"2026-10-1{i}T00:00:00Z"}})))
+        os.utime(f, (1_700_000_000 + i, 1_700_000_000 + i))
+    (d / "other.json").write_text("{}")
+    r = statuses.import_newest(conn, d, None, imports)
+    assert r.file.endswith("(2).json") and r.statuses_applied == 1
+    assert conn.execute("SELECT user_status FROM jobs").fetchone()[0] == "applied"
+    assert sorted(p.name for p in d.iterdir()) == ["other.json"]           # Downloads is clean, other files untouched
+    moved = sorted(p.name for p in (imports / "statuses").iterdir())
+    assert len(moved) == 3 and all(n.endswith(".json") and "jobsearch-statuses" in n for n in moved)
+    assert statuses.import_newest(conn, d, None, imports).skipped_reason.startswith("no ")
+    # a newer export saved later is imported next time; one saved again under an archived name doesn't collide
+    f = d / "jobsearch-statuses.json"
+    f.write_text(json.dumps(_export(statuses={"DemoCo::greenhouse::1": {"status": "interviewing",
+                                                                        "updated_at": "2026-10-15T00:00:00Z"}})))
+    os.utime(f, (1_700_000_000, 1_700_000_000))
+    assert statuses.import_newest(conn, d, None, imports).file.endswith("jobsearch-statuses.json")
+    assert len(list((imports / "statuses").iterdir())) == 4 and not list(d.glob("jobsearch-statuses*"))
+
+
+def test_import_leaves_exports_newer_than_the_imported_one(conn, tmp_path, monkeypatch):
+    import os
+    _job(conn)
+    d = tmp_path / "Downloads"
+    d.mkdir()
+    old, new = d / "jobsearch-statuses.json", d / "jobsearch-statuses (1).json"
+    for f, t in ((old, 1_700_000_000), (new, 1_700_000_100)):
+        f.write_text(json.dumps(_export()))
+        os.utime(f, (t, t))
+    statuses._archive(old, [d], tmp_path / "imports")                    # e.g. (1) arrived during the import
+    assert not old.exists() and new.exists()
+    monkeypatch.setattr(statuses.shutil, "move", lambda *a: (_ for _ in ()).throw(PermissionError("read-only")))
+    statuses._archive(new, [d], tmp_path / "imports")                    # not movable: left in place, no error
+    assert new.exists()
 
 
 def test_sync_payload_round_trip(conn, tmp_path):

@@ -384,10 +384,11 @@ def test_import_pending_script_imports_dashboard_files_now(monkeypatch, tmp_path
     assert '"DemoAir"' in (tmp_path / "dashboard" / "data.js").read_text()
     assert "Elsewhere (DEMO)" in (tmp_path / "dashboard" / "sync.js").read_text()
     assert not list(downloads.glob("hirescope-external-job*"))                 # moved out after import
+    assert not list(downloads.glob("jobsearch-statuses*"))                     # this one too
     before = (tmp_path / "dashboard" / "data.js").stat().st_mtime_ns
     assert IP.main(common) == 0                                                 # again: nothing waiting
     out = capsys.readouterr().out
-    assert "already imported" in out and "nothing waiting" in out and "dashboard updated" not in out
+    assert "statuses: no jobsearch-statuses" in out and "nothing waiting" in out and "dashboard updated" not in out
     assert (tmp_path / "dashboard" / "data.js").stat().st_mtime_ns == before
     with RunLock(paths.STATE_DIR / "run.lock", what="run"):                      # a run in progress: leave it to the run
         assert IP.main(common) == 3

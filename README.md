@@ -42,7 +42,7 @@ never logs in, never scrapes LinkedIn, never applies or messages anyone, and sen
 | Stage | Reads | Writes |
 |---|---|---|
 | Inputs | `inputs/preferences.yaml`, `inputs/resume/master_resume.md`, `inputs/companies/my_companies.csv`, `config/*.yaml`, `.env` | — |
-| Import your side | newest `~/Downloads/jobsearch-statuses*.json` (dashboard export) | SQLite `jobs.user_*`, `applications`, `application_events`; `data.nosync/imports/` |
+| Import your side | newest `~/Downloads/jobsearch-statuses*.json` (dashboard export) | SQLite `jobs.user_*`, `applications`, `application_events`; `data.nosync/imports/statuses/` |
 | Plan | tier schedules, My Companies, `--quick` / `--source` / `--company` | which sources run now |
 | Fetch (parallel, polite) | employer ATS APIs, feeds, HN API, IMAP (optional) | `data.nosync/jd/*.txt`, HTTP validators (ETag) |
 | Extract | JD text | title/level/track/terms/location/YOE/degree/flags/deadline/keywords per job |
@@ -330,7 +330,8 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
   `jobsearch-statuses.json` (format 3). Each run imports the newest `jobsearch-statuses*.json` in
   `statuses_import_dir` (default `~/Downloads`; `--statuses FILE` for a specific one, `--no-import` to skip) and merges
   it into SQLite: per item, **SQLite wins unless the export's entry is newer**; application timelines are unioned.
-  Imported files are archived in `data.nosync/imports/`.
+  The imported file and any older exports are then moved into `data.nosync/imports/statuses/`, so Downloads doesn't
+  collect `(1)`, `(2)` copies (an export saved after the imported one stays for the next run).
 - **Import now: `./scripts/import_pending.sh`** — the fallback after a dashboard session. It imports the newest
   Export statuses file and every "Add external job" file (plus the `inputs/external_jobs/` drop folder) from the same
   folders a run reads, then rewrites the dashboard once (no fetching; a few seconds). Each file is imported once, so
@@ -800,7 +801,7 @@ Plists are rendered from `scripts/launchd/com.nikhil.jobsearch{,.quick}.plist.te
 | `data.nosync/applications/` | saved JD copies for your applications |
 | `inputs/external_jobs/` | drop folder: JD files of jobs found outside HireScope (imported by the next run) |
 | `data.nosync/external_jobs/<Company>/` | original PDF / DOCX files of imported external jobs; `_imported/` = drop-folder files after import |
-| `data.nosync/imports/` | archived dashboard exports that were imported (`external/`: imported "Add external job" files) |
+| `data.nosync/imports/` | archived dashboard exports that were imported (`statuses/`: Export statuses files, moved out of Downloads; `external/`: imported "Add external job" files) |
 | `data.nosync/backups/` | daily backups (last 14) |
 | `data.nosync/digests/`, `data.nosync/exports/` | weekly digest pages, Excel exports |
 | `data.nosync/state/run.lock`, `data.nosync/logs/last_run_summary.txt` | run lock, last run's summary |

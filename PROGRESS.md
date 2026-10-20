@@ -24,7 +24,7 @@ end, then "Known limitations" and "Needs Nikhil".
 **Built**
 - `tracker/statuses.py`: imports the newest `jobsearch-statuses*.json` from `~/Downloads` each run (`--statuses FILE`,
   `--no-import`); per item SQLite wins unless the export is newer; entries capped at the export's own time; timelines
-  unioned; idempotent; archived to `data/imports/`. SQLite → `dashboard/sync.js` (statuses, notes, overrides,
+  unioned; idempotent; the imported and older exports are moved to `data.nosync/imports/statuses/`. SQLite → `dashboard/sync.js` (statuses, notes, overrides,
   applications, job state), merged by the page on load (newer wins).
 - Migration 6: `applications`, `application_events`, `jobs.track_override_at`, `jobs.user_notes`. Saved JD copies in
   `data/applications/` (from the export, else copied from the stored JD).
