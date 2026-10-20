@@ -108,6 +108,10 @@ distinguished, director, manager, architect, head of are excluded. Company level
 normalized with `config/locations.yaml` (NYC → New York, NY; "US Remote" → Remote (US)); non-US jobs are
 filtered and unknown locations are left uncertain.
 
+**Old postings**: a job posted more than `ghost.stale_days` (365) days ago stays visible when an official job system
+(the employer's ATS API or careers site, not an aggregator) listed it in the last 3 days, with an **Old posting**
+badge and a ghost-risk penalty (`ghost.stale_penalty`, 8); it is hidden only when no source can confirm it's open.
+
 ### Sources
 
 | Source | How | Notes |
@@ -574,7 +578,10 @@ pending) / Failed**. Each finished build is saved by the build itself (version f
 - **Queue** (`resume_queue` in SQLite; survives restarts): one build at a time by default
   (`config/resume_builder.yaml` → `resume_queue.concurrency`, max 2), never the same job twice at once; a job with a
   current READY resume is skipped unless you asked for Regenerate. A failed build is retried once, then marked
-  Failed with the reason (`resume_queue.retries`); a build running longer than `timeout_minutes` (45) is stopped.
+  Failed with the reason (`resume_queue.retries`); a build "Generating" longer than `timeout_minutes` (30) is stopped, marked Failed with the reason and
+  retried once. A watchdog in the worker does the same for builds nothing is running any more (a queue item left
+  "generating", or a Terminal session abandoned mid-way: its generation is set aside and the job queued once); a
+  session whose drafts are still changing is left alone. Claude's usage limit is a wait, not a failure.
   The worker pauses while a HireScope run holds the run lock and retries when SQLite says "database is locked".
   Logs: `data.nosync/logs/queue/` (one per attempt), `data.nosync/logs/launcher.log` (every link and its outcome).
 - **Queue mode never asks** (`--queue`): `prepare --queue` saves the keyword questions to **Questions for you**
