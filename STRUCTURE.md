@@ -81,6 +81,10 @@ hirescope/
   tests point it at a temporary folder (`JOBSEARCH_DESKTOP_DIR`).
 - Resume Builder inputs can come from a copy: `JOBSEARCH_RESUME_INPUTS_DIR=/copy-of-inputs-resume` (with
   `JOBSEARCH_DATA_DIR` / `JOBSEARCH_DASHBOARD_DIR` for a full test run that touches nothing real).
+- Job systems added 2026-10-20: `adapters/oracle_cloud.py` (Oracle Recruiting Cloud), `adapters/smallats.py` (BambooHR,
+  JazzHR, Paylocity, Avature); SuccessFactors and Radancy sites use `adapters/jsonld.py`'s sitemap adapter (microdata,
+  RSS sitemaps). Resume Builder submissions' answers: `external_resume.record_outcome` → meta `external_outcomes` →
+  `dashboard/live.js` (`external`). Employer-facing text: `output/employer_facing.py` (rule 39's never-named list).
 - External jobs (source `external`): `src/jobsearch/external.py` (reading, duplicates, import), `add_job.py` (CLI);
   their JD text goes to `jd/<Company>/external_<company>_ext-<id>.txt` like any other job's.
 - Running against a copy: `JOBSEARCH_DATA_DIR=/copy JOBSEARCH_DASHBOARD_DIR=/copy-dashboard …` leaves the real

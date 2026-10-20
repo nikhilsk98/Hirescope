@@ -113,17 +113,21 @@ filtered and unknown locations are left uncertain.
 | Source | How | Notes |
 |---|---|---|
 | Greenhouse, Lever, Ashby | official public job-board APIs | full JD in one call; ETag/304 skips unchanged boards |
-| Workday | the `cxs` JSON every `*.myworkdayjobs.com` page uses | US location facet + role keyword searches; JD fetched only for relevant jobs, cached 7 days |
+| Workday | the `cxs` JSON every `*.myworkdayjobs.com` page uses | US location facet + role keyword searches (up to the tier's `max_pages`; a search stops after 3 pages with no relevant title, results being relevance-ranked); JD fetched only for relevant jobs, cached 7 days; an HTTP 429 keeps what was found (partial) |
 | SmartRecruiters | public Posting API (`country=us`) | JD fetched only for relevant jobs; ETag/304 skips unchanged listings |
 | Rippling | public board API behind `ats.rippling.com/<slug>/jobs` | whole board in one call; JD fetched only for relevant jobs |
 | Jobvite | the employer's hosted `jobs.jobvite.com/<slug>` pages (its JSON API needs an employer key) | listing pages + `JobPosting` JSON-LD on job pages; robots.txt respected |
 | Eightfold | the PCSX JSON behind `<host>/careers?domain=<domain>` (e.g. Microsoft) | ≤300 US jobs: listed in full; bigger sites: role keyword searches, capped at 200 results each; robots.txt checked |
 | Workable | the public widget API Workable provides for embedding (`apply.workable.com/api/v1/widget/accounts/<slug>?details=true`) | whole board with descriptions in one call |
 | iCIMS | the portal's `sitemap.xml` + schema.org `JobPosting` on each job page (`?in_iframe=1`); iCIMS has no public job API | robots.txt respected (some portals disallow everything: those stay manual); pages cached by `lastmod` |
+| Oracle Recruiting Cloud | the public REST API behind every `…oraclecloud.com/hcmUI/CandidateExperience/…/sites/<site>` page (JPMorgan Chase, Oracle, Akamai, Fortinet) | role keyword searches in the site's United States facet, relevance stop; JD fetched only for relevant jobs |
+| SAP SuccessFactors, Radancy | the career site's `sitemap.xml` (any sitemap namespace, or an RSS job feed) + schema.org `JobPosting` (microdata on SuccessFactors, JSON-LD on Radancy) (Dynatrace, Cimpress, Ascend Learning, NTT DATA, Intuit) | title words in the job URL prefilter; robots.txt respected |
+| BambooHR, JazzHR, Paylocity | `<co>.bamboohr.com/careers/list` + `/detail` JSON; JazzHR's `/apply` listing (also on a company's own domain) + JSON-LD job pages; Paylocity's board page data + JSON-LD job pages | JD fetched only for relevant jobs |
+| Avature | the portal's job search pages (following its own pagination) + job pages (Bloomberg, Two Sigma, Siemens Digital Industries Software) | robots.txt allows `/careers`; location from the list or the job page |
 | Careers-site JSON feeds | Jibe career sites' own `/api/jobs` feed (AMD, Rivian, Schneider Electric, Publicis Sapient, N-able) | US jobs, full descriptions; detected automatically from a `careers_url` |
 | Amazon | `amazon.jobs/en/search.json` (best effort) | software-development category + intern/co-op/new-grad searches; ETag/304 skips unchanged listings |
 | Netflix | careers sitemap + schema.org `JobPosting` JSON-LD | its JSON search API is not public; pages cached by `lastmod` |
-| SimplifyJobs | `listings.json` from `SimplifyJobs/Summer2027-Internships` (incl. off-season) and `SimplifyJobs/New-Grad-Positions` | aggregator; JD pulled from the linked employer ATS for new relevant listings (capped per run). Repo names change yearly — update the URLs in `config/companies.yaml` |
+| SimplifyJobs | `listings.json` from `SimplifyJobs/Summer2027-Internships` (incl. off-season) and `SimplifyJobs/New-Grad-Positions` | aggregator; JD pulled from the linked employer ATS (any adapter above, else the page's JSON-LD; bot-blocked sites skipped) for relevant listings without one, stale ones, and ones Simplify edited (capped per run, never-enriched first); its sponsorship field fills a flag the JD leaves unstated. Repo names change yearly — update the URLs in `config/companies.yaml` |
 | Custom careers pages | `JobPosting` JSON-LD on the page and its job links | robots.txt respected; never logs in |
 | Hacker News Who's Hiring | official HN API (`hacker-news.firebaseio.com/v0`): newest "Ask HN: Who is hiring?" thread | one job per post (`Company \| Role \| Location \| …`); non-software posts skipped and remembered; only new posts fetched; last month's posts age out |
 | LinkedIn job alerts | **your own alert emails**, read-only over IMAP | needs `.env` (below); never opens LinkedIn; listings have no JD until an official ATS lists the same role |
@@ -168,7 +172,8 @@ Every row is checked **every run** with full pagination. The job system is auto-
 `careers_url` is an ATS URL → cached detection (re-run when `careers_url` changes) → seed list → SimplifyJobs-derived directory → ATS links on the
 careers page → company-name probes (Greenhouse, Lever, Ashby, SmartRecruiters) → JSON-LD on the careers page →
 **Manual check needed** (shown with a direct link, never dropped). A cached detection that fails is re-detected.
-Companies on job systems HireScope can't read (iCIMS, SuccessFactors, Workable, own sites whose terms forbid it…)
+Companies on job systems HireScope can't read (UKG, Paycor, Kula, Dover and Pinpoint disallow it in robots.txt; Comeet
+needs an unpublished token; Taleo, Njoyn, JobDiva; own sites whose terms forbid it…)
 are listed under `manual:` in `config/company_aliases.yaml` with the reason; their `careers_url` is the page to check.
 Test one company: `python -m jobsearch.run --company "Stripe" --verbose`.
 
@@ -860,6 +865,8 @@ any resume-scoring service); its drafting and review happen in **your Claude Cod
 | `GET apply.workable.com/api/v1/widget/accounts/<slug>?details=true` | per Workable company | none |
 | `GET <portal>.icims.com/robots.txt`, `/sitemap.xml`, `/jobs/<id>/<slug>/job?in_iframe=1` | per iCIMS company (job pages only for relevant new/changed jobs) | none |
 | `GET <careers site>/api/jobs?page=N&limit=100&country=United States` | per Jibe careers site; once during detection (`limit=1`) | none |
+| `GET <host>/hcmRestApi/resources/latest/recruitingCEJobRequisitions?…` + `…Details?…` | per Oracle Recruiting Cloud company | search keywords and the site's US facet id |
+| `GET <site>/sitemap.xml` + job pages, `<co>.bamboohr.com/careers/list` (+ `/<id>/detail`), `<board>/apply` (+ job pages), `recruiting.paylocity.com/recruiting/jobs/All/<guid>` (+ `/Jobs/Details/<id>`), `<avature portal>/SearchJobs?…Offset=N` (+ job pages) | per SuccessFactors / Radancy / BambooHR / JazzHR / Paylocity / Avature company | none |
 | `GET www.amazon.jobs/en/search.json?...` | Amazon | search keywords |
 | `GET explore.jobs.netflix.net/careers/sitemap…` + job pages | Netflix (pages only when new/changed) | none |
 | `GET raw.githubusercontent.com/SimplifyJobs/…/listings.json` (conditional) | SimplifyJobs feeds | none |
