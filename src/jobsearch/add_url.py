@@ -204,10 +204,13 @@ def main(argv=None) -> int:
         client.close()
     rescore_and_publish(conn, cfg, resume, log_file)
     row = db.decode_row(conn.execute("SELECT * FROM jobs WHERE id=?", (pk,)).fetchone())
+    from .external_resume import queue_resume
+    q = queue_resume(conn, pk, origin="external")   # the job you added gets its resume (same queue and build)
     conn.close()
     state = "Filtered: " + "; ".join(row["filter_reasons"] or []) if row["filtered"] else \
         f"score {row['score']} ({row['label']})"
     print(f"{status}: {row['company']} — {row['title']} [{row['track_override'] or row['track']}] via {how}; {state}")
+    print(f"resume: {'queued (builds in the background)' if q['status'] == 'queued' else q['message']}")
     return 0
 
 

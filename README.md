@@ -196,6 +196,12 @@ pbpaste | ./scripts/add_job.sh --company "Acme" --role "Backend Engineer" --past
 ./scripts/add_job.sh --pending        # import everything waiting (drop folder + files saved by the dashboard)
 ./scripts/add_job.sh --url https://…  # URL only: exactly ./scripts/add_url.sh (Add job by URL)
 ```
+- **Every external job gets its resume automatically**, whichever way it came in (Resume Builder tab, Add external
+  job, the drop folder, `add_job.sh`, `add_url.sh`, `external_resume.sh`): it is queued in the one resume queue
+  (origin `external` / `resume_builder`) and built exactly like any HireScope job — same `resume_rules.md`, two
+  projects, no "In Progress", truth checks and validation, the Desktop copy, Questions for you, and the same statuses
+  (Queued → Generating → Ready / Ready (questions pending) / Failed). A job that matched one HireScope already had gets
+  that job's resume queued if it has none; a job with a current READY resume isn't rebuilt (Regenerate does that).
 - **Dashboard → Resume Builder tab** (key `4`; the sidebar's "+ Add external job" and ⌘K open it): company, role,
   location, job URL (optional), track, and the JD pasted or as a file (.txt, .md, .pdf, .docx) — or just the URL
   (then Add job by URL reads the posting). **Save and build resume** saves

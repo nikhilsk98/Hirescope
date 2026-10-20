@@ -299,11 +299,12 @@ def test_cli_file_paste_duplicate_pending_and_url(monkeypatch, tmp_path, capsys,
                        "--track", "coop", "--url", "https://demo.example/j/9", *common])
     out = capsys.readouterr().out
     assert rc == 0 and "added: DemoCorp — Software Engineer Co-op (DEMO)" in out and "track coop_intern" in out
-    assert "/resume-builder" in out and "job package:" in out
+    assert "resume: queued (builds in the background)" in out and "job package:" in out
     data = (tmp_path / "dashboard" / "data.js").read_text()
     assert "Software Engineer Co-op (DEMO)" in data and '"external"' in data
     rc = add_job.main(["--company", "DemoCorp", "--role", "SWE Co-op", "--file", str(jd), "--url", "https://demo.example/j/9/", *common])
-    assert rc == add_job.EXIT_DUPLICATE and "duplicate, not added" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert rc == add_job.EXIT_DUPLICATE and "duplicate, not added" in out and "already in the queue" in out   # not twice
     monkeypatch.setattr("sys.stdin", io.StringIO(JD))
     assert add_job.main(["--company", "DemoBank", "--role", "Backend Engineer (DEMO)", "--paste", *common]) == 0
     assert "DemoBank" in capsys.readouterr().out
@@ -316,6 +317,10 @@ def test_cli_file_paste_duplicate_pending_and_url(monkeypatch, tmp_path, capsys,
     assert add_job.main(["--url", "https://coop.school.example/postings/1", *common]) == 2
     with sqlite_conn(tmp_path) as conn:
         assert {r[0] for r in conn.execute("SELECT company FROM jobs WHERE source='external'")} == {"DemoCorp", "DemoBank", "DemoAir"}
+        # every job added from the command line has its resume queued: the same queue as the dashboard's
+        queued = {r[0]: r[1] for r in conn.execute("SELECT j.company, q.origin FROM resume_queue q JOIN jobs j ON "
+                                                   "j.id = q.job_pk WHERE q.status='queued'")}
+        assert queued == {"DemoCorp": "external", "DemoBank": "external", "DemoAir": "external"}
 
 
 def test_next_run_imports_drop_folder_and_dashboard_file(monkeypatch, tmp_path, cfg, greenhouse_payload):
@@ -355,9 +360,13 @@ def test_next_run_imports_drop_folder_and_dashboard_file(monkeypatch, tmp_path, 
     summary = (tmp_path / "logs" / "last_run_summary.txt").read_text()
     assert "external job added: DemoRail — Embedded Software Co-op" in summary
     assert not list(paths.EXTERNAL_INBOX.iterdir()) and not list((tmp_path / "downloads").iterdir())
+    with sqlite_conn(tmp_path) as c:                                               # both resumes queued by the run
+        assert {r[0] for r in c.execute("SELECT j.company FROM resume_queue q JOIN jobs j ON j.id = q.job_pk WHERE "
+                                        "q.status='queued' AND q.origin='external'")} == {"DemoRail", "DemoAir"}
     assert R.main(args) == 0                                                       # the next run: nothing re-added
     with sqlite_conn(tmp_path) as c:
         assert c.execute("SELECT COUNT(*) FROM jobs WHERE source='external'").fetchone()[0] == 2
+        assert c.execute("SELECT COUNT(*) FROM resume_queue").fetchone()[0] == 2
 
 
 def test_import_pending_script_imports_dashboard_files_now(monkeypatch, tmp_path, capsys, cfg):
@@ -480,3 +489,13 @@ console.log(JSON.stringify({{rows: C.appliedCompanies({json.dumps(_apps())}),
     assert out["rows"] == A.applied_companies(_apps())
     assert out["url"]["kind"] == "same_url" and out["role"]["kind"] == "same_role" and out["role"]["id"] == 7
     assert out["none"] is None
+
+
+def test_external_jobs_get_the_same_build_as_any_job():
+    """No lighter build: the queue's command for an external job is exactly the command for any other job."""
+    from resume_builder import queue
+    s = queue.settings()
+    for regen in (0, 1):
+        base = {"id": 1, "job_pk": 42, "regenerate": regen, "attempts": 0, "message": None}
+        cmds = {o: queue.command({**base, "origin": o}, s) for o in ("external", "resume_builder", "dashboard", "bucket")}
+        assert len({tuple(c) for c in cmds.values()}) == 1

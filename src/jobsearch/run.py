@@ -226,6 +226,20 @@ def parse_args(argv=None):
 EX_TEMPFAIL = 75   # offline: launchd's next scheduled run retries
 
 
+def queue_external(conn, outcomes) -> None:
+    """External jobs you added (drop folder, the dashboard's saved files) get their resume queued like a Resume
+    Builder submission — new ones and ones that matched a job HireScope had. The worker builds them after this run
+    (it waits while the run holds the database)."""
+    from .external_resume import queue_resume
+    for o in outcomes:
+        if o.status in ("new", "duplicate") and o.job_pk:
+            try:
+                q = queue_resume(conn, o.job_pk, origin="external")
+                log.info("external job %s: resume %s", o.job_pk, q["status"], extra=LOG_ONLY)
+            except Exception as e:  # noqa: BLE001 — the run goes on; the job can be queued from the dashboard
+                log.warning("resume not queued for external job %s: %s", o.job_pk, e)
+
+
 def main(argv=None) -> int:
     """Lock (one run at a time; stale locks replaced), offline check, then the run itself."""
     args = parse_args(argv)
@@ -313,6 +327,7 @@ def _main(args, log_file: Path) -> int:
         ext = external.import_pending(conn, cfg, paths.EXTERNAL_INBOX, import_dirs(cfg.prefs.statuses_import_dir))
         for o in ext:
             (log.info if o.status == "new" else log.warning)("external job %s", external.summary_line(o), extra=LOG_ONLY)
+        queue_external(conn, ext)
     learned = feedback.learn(db.labeled_jobs(conn), cfg.prefs)
     if learned.labeled:
         log.info("feedback learning: %s", learned.describe()["status"])

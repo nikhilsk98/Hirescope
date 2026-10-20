@@ -240,3 +240,16 @@ def test_every_run_merges_duplicates_found_since(conn, cfg, resume, embedder):
     assert a != b
     run(conn, cfg, resume, [], mock_client(lambda r: httpx.Response(404)), embedder, None)
     assert [r[0] for r in conn.execute("SELECT id FROM jobs")] == [a]
+
+
+def test_add_url_cli_queues_the_resume(monkeypatch, tmp_path, capsys, cfg):
+    from jobsearch import add_url
+    from .test_external import _cli_env, sqlite_conn
+    _, common = _cli_env(monkeypatch, tmp_path, cfg)
+    monkeypatch.setattr(add_url, "resolve", lambda url, c, co: (RawJob(
+        company="DemoUrl", job_id="u9", title="Backend Co-op (DEMO)", source="careers_page", source_url=url, apply_url=url,
+        description=JD.replace("DemoCorp", "DemoUrl")), "JSON-LD on the page"))
+    assert add_url.main(["https://jobs.demourl.example/p/9", *common]) == 0
+    assert "resume: queued (builds in the background)" in capsys.readouterr().out
+    with sqlite_conn(tmp_path) as conn:
+        assert conn.execute("SELECT origin FROM resume_queue WHERE status='queued'").fetchone()[0] == "external"

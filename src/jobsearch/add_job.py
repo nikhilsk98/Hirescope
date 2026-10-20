@@ -9,8 +9,9 @@
 The JD file may be .txt, .md, .pdf or .docx; company / role / URL / location / track may also come from "Key: value"
 lines at the top of a text file or from its name ("Acme - Software Engineer.pdf"). The job is stored with source
 "external", scored (tracks, level, sponsorship flags, ATS keywords), given a job package, and shown on the dashboard
-with an "External" badge. If it matches a job HireScope already has, nothing is created and the existing job is
-named instead (--force adds it anyway). Exit codes: 0 added, 3 duplicate (not added), 2 error.
+with an "External" badge, and its tailored resume is queued (the same queue and build as every other job). If it
+matches a job HireScope already has, nothing is created and the existing job is named instead — its resume is queued
+if it has none (--force adds it anyway). Exit codes: 0 added, 3 duplicate (not added), 2 error.
 """
 from __future__ import annotations
 
@@ -92,7 +93,6 @@ def describe(conn, o: external.Outcome) -> str:
     from .output.packages import package_filename
     pkg = paths.PACKAGES_DIR / paths.slug(row["company"]) / package_filename(row["company"], row["title"], row["job_id"])
     out.append(f"  job package: {pkg}")
-    out.append(f"  resume: claude \"/resume-builder {row['id']}\"   (or Generate Resume on the dashboard)")
     return "\n".join(out)
 
 
@@ -128,8 +128,12 @@ def main(argv=None) -> int:
                 return 2
         if any(o.status == "new" for o in outcomes):
             rescore_and_publish(conn, cfg, resume, log_file)
+        from .external_resume import queue_resume
         for o in outcomes:
             print(describe(conn, o))
+            if o.status in ("new", "duplicate") and o.job_pk:     # same queue, same build as every other job
+                q = queue_resume(conn, o.job_pk, origin="external")
+                print(f"  resume: {'queued (builds in the background)' if q['status'] == 'queued' else q['message']}")
     finally:
         conn.close()
     if any(o.status == "error" for o in outcomes):
