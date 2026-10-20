@@ -131,7 +131,7 @@ class WorkdayAdapter(Adapter):
         for param, fid, desc in _early_career_facets(first.get("facets") or []):
             searches.append((f"[{desc}]", {**applied, param: [fid]}))
         items: dict[str, dict] = {}
-        capped, limited = [], None
+        capped, limited, early = [], None, False
         for q, facets in searches:
             offset, total, stale = 0, None, 0
             text = "" if q.startswith("[") else q
@@ -154,7 +154,10 @@ class WorkdayAdapter(Adapter):
                         hit = hit or ctx.want(p.get("title") or "", p.get("locationsText"))
                 stale = 0 if hit or not text else stale + 1
                 offset += PAGE
-                if not posts or offset >= total or stale >= STALE_PAGES:
+                if not posts or offset >= total:
+                    break
+                if stale >= STALE_PAGES:
+                    early = True           # the irrelevant tail wasn't read: its jobs aren't "gone"
                     break
             else:
                 capped.append(f"“{q}” capped at {max_pages * PAGE} of {total}")
@@ -179,7 +182,7 @@ class WorkdayAdapter(Adapter):
         notes = [] if facet else ["no United States location facet found; searched all locations"]
         if details >= ctx.max_details:
             notes.append(f"detail fetches capped at {ctx.max_details}; remaining fetched next run")
-        return FetchResult(jobs=jobs, partial=partial, notes=notes)
+        return FetchResult(jobs=jobs, partial=partial, notes=notes, complete=not early)
 
     def check_open(self, company: Company, job_id: str, apply_url: str | None) -> bool | None:
         u = urlparse(apply_url or "")

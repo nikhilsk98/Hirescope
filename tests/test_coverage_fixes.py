@@ -167,3 +167,27 @@ def test_stale_source_rows_are_pruned_after_a_complete_run(conn):
     db.set_source_status(conn, "DemoCo", "workday", "ok", None, 12, "2026-10-20T09:00:00+00:00")
     assert db.prune_source_status(conn, "2026-10-20T08:57:00+00:00") == 1
     assert [(r["source"], r["status"]) for r in db.source_statuses(conn)] == [("workday", "ok")]
+
+
+def test_searches_that_stop_early_dont_close_the_unread_tail(conn, cfg):
+    """2026-10-20: the relevance stop left 5,992 irrelevant Workday listings unread; they were closed as if gone."""
+    rec = _rec(cfg, "workday", "nurse_r1", "Registered Nurse", "Boston, MA",
+               "https://demo.wd5.myworkdayjobs.com/Ext/job/Boston/Registered-Nurse_R1")
+    pk, _ = db.upsert_job(conn, rec, now="2026-10-15T00:00:00+00:00")
+    conn.execute("UPDATE jobs SET filtered=1 WHERE id=?", (pk,))
+    for _ in range(3):                                  # unread three runs in a row, last seen 5 days ago: kept
+        db.close_unseen(conn, "workday", "DemoCo", set(), 21, "2026-10-20T00:00:00+00:00")
+    assert conn.execute("SELECT job_status FROM jobs WHERE id=?", (pk,)).fetchone()[0] != "closed"
+    for _ in range(2):                                  # unseen for 3 weeks: it ages out
+        db.close_unseen(conn, "workday", "DemoCo", set(), 21, "2026-11-10T00:00:00+00:00")
+    assert conn.execute("SELECT job_status FROM jobs WHERE id=?", (pk,)).fetchone()[0] == "closed"
+
+
+def test_workday_says_when_searches_stopped_early():
+    from .test_new_adapters import _workday_client, want_swe
+    from jobsearch.adapters.workday import WorkdayAdapter
+    c, _ = _workday_client(lambda page: "Software Engineer" if page < 2 else "Nurse")
+    co = Company(name="DemoW", source="workday", host="demo.wd1.myworkdayjobs.com", board="demo", site="Ext")
+    res = WorkdayAdapter(c).fetch(co, FetchContext(want=want_swe, full=False, max_pages=25, max_details=0,
+                                                   queries={"workday": ["software"]}))
+    assert res.complete is False and res.partial is None

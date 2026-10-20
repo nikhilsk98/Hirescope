@@ -353,7 +353,8 @@ class Fetched:
     refused: str | None = None      # SourceUnavailable.kind: maintenance | blocked | paused
 
 
-UNAVAILABLE_GRACE = timedelta(hours=48)   # a source down this long without an OK check counts as failed again
+UNAVAILABLE_GRACE = timedelta(hours=48)
+STALE_UNSEEN_DAYS = 21                    # incomplete searches: an irrelevant listing unseen this long is closed   # a source down this long without an OK check counts as failed again
 
 
 def _refusal(e: BaseException | None) -> str | None:
@@ -644,6 +645,13 @@ def _store(conn, cfg: Config, f: Fetched, jd_dir: Path | None) -> SourceOutcome:
         if res.confirmed_open or res.confirmed_closed:
             out.notes = [*out.notes, f"listing capped: verified {len(res.confirmed_open)} still open, "
                                      f"{len(res.confirmed_closed)} gone"]
+    elif not res.complete:
+        # searches stopped where relevance ran out: the unread tail isn't gone. Close what was verified gone, and
+        # irrelevant listings not seen for STALE_UNSEEN_DAYS (so the tail still ages out)
+        for jid in res.confirmed_open | res.protected:
+            db.touch_job(conn, label, name, jid, now)
+        out.closed = db.mark_missing_ids(conn, label, scope, res.confirmed_closed, now) + \
+            db.close_unseen(conn, label, scope, seen | res.confirmed_open | res.protected, STALE_UNSEEN_DAYS, now)
     else:
         # search-based sources: relevant jobs we couldn't verify are kept as present (never closed on a guess)
         for jid in res.confirmed_open | res.protected:

@@ -132,6 +132,7 @@ class FetchResult:
     confirmed_open: set[str] = field(default_factory=set)    # partial listing: verified still open
     confirmed_closed: set[str] = field(default_factory=set)  # partial listing: verified gone (404 / inactive)
     protected: set[str] = field(default_factory=set)         # relevant, missing, not verified: treat as present
+    complete: bool = True                   # False: searches stopped early (relevance ran out): "not returned" != closed
 
 
 class Adapter:

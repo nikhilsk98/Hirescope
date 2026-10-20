@@ -109,7 +109,7 @@ class OracleCloudAdapter(Adapter):
                    if (f.get("Name") or "").strip().lower() in ("united states", "united states of america")), None)
         max_pages = FULL_PAGES if ctx.full else max(ctx.max_pages, 4)
         rows: dict[str, dict] = {}
-        capped = []
+        capped, early = [], False
         for q in ctx.queries.get("oracle_cloud") or DEFAULT_QUERIES:
             stale = 0
             for page in range(max_pages):
@@ -121,7 +121,10 @@ class OracleCloudAdapter(Adapter):
                         rows.setdefault(str(r["Id"]), r)
                         hit = hit or ctx.want(r.get("Title") or "", r.get("PrimaryLocation"))
                 stale = 0 if hit else stale + 1
-                if len(reqs) < PAGE or (page + 1) * PAGE >= (res.get("TotalJobsCount") or 0) or stale >= STALE_PAGES:
+                if len(reqs) < PAGE or (page + 1) * PAGE >= (res.get("TotalJobsCount") or 0):
+                    break
+                if stale >= STALE_PAGES:
+                    early = True
                     break
             else:
                 capped.append(f"“{q}” capped at {max_pages * PAGE} of {res.get('TotalJobsCount')}")
@@ -140,7 +143,7 @@ class OracleCloudAdapter(Adapter):
         notes = [] if us else ["no United States location facet found; searched all locations"]
         if details >= ctx.max_details:
             notes.append(f"detail fetches capped at {ctx.max_details}; remaining fetched next run")
-        return FetchResult(jobs=jobs, partial="; ".join(capped) or None, notes=notes)
+        return FetchResult(jobs=jobs, partial="; ".join(capped) or None, notes=notes, complete=not early)
 
     def check_open(self, company: Company, job_id: str, apply_url: str | None) -> bool | None:
         host, site = self._base(company)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from rapidfuzz import fuzz
@@ -637,6 +637,21 @@ def mark_missing_ids(conn, source: str, company: str | None, ids: set[str], now:
                 closed += conn.execute("UPDATE jobs SET job_status='closed', status_changed_at=? WHERE id=? AND "
                                        "job_status!='closed'", (now, r["job_pk"])).rowcount
     return closed
+
+
+def close_unseen(conn, source: str, company: str | None, present: set[str], days: int, now: str | None = None) -> int:
+    """For searches that stopped early: listings not returned now that no search has returned for `days` and that
+    aren't shown (filtered) are treated as gone; shown ones are left to verification. Returns jobs closed."""
+    now = now or utcnow()
+    cutoff = (datetime.fromisoformat(now) - timedelta(days=days)).isoformat(timespec="seconds")
+    q = ("SELECT s.source_job_id FROM job_sources s JOIN jobs j ON j.id = s.job_pk WHERE s.source=? AND "
+         "s.last_seen < ? AND j.filtered = 1 AND j.job_status != 'closed'")
+    args: tuple = (source, cutoff)
+    if company is not None:
+        q += " AND s.company_key=?"
+        args += (company_key(company),)
+    ids = {r[0] for r in conn.execute(q, args)} - set(present)
+    return mark_missing_ids(conn, source, company, ids, now) if ids else 0
 
 
 def relevant_listings(conn, source: str, company: str | None) -> dict[str, str | None]:
