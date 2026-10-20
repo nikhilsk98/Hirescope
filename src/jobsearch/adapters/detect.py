@@ -91,6 +91,19 @@ def from_url(url: str | None) -> dict | None:
         return {"source": "amazon"}
     if host.endswith("jobs.netflix.net") or host == "jobs.netflix.com":
         return {"source": "netflix"}
+    if host.endswith("oraclecloud.com") and "/sites/" in path:      # Oracle Recruiting Cloud career site
+        from .oracle_cloud import parse_url as oracle_url
+        h, site, _ = oracle_url(u.geturl())
+        return {"source": "oracle_cloud", "host": h, "site": site} if site else None
+    if host.endswith(".bamboohr.com") and not host.startswith("www."):
+        return {"source": "bamboohr", "board": host.split(".")[0]}
+    if host.endswith(".applytojob.com") and not host.startswith("www."):
+        return {"source": "jazzhr", "board": host.split(".")[0]}
+    if host == "recruiting.paylocity.com" and (m := re.search(r"/jobs/all/([0-9a-f-]{36})", path, re.I)):
+        return {"source": "paylocity", "board": m.group(1), "careers_url": u.geturl()}
+    if host.endswith(".avature.net") or (re.search(r"/(?:SearchJobs|OpenRoles|JobDetail)\b", path)
+                                         and host.split(".")[0] in ("careers", "jobs")):
+        return {"source": "avature", "careers_url": u.geturl()}
     domain = (parse_qs(u.query).get("domain") or [None])[0]
     if domain and (host.endswith(".eightfold.ai") or path.startswith("/careers")):   # Eightfold PCSX site
         return {"source": "eightfold", "host": host, "board": domain}

@@ -57,6 +57,16 @@ def canonical_key(url: str | None) -> str | None:
         return f"rippling:{m.group(0)}"
     if host.endswith("workable.com") and (m := re.search(r"/j/([0-9A-F]{6,12})(?:/|$)", path, re.I)):
         return f"workable:{m.group(1).upper()}"
+    if host.endswith("oraclecloud.com") and (m := re.search(r"/sites/[A-Za-z0-9_]+/(?:job|requisitions/preview)/(\d+)", path)):
+        return f"oracle_cloud:{host.split('.')[0]}:{m.group(1)}"
+    if host.endswith(".bamboohr.com") and (m := re.search(r"/careers/(\d+)", path)):
+        return f"bamboohr:{host.split('.')[0]}:{m.group(1)}"
+    if host.endswith(".applytojob.com") and (m := re.search(r"/apply/([A-Za-z0-9]{6,})", path)):
+        return f"jazzhr:{m.group(1)}"
+    if host == "recruiting.paylocity.com" and (m := re.search(r"/jobs/details/(\d+)", path, re.I)):
+        return f"paylocity:{m.group(1)}"
+    if "/JobDetail/" in path and (m := re.search(r"/JobDetail/(?:[^/]+/)?(\d+)/?$", path)):
+        return f"avature:{host}:{m.group(1)}"
     # Jibe career sites (the jibe adapter's key): the site's own job page, or the same page linked with ?icims=1
     if (m := re.match(r"^(?:/[a-z]{2}(?:-[a-z]{2})?)?/careers-home/jobs/(\d+)", path)) or \
             ("icims" in qs and (m := re.match(r"^/jobs/(\d+)", path))):

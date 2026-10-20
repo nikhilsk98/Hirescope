@@ -148,6 +148,9 @@ search_queries:
   # Results come 10 per request and Microsoft rate-limits bursts, so the list stays short and specific;
   # "new grad" is left out: it is matched loosely (1,163 Microsoft US hits on 2026-10-12, mostly senior roles).
   eightfold: [software engineer, software developer, intern, data engineer, site reliability, full stack]
+  # Oracle Recruiting Cloud `keyword` (relevance-ranked inside the site's United States facet; a search stops after a
+  # few pages with no relevant title)
+  oracle_cloud: [software, developer, intern, data engineer, cloud, new grad, analyst developer]
   # Amazon search.json: each item is one query (category[] or base_query)
   amazon:
     - {"category[]": software-development}

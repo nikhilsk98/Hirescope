@@ -2159,3 +2159,62 @@ companies:
   careers_url: https://careers.publicisgroupe.com/jobs
   verified: '2026-10-13'
   notes: Publicis Groupe site, filtered to the "Publicis Sapient" brand tag (53 of 972 US jobs at verification)
+# Oracle Recruiting Cloud (public REST API behind the career site, adapters/oracle_cloud.py), verified 2026-10-20
+- name: Oracle
+  source: oracle_cloud
+  host: eeho.fa.us2.oraclecloud.com
+  site: CX_45001
+  tier: 2
+  careers_url: https://careers.oracle.com/en/sites/jobsearch
+  verified: '2026-10-20'
+  notes: 926 "software" hits at verification (careers.oracle.com is this site); Akamai, Fortinet and JPMorgan Chase are detected from their My Companies URLs
+# SAP SuccessFactors career sites: sitemap (or RSS feed) + schema.org JobPosting microdata on each job page, verified 2026-10-20
+- name: Dynatrace
+  source: jsonld_sitemap
+  board: https://apply.careers.dynatrace.com/sitemap.xml
+  site: /job/
+  tier: 2
+  careers_url: https://apply.careers.dynatrace.com/search/
+  verified: '2026-10-20'
+  notes: 105 jobs at verification (SuccessFactors)
+- name: Cimpress
+  source: jsonld_sitemap
+  board: https://jobs.vista.com/sitemap.xml
+  site: /job/
+  tier: 2
+  careers_url: https://jobs.vista.com/search/
+  verified: '2026-10-20'
+  notes: 37 jobs at verification (Vista's SuccessFactors site)
+- name: Ascend Learning
+  source: jsonld_sitemap
+  board: https://ascendlearning.jobs.hr.cloud.sap/sitemap.xml
+  site: /job/
+  tier: 2
+  careers_url: https://ascendlearning.jobs.hr.cloud.sap/search/
+  verified: '2026-10-20'
+  notes: 47 jobs at verification (SuccessFactors)
+- name: NTT DATA
+  source: jsonld_sitemap
+  board: https://careers-inc.nttdata.com/sitemap.xml
+  site: /job/
+  tier: 2
+  careers_url: https://careers-inc.nttdata.com/search/
+  verified: '2026-10-20'
+  notes: 1,536 jobs at verification (SuccessFactors; its sitemap is an RSS feed with full descriptions)
+# Radancy (TalentBrew) career sites: sitemap + JSON-LD job pages (robots.txt disallows /search-jobs/, not job pages)
+- name: Intuit
+  source: jsonld_sitemap
+  board: https://jobs.intuit.com/sitemap.xml
+  site: /job/
+  tier: 2
+  careers_url: https://jobs.intuit.com/search-jobs
+  verified: '2026-10-20'
+  notes: 595 jobs at verification (not Avature; robots.txt disallows only the search page)
+# JazzHR on its own domain (adapters/smallats.py)
+- name: Flexcar
+  source: jazzhr
+  board: careers.flexcar.com
+  tier: 3
+  careers_url: https://careers.flexcar.com/apply
+  verified: '2026-10-20'
+  notes: 29 jobs at verification

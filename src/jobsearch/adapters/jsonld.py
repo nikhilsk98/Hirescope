@@ -16,7 +16,8 @@ import logging
 import re
 import xml.etree.ElementTree as ET
 from html import unescape
-from urllib.parse import urljoin, urlparse
+from html.parser import HTMLParser
+from urllib.parse import unquote, urljoin, urlparse
 
 from ..config import Company
 from ..extract.text import html_to_text
@@ -51,7 +52,73 @@ def jobpostings_in_html(html: str) -> list[dict]:
             walk(json.loads(unescape(m.group(1)).strip()) if "&quot;" in m.group(1) else json.loads(m.group(1)))
         except (json.JSONDecodeError, ValueError):
             continue
+    if not out and _MICRODATA.search(html or ""):
+        if d := _microdata_posting(html):
+            out.append(d)
     return out
+
+
+# schema.org JobPosting as microdata (itemtype/itemprop attributes) instead of JSON-LD: SAP SuccessFactors career sites
+# (verified 2026-10-20: apply.careers.dynatrace.com, jobs.vista.com, ascendlearning.jobs.hr.cloud.sap job pages)
+_MICRODATA = re.compile(r"itemtype=[\"']https?://schema\.org/JobPosting[\"']", re.I)
+
+
+class _Props(HTMLParser):
+    """itemprop values: a <meta>'s content, else the element's inner HTML (description) or text."""
+
+    VOID = {"meta", "link", "img", "br", "hr", "input", "source", "area", "base", "col", "embed", "param", "track", "wbr"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.props: dict[str, str] = {}
+        self.open: list[list] = []          # [prop, tag, depth, parts]
+        self.depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        prop = a.get("itemprop")
+        if prop and (tag == "meta" or "content" in a):
+            self.props.setdefault(prop, a.get("content") or "")
+        for o in self.open:
+            o[3].append(self.get_starttag_text() or "")
+        if tag in self.VOID:
+            return
+        self.depth += 1
+        if prop and prop not in self.props and "content" not in a:
+            self.open.append([prop, tag, self.depth, []])
+
+    def handle_endtag(self, tag):
+        if tag in self.VOID:
+            return
+        for o in list(self.open):
+            if o[1] == tag and o[2] == self.depth:
+                self.open.remove(o)
+                self.props.setdefault(o[0], "".join(o[3]).strip())
+            else:
+                o[3].append(f"</{tag}>")
+        self.depth -= 1
+
+    def handle_data(self, data):
+        for o in self.open:
+            o[3].append(data.replace("<", "&lt;"))
+
+
+def _microdata_posting(html: str) -> dict | None:
+    p = _Props()
+    try:
+        p.feed(html)
+    except Exception:  # noqa: BLE001 - malformed pages: whatever was read so far
+        pass
+    m = p.props
+    title = re.sub(r"<[^>]+>", " ", m.get("title") or "")
+    if not title.strip():
+        return None
+    return {"@type": "JobPosting", "title": " ".join(title.split()), "description": m.get("description") or "",
+            "datePosted": m.get("datePosted"), "employmentType": m.get("employmentType"),
+            "validThrough": m.get("validThrough"), "hiringOrganization": {"name": m.get("hiringOrganization")},
+            "jobLocation": {"address": {"addressLocality": m.get("addressLocality"),
+                                        "addressRegion": m.get("addressRegion"),
+                                        "addressCountry": m.get("addressCountry")}}}
 
 
 def _place(p) -> str | None:
@@ -117,9 +184,12 @@ def _url_id(url: str) -> str:
 
 
 def _slug_title(url: str) -> str:
-    seg = urlparse(url).path.rstrip("/").split("/")[-1]
+    """The title words in a job URL: its last segment with words (…/job/Boston-Software-Engineer/1440363800/ and
+    …/job/boston/software-engineer/27595/102189634112 end in ids)."""
+    segs = [unquote(x) for x in urlparse(url).path.rstrip("/").split("/") if x]
+    seg = next((x for x in reversed(segs) if re.search(r"[A-Za-z]{3}", x)), "")
     seg = re.sub(r"^\d+[-_]?", "", seg)
-    return re.sub(r"[-_]+", " ", seg)
+    return re.sub(r"[-_+]+", " ", seg)
 
 
 class SitemapJsonLdAdapter(Adapter):
@@ -145,21 +215,38 @@ class SitemapJsonLdAdapter(Adapter):
     def _sitemap_urls(self, url: str, depth: int = 0) -> list[tuple[str, str | None]]:
         xml = self.http.get(url, headers={"Accept": "application/xml,text/xml"}).text
         root = ET.fromstring(xml.encode())
-        ns = {"s": "http://www.sitemaps.org/schemas/sitemap/0.9"}
-        if root.tag.endswith("sitemapindex") and depth < 2:
+        # any sitemap namespace (SuccessFactors uses Google's old http://www.google.com/schemas/sitemap/0.9)
+        local = lambda e: e.tag.rsplit("}", 1)[-1]  # noqa: E731
+        kids = lambda e, name: [c for c in e if local(c) == name]  # noqa: E731
+        text = lambda e, name: next((c.text or "" for c in e if local(c) == name), None)  # noqa: E731
+        if local(root) == "sitemapindex" and depth < 2:
             out = []
-            for sm in root.findall("s:sitemap", ns):
-                loc = sm.findtext("s:loc", default="", namespaces=ns).strip()
+            for sm in kids(root, "sitemap"):
+                loc = (text(sm, "loc") or "").strip()
                 if loc and "_cat" not in loc:   # skip category sitemaps
                     out.extend(self._sitemap_urls(loc, depth + 1))
             return out
-        return [(u.findtext("s:loc", default="", namespaces=ns).strip(),
-                 u.findtext("s:lastmod", default=None, namespaces=ns)) for u in root.findall("s:url", ns)]
+        if root.tag == "rss":                 # a job feed as the sitemap (NTT DATA's SuccessFactors site)
+            out = []
+            for it in root.iter("item"):
+                link = (it.findtext("link") or "").strip()
+                if not link:
+                    continue
+                title = (it.findtext("title") or "").strip()
+                loc = None
+                if m := re.match(r"^(.*?)\s*\(([^()]*,[^()]*)\)\s*$", title):   # "Role (San Francisco, CA, US)"
+                    title, loc = m.group(1), m.group(2)
+                self._feed[link] = {"@type": "JobPosting", "title": title, "description": unescape(it.findtext("description") or ""),
+                                    "datePosted": it.findtext("pubDate"), "jobLocation": loc}
+                out.append((link, it.findtext("pubDate")))
+            return out
+        return [((text(u, "loc") or "").strip(), text(u, "lastmod")) for u in kids(root, "url")]
 
     def fetch(self, company: Company, ctx: FetchContext) -> FetchResult:
         if not company.board:
             raise SourceError(f"{company.name}: sitemap adapter requires 'board' (sitemap URL)")
         pattern = re.compile(company.site or r"/jobs?/")
+        self._feed: dict[str, dict] = {}
         try:
             urls = [(u, lm) for u, lm in self._sitemap_urls(company.board) if u and pattern.search(u)]
         except Exception as e:  # noqa: BLE001
@@ -173,7 +260,11 @@ class SitemapJsonLdAdapter(Adapter):
             jid = self.job_id(url)
             seen.add(jid)            # listed at the source, whether or not we fetch it
             cached = ctx.pages.get(url)
-            if cached and cached.get("payload") and cached.get("lastmod") == lastmod:
+            if url in self._feed:              # the feed item is the posting: nothing to fetch
+                d = self._feed[url]
+                if not ctx.want(d["title"], d.get("jobLocation")):
+                    continue
+            elif cached and cached.get("payload") and cached.get("lastmod") == lastmod:
                 d = json.loads(cached["payload"])
             elif not ctx.want(self.slug_title(url), self.slug_title(url)):
                 continue             # slug says the role is not relevant: don't fetch the page

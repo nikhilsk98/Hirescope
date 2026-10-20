@@ -93,9 +93,18 @@ def _classify(part: str, cfg: LocationConfig) -> Place:
     if pat["remote_us"].search(low):
         return Place("Remote (US)", "US", True)
 
-    # "CA-QC-Longueuil" / "CAN-ON-Toronto": Canada (country code + province), not California
-    if re.match(r"^(CA|CAN|Canada)\s*[-–,]\s*(QC|ON|BC|AB|MB|NS|NB|NL|PE|SK|YT|NT|NU)\b", raw, re.I):
+    # "CA-QC-Longueuil" / "CAN-ON-Toronto": Canada (country code + province), not California; "IN-KA-Bengaluru":
+    # India + state code, not Indiana
+    if re.match(r"^(CA|CAN|Canada)\s*[-–,]\s*(QC|ON|BC|AB|MB|NS|NB|NL|PE|SK|YT|NT|NU)\b", raw, re.I) or \
+            re.match(r"^(IN|IND|India)\s*[-–,]\s*(KA|TS|TG|MH|TN|DL|HR|UP|GJ|AP|WB|KL|RJ|MP|PB|OR|OD|CH)\b", raw, re.I):
         return Place(raw, "non-US", remote)
+    # a full state name after a comma: "Vancouver, Washington", "Oxford, Ohio", "Athens, Georgia" (not the
+    # country's cities: "Tbilisi, Georgia")
+    if m := re.search(r",\s*(" + "|".join(sorted((re.escape(n) for n in cfg.states.values()), key=len, reverse=True))
+                      + r")\b(?:\s+\d{5})?\s*$", raw, re.I):
+        if m.group(1).lower() == "georgia" and re.search(r"tbilisi|batumi|kutaisi|rustavi", low):
+            return Place(raw, "non-US", remote)
+        return Place(raw, "US", remote)
     # "US, CA, Santa Clara" / "USA - CA - Santa Clara" / "US-WA-Seattle" (Amazon, Workday)
     toks = [t.strip() for t in re.split(r"\s*[,\-–]\s*", raw) if t.strip()]
     if toks and toks[0].lower() in cfg.us_names and len(toks) >= 2:
@@ -104,6 +113,11 @@ def _classify(part: str, cfg: LocationConfig) -> Place:
         if toks[1].lower() == "remote":
             return Place("Remote (US)", "US", True)
         return Place(raw, "US", remote)
+    # an explicit US country at the end wins over town names shared with other countries ("North Reading,
+    # Massachusetts, USA", "New Berlin, Wisconsin, United States of America", "Ontario, CA, US")
+    if re.search(r"(?:,|\s[-–])\s*(?:US|USA|U\.S\.A?\.?|United States(?: of America)?)\s*$", raw, re.I) or \
+            re.match(r"^(?:United States|USA)\b", raw, re.I):
+        return Place("Remote (US)" if remote else raw, "US", remote)
 
     # ", CA" / ", NY 10001" / "...Meade MD" state abbreviation at the end (case-sensitive: "on"/"in" never count)
     if m := re.search(r"(?:,|\s)\s*([A-Z]{2})(?:\s+\d{5})?\s*(?:,\s*(?:US|USA|United States)\s*)?$", raw):
@@ -112,10 +126,11 @@ def _classify(part: str, cfg: LocationConfig) -> Place:
             return Place(raw, "non-US", remote)
         if m.group(1) in cfg.states:
             return Place(raw, "US", remote)
-    # "CT - Hartford" / "GA - Alpharetta" (state code first)
-    if (m := re.match(r"^([A-Z]{2})\s*[-–]\s*[A-Za-z]", raw)) and m.group(1) in cfg.states:
+    # "CT - Hartford" / "GA - Alpharetta" (state code first; "DE-Berlin" is Germany)
+    if (m := re.match(r"^([A-Z]{2})\s*[-–]\s*[A-Za-z]", raw)) and m.group(1) in cfg.states \
+            and not pat["non_us"].search(low[m.end() - 1:]):
         return Place(raw, "US", remote)
-    if pat["non_us"].search(low):  # before US cities: "London" is London, UK unless a state was given
+    if pat["non_us"].search(low.replace("new mexico", "")):  # before US cities: "London" is London, UK unless a state was given
         return Place(raw, "non-US", remote)
     if pat["states"].search(low):
         return Place(raw, "US", remote)

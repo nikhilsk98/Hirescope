@@ -26,6 +26,7 @@ from .util import join_locations, parse_dt
 
 PAGE = 20
 FULL_PAGES = 120          # full runs: up to 2,400 results per search (RTX lists ~2,050; Leidos, NVIDIA ~1,200)
+STALE_PAGES = 3           # a keyword search stops after this many pages in a row with no relevant title
 # Role searches come from config/title_rules.yaml -> search_queries.workday (why those phrases: see that file).
 # Co-op/intern roles come from each site's own early-career facets.
 _US = {"united states of america", "united states", "usa", "us"}
@@ -122,30 +123,44 @@ class WorkdayAdapter(Adapter):
             raise SourceError(f"{company.name}: {url}: {e}") from e
         facet = _find_us_facet(first.get("facets") or [])
         applied = {facet[0]: [facet[1]]} if facet else {}
-        max_pages = FULL_PAGES if ctx.full else min(ctx.max_pages, 10)
+        # tier pages (preferences company_tiers.max_pages: 25 for tier 2), at least 10; keyword results are
+        # relevance-ranked, so a search stops after STALE_PAGES pages in a row without one relevant title
+        max_pages = FULL_PAGES if ctx.full else max(ctx.max_pages, 10)
 
         searches = [(q, applied) for q in ctx.queries.get("workday", [])]
         for param, fid, desc in _early_career_facets(first.get("facets") or []):
             searches.append((f"[{desc}]", {**applied, param: [fid]}))
         items: dict[str, dict] = {}
-        capped = []
+        capped, limited = [], None
         for q, facets in searches:
-            offset, total = 0, None
+            offset, total, stale = 0, None, 0
             text = "" if q.startswith("[") else q
             for _ in range(max_pages):
-                page = self.http.post_json(url, {"appliedFacets": facets, "limit": PAGE, "offset": offset,
-                                                 "searchText": text})
+                try:
+                    page = self.http.post_json(url, {"appliedFacets": facets, "limit": PAGE, "offset": offset,
+                                                     "searchText": text})
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code != 429 or not items:
+                        raise
+                    limited = q            # rate-limited after retries: keep what we have, ask again next run
+                    break
                 if total is None:
                     total = page.get("total") or 0
                 posts = page.get("jobPostings") or []
+                hit = False
                 for p in posts:
                     if p.get("externalPath"):
                         items.setdefault(p["externalPath"], p)
+                        hit = hit or ctx.want(p.get("title") or "", p.get("locationsText"))
+                stale = 0 if hit or not text else stale + 1
                 offset += PAGE
-                if not posts or offset >= total:
+                if not posts or offset >= total or stale >= STALE_PAGES:
                     break
             else:
                 capped.append(f"“{q}” capped at {max_pages * PAGE} of {total}")
+            if limited:
+                capped.append(f"rate-limited (HTTP 429) during “{limited}”; the remaining searches run next time")
+                break
 
         jobs, details = [], 0
         for path, item in items.items():

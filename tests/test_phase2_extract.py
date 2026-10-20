@@ -251,3 +251,17 @@ def test_enrollment_phrases_are_not_work_terms():
     t, jd = "Software Developer Intern (DEMO)", "Summer 2027 internship. Must be enrolled at a university for Fall term 2027."
     terms = parse_terms(f"{t}\n{jd}")
     assert terms == ["Summer 2027"] and summer_only(terms, t, jd)
+
+
+@pytest.mark.parametrize("text,us", [
+    # US towns that share a name with a place abroad (audit 2026-10-20: 250 open jobs were filtered "Not in the US")
+    ("North Reading, Massachusetts, USA", True), ("New Berlin, Wisconsin, United States of America", True),
+    ("Vancouver, Washington, United States of America", True), ("Oxford, Ohio, United States", True),
+    ("Athens, Georgia", True), ("Vienna, Virginia, US", True), ("Ontario, CA, US", True),
+    ("Albuquerque, New Mexico", True), ("New Mexico", True), ("United States and Canada", True),
+    # and places abroad that look like US codes
+    ("DE-Berlin", False), ("IN-KA-Bengaluru", False), ("IN-TS-Hyderabad", False), ("Tbilisi, Georgia", False),
+    ("Reading, UK", False), ("Vancouver, BC", False), ("Toronto, CA", False), ("Mexico City, Mexico", False),
+])
+def test_location_country_edge_cases(text, us):
+    assert normalize_location(text).us is us
