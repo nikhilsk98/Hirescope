@@ -58,7 +58,7 @@ class _ListThenDetail(Adapter):
         jobs, details = [], 0
         for jid, title, loc, item in rows:
             raw = None
-            if ctx.want(title, loc) and ctx.needs_detail(jid, now) and details < ctx.max_details:
+            if ctx.wants(jid, title, loc) and ctx.needs_detail(jid, now) and details < ctx.max_details:
                 try:
                     raw = self.detail(company, jid, item)
                     details += 1

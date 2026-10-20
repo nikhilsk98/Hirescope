@@ -167,7 +167,7 @@ class WorkdayAdapter(Adapter):
             slug = path.rstrip("/").split("/")[-1].lower()
             # info None -> keep the stored JD; {} -> listing without a JD; dict -> fresh detail
             info: dict | None = None if slug in ctx.known else {}
-            if ctx.want(item.get("title") or "", item.get("locationsText")) and ctx.needs_detail(slug, now) \
+            if ctx.wants(slug, item.get("title") or "", item.get("locationsText")) and ctx.needs_detail(slug, now) \
                     and details < ctx.max_details:
                 try:
                     info = self._detail(host, tenant, site, path)

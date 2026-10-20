@@ -345,13 +345,20 @@ def _main(args, log_file: Path) -> int:
                                          "serpapi.com": 1.0, "api.rippling.com": 0.5, "jobs.jobvite.com": 0.5,
                                          "eightfold.ai": 1.5, "careers.microsoft.com": 1.5,
                                          "careers.qualcomm.com": 1.5,
-                                         "icims.com": 0.5, "apply.workable.com": 0.5})
+                                         "icims.com": 0.5, "apply.workable.com": 0.5,
+                                         "oraclecloud.com": 0.4, "bamboohr.com": 0.5, "applytojob.com": 0.5,
+                                         "recruiting.paylocity.com": 0.5, "avature.net": 0.5, "jobs.siemens.com": 1.0,
+                                         "careers.twosigma.com": 1.0, "jobs.intuit.com": 0.5})
+    started = db.utcnow()
     try:
         summary = run(conn, cfg, resume, [] if args.rescore else None, client, Embedder(conn), jd_dir, watch=watch,
                       only_company=args.company, only_source=args.source, force_all=args.all,
                       workers=args.workers, watchlist_only=args.watchlist, learned=learned, quick=args.quick,
                       source_timeout=sched.source_timeout_minutes * 60 or None, deadline=deadline)
         conn.commit()
+        if args.all and not (args.company or args.source or args.watchlist or args.quick or args.dry_run or args.rescore):
+            if n := db.prune_source_status(conn, started):   # every source was just checked: older rows are stale
+                log.info("coverage: %d stale source rows removed (companies that moved to another job system)", n)
         links = None
         if not args.no_link_check and not args.dry_run and not args.rescore and not args.quick:
             links = check_links(conn, client, db.open_jobs(conn))

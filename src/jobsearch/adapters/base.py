@@ -106,6 +106,11 @@ class FetchContext:
     # role keywords for query-based sources, per adapter (config/title_rules.yaml -> search_queries)
     queries: dict[str, list] = field(default_factory=lambda: default_queries())
 
+    def wants(self, job_id: str, title: str, location: str | None) -> bool:
+        """Worth a detail request: the title passes the cheap check, or the job is already shown on the dashboard
+        (a meaning-based rescue the title check would skip, so it never got its JD)."""
+        return self.want(title, location) or job_id in self.known_relevant
+
     def needs_detail(self, job_id: str, now: datetime | None = None) -> bool:
         ts = self.known.get(job_id)
         if job_id not in self.known or not ts:

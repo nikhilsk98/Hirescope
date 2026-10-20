@@ -85,7 +85,7 @@ class RipplingAdapter(Adapter):
             # info None -> keep the stored JD; {} -> listing without a JD; dict -> fresh detail
             info: dict | None = None if item["uuid"] in ctx.known else {}
             loc = (item.get("workLocation") or {}).get("label")
-            if ctx.want(item["name"], loc) and ctx.needs_detail(item["uuid"], now) and details < ctx.max_details:
+            if ctx.wants(item["uuid"], item["name"], loc) and ctx.needs_detail(item["uuid"], now) and details < ctx.max_details:
                 try:
                     info = self._detail(company.board, item["uuid"])
                     details += 1

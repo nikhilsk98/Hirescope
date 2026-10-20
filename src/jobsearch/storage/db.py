@@ -671,6 +671,14 @@ def set_source_status(conn, company: str, source: str, status: str, error: str |
                  f"ON CONFLICT(company_key, source) DO UPDATE SET {updates}", list(cols.values()))
 
 
+def prune_source_status(conn, before: str) -> int:
+    """Drop source rows a complete run didn't touch (a company now read through another job system, or no longer
+    listed): they would show old failures ("Microsoft — jsonld — failed") on the coverage view."""
+    n = conn.execute("DELETE FROM source_status WHERE last_checked < ?", (before,)).rowcount
+    conn.commit()
+    return n
+
+
 def source_statuses(conn) -> list[dict]:
     return [dict(r) for r in conn.execute("SELECT * FROM source_status ORDER BY company")]
 

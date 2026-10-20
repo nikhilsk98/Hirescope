@@ -129,7 +129,7 @@ class OracleCloudAdapter(Adapter):
         jobs, details = [], 0
         for jid, r in rows.items():
             info: dict | None = None if jid in ctx.known else {}
-            if ctx.want(r.get("Title") or "", r.get("PrimaryLocation")) and ctx.needs_detail(jid, now) \
+            if ctx.wants(jid, r.get("Title") or "", r.get("PrimaryLocation")) and ctx.needs_detail(jid, now) \
                     and details < ctx.max_details:
                 try:
                     info = self._detail(host, site, jid)

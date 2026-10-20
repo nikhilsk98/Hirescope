@@ -154,3 +154,16 @@ def test_years_of_experience_parsing(text, lo, hi):
 def test_test_requisitions_are_not_postings():
     assert NOT_A_POSTING.search("Full Stack Software Engineer (TEST REQ - DO NOT APPLY)")
     assert not NOT_A_POSTING.search("Software Engineer in Test") and not NOT_A_POSTING.search("Test Automation Engineer")
+
+
+def test_jobs_shown_by_meaning_still_get_their_jd():
+    """A job the title check skips but the dashboard shows (rescued by meaning) is worth its detail request."""
+    ctx = FetchContext(want=lambda t, loc: False, known_relevant={"jr9": "https://x"})
+    assert ctx.wants("jr9", "Systems Engineer", None) and not ctx.wants("jr10", "Systems Engineer", None)
+
+
+def test_stale_source_rows_are_pruned_after_a_complete_run(conn):
+    db.set_source_status(conn, "DemoCo", "jsonld", "failed", "no JobPosting data", None, "2026-10-12T00:00:00+00:00")
+    db.set_source_status(conn, "DemoCo", "workday", "ok", None, 12, "2026-10-20T09:00:00+00:00")
+    assert db.prune_source_status(conn, "2026-10-20T08:57:00+00:00") == 1
+    assert [(r["source"], r["status"]) for r in db.source_statuses(conn)] == [("workday", "ok")]

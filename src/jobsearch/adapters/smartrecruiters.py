@@ -124,7 +124,7 @@ class SmartRecruitersAdapter(Adapter):
                 continue
             pid = str(p["id"])
             detail: dict | None = None if pid in ctx.known else {}   # None -> keep the stored JD
-            if ctx.want(p.get("name") or "", _location(p.get("location") or {})) and ctx.needs_detail(pid, now) \
+            if ctx.wants(pid, p.get("name") or "", _location(p.get("location") or {})) and ctx.needs_detail(pid, now) \
                     and details < ctx.max_details:
                 try:
                     detail = self.http.get_json(ONE.format(co=co, id=pid))

@@ -110,7 +110,7 @@ class SimplifyAdapter(Adapter):
             want_jd = raw.description == "" or ctx.needs_detail(raw.job_id) or _edited_since(raw, ctx.known.get(raw.job_id))
             if (ats, board.casefold()) in ctx.covered:
                 pass  # the employer's own board is fetched this run; that adapter supplies the JD
-            elif want_jd and link and ctx.want(raw.title, raw.location) and not unreadable(link):
+            elif want_jd and link and ctx.wants(raw.job_id, raw.title, raw.location) and not unreadable(link):
                 to_enrich.append((raw, ats if ats in enrichers else "jsonld"))
             jobs.append(raw)
         # never-enriched first, then newest; capped per run; the rest are enriched on later runs

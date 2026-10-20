@@ -104,7 +104,7 @@ class JobviteAdapter(Adapter):
         for jid, (title, loc) in listing.items():
             # posting None -> keep the stored JD; {} -> listing without a JD; dict -> fresh detail
             posting: dict | None = None if jid in ctx.known else {}
-            if ctx.want(title, loc) and ctx.needs_detail(jid, now) and details < ctx.max_details:
+            if ctx.wants(jid, title, loc) and ctx.needs_detail(jid, now) and details < ctx.max_details:
                 try:
                     posting = self._detail(slug, jid) or {}
                     details += 1

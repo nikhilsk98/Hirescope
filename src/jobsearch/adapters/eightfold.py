@@ -129,7 +129,7 @@ class EightfoldAdapter(Adapter):
         for pid, p in items.items():
             # info None -> keep the stored JD; {} -> listing without a JD; dict -> fresh detail
             info: dict | None = None if pid in ctx.known else {}
-            if ctx.want(p.get("name") or "", join_locations(p.get("locations"))) and ctx.needs_detail(pid, now) \
+            if ctx.wants(pid, p.get("name") or "", join_locations(p.get("locations"))) and ctx.needs_detail(pid, now) \
                     and details < ctx.max_details:
                 try:
                     info = self._detail(host, domain, pid)

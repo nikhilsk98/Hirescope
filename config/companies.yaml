@@ -2064,12 +2064,6 @@ companies:
   tier: 2
   verified: '2026-10-12'
   notes: 2 US software intern/new-grad listings in SimplifyJobs; 35 open jobs at verification
-- name: Wayfair
-  source: smartrecruiters
-  board: wayfair
-  tier: 2
-  verified: '2026-10-12'
-  notes: curated; 1 open jobs at verification
 - name: Waymo
   source: greenhouse
   board: waymo

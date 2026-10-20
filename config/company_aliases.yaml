@@ -80,6 +80,7 @@ manual:
   Robin: "Kula: robots.txt disallows careers.kula.ai/api/ (the job data); its pages build themselves with JavaScript."
   Ekotrope: "Dover: robots.txt disallows app.dover.com's careers API."
   Brightcove: "Acquired by Bending Spoons; hires on Bending Spoons' Pinpoint board, whose robots.txt disallows postings.json."
+  Wayfair: "Wayfair careers: its own site builds the job list with JavaScript (Greenhouse behind it, no public board token); its SmartRecruiters account lists only a support role (checked 2026-10-20)."
   # No public job board found
   Confluent: "Acquired by IBM (2026); its Ashby board (confluent) lists 0 jobs and its careers site is bot-blocked."
   OM1: "No public job board: its careers page still links a deleted Greenhouse board (om1 -> 404); Workable account has 0 jobs."
