@@ -120,7 +120,9 @@ def ghost_signals(job: dict, prefs: Preferences, now: datetime, jd_text: str = "
     out = []
     if job.get("posted_date"):
         age = (now - datetime.fromisoformat(job["posted_date"])).days
-        if age > g.age_days:
+        if age > g.stale_days and job.get("listed_open"):
+            out.append((f"Old posting: posted {age} days ago, still listed by the employer", g.stale_penalty))
+        elif age > g.age_days:
             out.append((f"Posted {age} days ago", g.age_penalty))
     if (job.get("repost_count") or 0) >= 1:
         out.append((f"Reposted / reopened {job['repost_count']}x", g.repost_penalty))

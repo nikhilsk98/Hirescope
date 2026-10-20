@@ -158,8 +158,11 @@ def apply_rules(job: dict, prefs: Preferences, rules: TitleRules, now: datetime 
     posted = job.get("posted_date")
     if posted:
         age = (now - datetime.fromisoformat(posted)).days
-        if age > prefs.ghost.stale_days:
-            fail("stale_posting", f"Posted {age} days ago — likely stale (filtered after {prefs.ghost.stale_days} days)")
+        if age > prefs.ghost.stale_days and job.get("listed_open"):
+            res.signals["old_posting"] = age      # the employer's job system still lists it: shown, with a penalty
+        elif age > prefs.ghost.stale_days:
+            fail("stale_posting", f"Posted {age} days ago — likely stale (filtered after {prefs.ghost.stale_days} days; "
+                                  "the source can't confirm it's still open)")
         elif prefs.max_posting_age_days and age > prefs.max_posting_age_days:
             fail("posting_age", f"Posted {age} days ago (max {prefs.max_posting_age_days})")
 

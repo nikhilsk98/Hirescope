@@ -654,6 +654,17 @@ def close_unseen(conn, source: str, company: str | None, present: set[str], days
     return mark_missing_ids(conn, source, company, ids, now) if ids else 0
 
 
+def open_listings(conn, source: str, company: str | None) -> dict[str, str]:
+    """Open listings for a source/company: job id -> last seen."""
+    q = ("SELECT s.source_job_id, s.last_seen FROM job_sources s JOIN jobs j ON j.id = s.job_pk WHERE s.source=? "
+         "AND j.job_status != 'closed'")
+    args: tuple = (source,)
+    if company is not None:
+        q += " AND s.company_key=?"
+        args += (company_key(company),)
+    return {r[0]: r[1] for r in conn.execute(q, args)}
+
+
 def relevant_listings(conn, source: str, company: str | None) -> dict[str, str | None]:
     """Visible (not filtered) open listings for a source/company: job id -> apply url."""
     q = ("SELECT s.source_job_id, j.apply_url FROM job_sources s JOIN jobs j ON j.id = s.job_pk WHERE s.source=? "

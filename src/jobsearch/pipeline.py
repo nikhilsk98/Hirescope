@@ -375,6 +375,7 @@ def _context(conn, cfg: Config, company: Company, label: str, multi: bool, tier:
         want=lambda title, loc: quick_relevant(title, loc, cfg.prefs, cfg.title_rules),
         known=db.known_listings(conn, label, None if multi else company.name),
         known_relevant=db.relevant_listings(conn, label, None if multi else company.name),
+        known_open=db.open_listings(conn, label, None if multi else company.name),
         validators=validators,
         pages=pages_cache,
         max_details=200 if multi else (400 if full else 150),
@@ -671,6 +672,21 @@ def _jd(job: dict) -> str:
     return p.read_text(encoding="utf-8") if p else ""
 
 
+# listings that don't confirm a posting is still open with the employer (aggregators, feeds, jobs you added)
+UNCONFIRMED_SOURCES = ("simplify_internships", "simplify_newgrad", "simplify", "hn_hiring", "linkedin_alerts",
+                       "aggregator", "external", "added_url")
+LISTED_OPEN_DAYS = 3
+
+
+def listed_open(conn, now: datetime) -> set[int]:
+    """Jobs an official job system (ATS API, the employer's own careers site) listed in the last LISTED_OPEN_DAYS:
+    the source confirms they're open, however old the posting date."""
+    since = (now - timedelta(days=LISTED_OPEN_DAYS)).isoformat(timespec="seconds")
+    marks = ",".join("?" * len(UNCONFIRMED_SOURCES))
+    return {pk for (pk,) in conn.execute(f"SELECT DISTINCT job_pk FROM job_sources WHERE last_seen >= ? AND source NOT "
+                                         f"IN ({marks})", (since, *UNCONFIRMED_SOURCES))}
+
+
 def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: Embedder,
               summary: RunSummary, learned=None) -> None:
     """learned: tracker.feedback.Learned (bounded adjustments from your statuses), or None."""
@@ -689,6 +705,9 @@ def score_all(conn: sqlite3.Connection, cfg: Config, resume: Resume, embedder: E
         k = (j["company_key"], j["source"])
         first_scan[k] = min(first_scan.get(k, j["first_seen"]), j["first_seen"])
 
+    confirmed = listed_open(conn, now)                 # old postings still listed by the employer stay visible
+    for j in jobs:
+        j["listed_open"] = j["id"] in confirmed
     results = {j["id"]: apply_rules(j, prefs, cfg.title_rules, now) for j in jobs}
 
     # meaning-based pre-filter: rescue relevant jobs with unusual titles

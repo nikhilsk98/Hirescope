@@ -253,7 +253,7 @@
   }
   const BADGE = {
     new: ["New", "good"], fresh: ["Fresh", "good"], updated: ["Updated", "warn"], reopened: ["Reopened", "warn"],
-    closing: ["Closing soon", "flag"], ghost: ["Ghost risk", "warn"], newgrad: ["New Grad", "info"], eligibility: ["Check eligibility", "warn"],
+    closing: ["Closing soon", "flag"], ghost: ["Ghost risk", "warn"], old: ["Old posting", "warn"], newgrad: ["New Grad", "info"], eligibility: ["Check eligibility", "warn"],
     broken: ["Broken link", "flag"], nojd: ["No JD", ""], meaning: ["Meaning match", "info"], mine: ["My Company", "info"],
     seen: ["Seen", "seen"], external: ["External", "info"],
   };
@@ -261,7 +261,7 @@
   const RED = { sponsorship: "No sponsorship", citizenship: "US citizenship required", clearance: "Clearance required" };
   function flagNames(j) {
     const out = Object.entries(RED).filter(([k, v]) => (j.flags || {})[k] === v).map(([, v]) => v);
-    for (const b of j.badges || []) if (["ghost", "eligibility", "broken", "closing", "nojd", "newgrad", "meaning", "reopened"].includes(b)) out.push(BADGE[b][0]);
+    for (const b of j.badges || []) if (["ghost", "old", "eligibility", "broken", "closing", "nojd", "newgrad", "meaning", "reopened"].includes(b)) out.push(BADGE[b][0]);
     if ((REF[j.company] || {}).count) out.push("Referral");
     if (appForJob(j)) out.push("Applied (in My Applications)");
     return out;

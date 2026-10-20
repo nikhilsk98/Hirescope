@@ -416,7 +416,7 @@ def test_broken_settings_fall_back_to_defaults_and_are_clamped(monkeypatch):
     monkeypatch.setattr(queue.rc, "load_settings", lambda: type("S", (), {"raw": {"resume_queue": {
         "concurrency": 0, "retries": 7, "timeout_minutes": None}}})())
     s = queue.settings()
-    assert s["concurrency"] == 1 and s["retries"] == 3 and s["timeout_minutes"] == 45     # None keeps the default
+    assert s["concurrency"] == 1 and s["retries"] == 3 and s["timeout_minutes"] == 30     # None keeps the default
 
 
 def test_retry_locked_retries_busy_without_waiting_for_real(monkeypatch):
@@ -686,8 +686,8 @@ def test_timed_out_build_is_stopped_and_failed(qenv, monkeypatch):
     w.tick(qenv.conn)
     assert not w.running and r["proc"].returncode is not None
     it = item_row(qenv.conn, qenv.a)
-    assert it["status"] == "failed" and it["message"] == "timed out after 0 minutes" and it["pid"] is None
-    assert sent and sent[0][0] == "Resume failed" and "timed out" in sent[0][1]
+    assert it["status"] == "failed" and it["message"] == "stuck in Generating for more than 0 minutes: stopped" and it["pid"] is None
+    assert sent and sent[0][0] == "Resume failed" and "stuck in Generating" in sent[0][1]
 
 
 def test_cancel_seen_by_the_worker_stops_the_build(qenv):
@@ -895,3 +895,43 @@ def test_a_usage_limit_waits_for_the_reset_and_keeps_both_attempts(qenv):
     qenv.use("ok", qenv.a)
     w.tick(qenv.conn)
     assert w.running                                    # after the reset the queue goes on
+
+
+def test_watchdog_stuck_queue_item_is_retried_once_then_failed(qenv):
+    queue.add(qenv.conn, [qenv.a])
+    old = "2026-10-01T00:00:00+00:00"
+    qenv.conn.execute("UPDATE resume_queue SET status='generating', started_at=?, attempts=1, pid=NULL", (old,))
+    qenv.conn.commit()
+    assert "retrying" in queue.watchdog(qenv.conn, set(), 30, 1)[0]
+    assert qenv.conn.execute("SELECT status FROM resume_queue").fetchone()[0] == "queued"
+    qenv.conn.execute("UPDATE resume_queue SET status='generating', started_at=?, attempts=2", (old,))
+    qenv.conn.commit()
+    assert "marked Failed" in queue.watchdog(qenv.conn, set(), 30, 1)[0]
+    it = qenv.conn.execute("SELECT status, message FROM resume_queue").fetchone()
+    assert it["status"] == "failed" and "stuck in Generating for more than 30 minutes" in it["message"]
+    assert queue.watchdog(qenv.conn, {999}, 30, 1) == []                     # nothing else stuck
+
+
+def test_watchdog_abandoned_session_is_failed_and_queued_once(qenv):
+    """John Deere 147732 (2026-10-17): "generating" for days, no queue item, no lock, nothing drafting."""
+    import json as _json
+    from resume_builder import hirescope_bridge
+    jd = qenv.use("ok", qenv.a)
+    work = jd / pipeline.WORK
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "state.json").write_text(_json.dumps({"status": "generating", "prepared_at": "2026-10-17T07:38:00+00:00"}))
+    os.utime(work / "state.json", (time.time() - 7200, time.time() - 7200))
+    hirescope_bridge.set_status(qenv.a, "generating", "x", db_path=hs_paths.DB)
+    qenv.conn.execute("UPDATE resume_status SET updated_at='2026-10-17T07:38:01+00:00' WHERE job_pk=?", (qenv.a,))
+    qenv.conn.commit()
+    lines = queue.watchdog(qenv.conn, set(), 30, 1)
+    assert lines and "queued once" in lines[0]
+    assert _json.loads((work / "state.json").read_text())["status"] == "abandoned"
+    assert queue.active_item(qenv.conn, qenv.a)["origin"] == "watchdog"
+    # a Terminal session still drafting (its drafts changing) is left alone; the state file alone doesn't count
+    (work / "state.json").write_text(_json.dumps({"status": "generating", "prepared_at": "2026-10-20T07:38:00+00:00"}))
+    (work / "draft.json").write_text("{}")
+    qenv.conn.execute("DELETE FROM resume_queue")
+    qenv.conn.execute("UPDATE resume_status SET status='generating', updated_at='2026-10-17T07:38:01+00:00' WHERE job_pk=?", (qenv.a,))
+    qenv.conn.commit()
+    assert queue.watchdog(qenv.conn, set(), 30, 1) == []

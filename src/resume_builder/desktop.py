@@ -1,4 +1,5 @@
-"""Desktop copy of the employer-facing PDFs (config/resume_builder.yaml → desktop_copy):
+"""Copies of the employer-facing PDFs in ~/HireScope Resumes (config/resume_builder.yaml → desktop_copy; a Finder alias
+"Generated Resumes" on the Desktop points there, and the folder isn't macOS-protected, so background jobs write freely):
 
   <dir>/<Company>/<Role>_<JobID>/<First>_<Last>_Resume_<Company>.pdf      the current (last READY) version
   <dir>/<Company>/<Role>_<JobID>/<First>_<Last>_Resume_<Company>_v<N>.pdf  every other READY / reviewed version
@@ -28,7 +29,7 @@ from pathlib import Path
 from . import config as rc
 from . import versions
 
-DEFAULT_DIR = "~/Desktop/Generated Resumes"
+DEFAULT_DIR = "~/HireScope Resumes"     # outside ~/Desktop: no macOS folder permission needed (a Desktop alias points here)
 DEFAULT_JOB = "_default"
 OK_STATUS = ("ready", "reviewed")
 
@@ -219,5 +220,5 @@ def sync_all(settings=None, force: bool = False, direct: bool = False) -> tuple[
         if e.errno in (errno.EPERM, errno.EACCES):
             return 1, [blocked_message(folder, e)]
         return 1, [f"Desktop copy failed: {e}"]
-    lines.append(f"Desktop folder {folder}: {copied} copied, {removed} removed, {len(job_dirs())} resume folder(s).")
+    lines.append(f"Resume folder {folder}: {copied} copied, {removed} removed, {len(job_dirs())} resume folder(s).")
     return 0, lines

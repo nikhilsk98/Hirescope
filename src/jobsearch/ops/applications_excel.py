@@ -1,5 +1,5 @@
 """My Applications as an Excel file on the Desktop, regenerated from SQLite after every change:
-~/Desktop/Generated Resumes/HireScope Applications.xlsx (preferences.yaml → excel_applications.path / enabled).
+~/HireScope Resumes/HireScope Applications.xlsx (preferences.yaml → excel_applications.path / enabled).
 
 Sheets: Applications (one row per application, newest first, clickable job / resume / saved-JD links, stage colors),
 Applied Companies (one row per company), Summary (totals by stage and track, applications per week, response rate).
@@ -45,7 +45,7 @@ def settings() -> tuple[bool, Path]:
         cfg = load_preferences().excel_applications
         enabled, path = cfg.enabled, cfg.path
     except (OSError, ValueError):
-        enabled, path = True, "~/Desktop/Generated Resumes/HireScope Applications.xlsx"
+        enabled, path = True, "~/HireScope Resumes/HireScope Applications.xlsx"
     return enabled, Path(os.path.expanduser(env or path))
 
 

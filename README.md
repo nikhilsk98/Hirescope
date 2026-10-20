@@ -331,7 +331,8 @@ are checked (rate-limited, cached 24h); broken ones get a badge instead of being
 - **Stats** per track: applications per week, response / OA / interview rates, offers, median days to first
   response (inline SVG), plus response rates by source, company tier, score label and level.
 - CLI (SQLite copy, as of the last import): `python -m jobsearch.apps list | followups | stats | companies | csv [FILE] | import FILE | mark-applied JOB_ID`.
-- **Excel on your Desktop**: `~/Desktop/Generated Resumes/HireScope Applications.xlsx` (`preferences.yaml →
+- **Excel next to your resumes**: `~/HireScope Resumes/HireScope Applications.xlsx` (open it through the Desktop alias
+  "Generated Resumes"; `preferences.yaml →
   excel_applications: {enabled, path}`), rewritten from SQLite within seconds of Mark Applied, a stage change or a
   note edit on the dashboard (those go through the launcher: `hirescope://status…`, `hirescope://note?app=…&text=…`),
   and after every HireScope run, `import_pending.sh`, `resume_builder refresh` and queue build (Export statuses stays
@@ -597,11 +598,13 @@ pending) / Failed**. Each finished build is saved by the build itself (version f
   where you answer the keyword questions). Job IDs must be numbers of jobs that exist, every option a known value,
   files only directly inside ~/Downloads or `inputs/external_jobs/` (symlinks resolved first); no part of a link is
   ever handed to a shell.
-- **One-time macOS permission (recommended)**: macOS asks once per program before it may open files in your Desktop
-  and Downloads folders that another program wrote, and a background job has no window for that question. HireScope
-  never waits on it (`src/jobsearch/ops/desktop_access.py` checks in a child process with a timeout and skips that
-  folder with a notice), but until you allow it, background runs and builds skip the Desktop copies and the Excel file,
-  and an uploaded JD file can't be read from Downloads. Allow it once: System Settings → Privacy & Security → Files and
+- **Resume copies live outside the Desktop** (2026-10-20): `~/HireScope Resumes` is not a macOS-protected folder, so
+  background builds, runs and the launcher write PDFs and the Excel file there without any permission; the Desktop
+  has a Finder alias **Generated Resumes** pointing to it. Only Downloads is still protected: macOS asks once per
+  program before it may open files there that another program wrote, and a background job has no window for that
+  question. HireScope never waits on it (`src/jobsearch/ops/desktop_access.py` checks in a child process with a
+  timeout and skips that folder with a notice), but until you allow it an uploaded JD file can't be read from
+  Downloads. Allow it once: System Settings → Privacy & Security → Files and
   Folders → **Python** → Desktop Folder and Downloads Folder (and the same for **HireScope Launcher** if listed), or
   answer the prompts when they appear. Meanwhile `./scripts/sync_desktop_resumes.sh` and
   `python -m resume_builder refresh` (run in Terminal) bring the Desktop up to date. A pasted JD needs no permission:
@@ -704,8 +707,9 @@ the next request build a new version.
   files, an edit whose evidence changed since) are flagged and block "ready" instead of being overwritten;
   `prepare --discard-edits` drops them on purpose. The edited version itself is never touched.
 - One run per job at a time (job lock; a second run says another is in progress).
-- **Desktop copy**: every time a version becomes current (a READY build, `--regenerate`, `default`, `rollback`,
-  `mark-reviewed`), its employer-facing PDF is copied to `~/Desktop/Generated Resumes/<Company>/<Role>_<JobID>/`
+- **Resume copies**: every time a version becomes current (a READY build, `--regenerate`, `default`, `rollback`,
+  `mark-reviewed`), its employer-facing PDF is copied to `~/HireScope Resumes/<Company>/<Role>_<JobID>/` (Desktop
+  alias: Generated Resumes)
   (same folder names as `generated_resumes/`): the current version as `Nikhil_Shivakumar_Resume_<Company>.pdf`
   (overwritten when a newer version becomes current), every other READY version beside it as `…_<Company>_v<N>.pdf`;
   the default resume in `Default/Nikhil_Shivakumar_Resume.pdf`. Only PDFs, only versions that passed every check;
@@ -713,9 +717,9 @@ the next request build a new version.
   company never share a PDF. The sync also removes stray copies: hash-suffixed (`…_19fc85.pdf`), `(1)` or `copy`
   files in a job folder, and any resume PDF elsewhere in the folder that is byte-identical to one of its copies. Re-sync (or backfill) anytime: `./scripts/sync_desktop_resumes.sh`
   (`--force` copies even when turned off). Settings: `desktop_copy.enabled` / `desktop_copy.dir` in
-  `config/resume_builder.yaml` (not part of the settings hash, so changing them never forces a rebuild). If macOS
-  blocks the Desktop (Privacy & Security → Files and Folders), the build still succeeds, the resume stays in
-  `data.nosync`, and a message explains how to allow it: run the script once in Terminal and click OK.
+  `config/resume_builder.yaml` (not part of the settings hash, so changing them never forces a rebuild). If you point
+  `dir` back into a macOS-protected folder (Desktop, Documents) and macOS blocks it, the build still succeeds, the
+  resume stays in `data.nosync`, and a message explains how to allow it.
 - Each build saves a version, also within one generation (a rebuild after tightening a bullet is `v<N+1>`). A
   generation allows 3 builds; a 4th is refused without building anything (`prepare --regenerate` starts a new one).
 - Trying things against a copy of your data: `JOBSEARCH_DATA_DIR=/path/copy JOBSEARCH_DASHBOARD_DIR=/path/dash

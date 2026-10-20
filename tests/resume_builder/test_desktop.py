@@ -156,3 +156,21 @@ def test_older_versions_naming_the_client_are_not_mirrored(rb_env, monkeypatch):
     versions.set_current(j, 2, "test")    # the regenerated version: the old one isn't mirrored any more
     assert sorted(p.name for p in (_desk() / "Acme" / "Cloud-Developer-Intern_123").glob("*.pdf")) == [PDF]
     assert b"v2" in (_desk() / "Acme" / "Cloud-Developer-Intern_123" / PDF).read_bytes()
+
+
+def test_resume_folder_is_outside_macos_protected_folders(monkeypatch):
+    """2026-10-20: copies go to ~/HireScope Resumes (a Desktop alias points there), so background builds never need
+    Desktop permission; the Excel file sits beside them."""
+    import yaml as _yaml
+    from jobsearch import config as jcfg
+    from jobsearch.ops import applications_excel
+    monkeypatch.delenv("JOBSEARCH_DESKTOP_DIR", raising=False)
+    protected = [Path("~/Desktop").expanduser(), Path("~/Documents").expanduser(), Path("~/Downloads").expanduser()]
+    shipped = _yaml.safe_load((rc.ROOT / "config" / "resume_builder.yaml").read_text())["desktop_copy"]["dir"]
+    for folder in (Path(os.path.expanduser(desktop.DEFAULT_DIR)), Path(os.path.expanduser(shipped))):
+        assert folder == Path("~/HireScope Resumes").expanduser()
+        assert not any(folder == p or p in folder.parents for p in protected)
+    assert jcfg.ExcelApplications().path == "~/HireScope Resumes/HireScope Applications.xlsx"
+    example = _yaml.safe_load((rc.ROOT / "inputs" / "preferences.example.yaml").read_text())
+    assert example["excel_applications"]["path"] == "~/HireScope Resumes/HireScope Applications.xlsx"
+    assert "HireScope Resumes" in Path(applications_excel.__file__).read_text()

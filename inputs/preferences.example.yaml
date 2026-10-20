@@ -102,7 +102,9 @@ freshness: {boost_24h: 8, boost_72h: 4, decay_days: 21, cap: 10, coop_multiplier
 # --- Priority boosts (total capped) -------------------------------------------------------------
 boosts: {new_grad: 8, term: 4, grad_match: 3, cap: 12}
 # --- Ghost-job signals --------------------------------------------------------------------------
-ghost: {age_days: 90, stale_days: 365, age_penalty: 5, repost_penalty: 4, evergreen_penalty: 4}
+# stale_days: older postings are hidden unless the employer's job system still lists them (then: "Old posting" badge
+# and stale_penalty instead of age_penalty)
+ghost: {age_days: 90, stale_days: 365, age_penalty: 5, stale_penalty: 8, repost_penalty: 4, evergreen_penalty: 4}
 # --- Meaning-based pre-filter (local embeddings rescue relevant jobs with unusual titles) -------
 prefilter: {enabled: true, threshold: 0.52, margin: 0.05}
 # --- Optional: H-1B sponsorship history (USCIS Employer Data Hub CSV you download yourself) -----
@@ -124,7 +126,7 @@ applications: {follow_up_days: [7, 10], ghosted_after_days: 30, same_company_win
   # an external job whose resume becomes READY lands in My Applications at "Ready to apply"; true = mark it Applied
   auto_mark_applied_external: false}
 # My Applications as an Excel file, rewritten from SQLite after every change (Mark Applied, stage, notes, each run)
-excel_applications: {enabled: true, path: "~/Desktop/Generated Resumes/HireScope Applications.xlsx"}
+excel_applications: {enabled: true, path: "~/HireScope Resumes/HireScope Applications.xlsx"}
 # LinkedIn connections export (Settings > Data privacy > Get a copy of your data > Connections). Optional.
 connections_csv: inputs/linkedin/Connections.csv
 # --- Optional aggregator (off by default; key in .env). Sends only these queries to the provider. -----------

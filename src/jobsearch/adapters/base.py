@@ -103,6 +103,7 @@ class FetchContext:
     max_details: int = 400                  # detail fetches allowed this run for this company
     covered: set[tuple[str, str]] = field(default_factory=set)  # (source, board) fetched officially this run
     known_relevant: dict[str, str | None] = field(default_factory=dict)  # visible job id -> apply url
+    known_open: dict[str, str] = field(default_factory=dict)  # open listing id -> last seen (for verifying unread ones)
     # role keywords for query-based sources, per adapter (config/title_rules.yaml -> search_queries)
     queries: dict[str, list] = field(default_factory=lambda: default_queries())
 

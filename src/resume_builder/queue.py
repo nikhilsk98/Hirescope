@@ -35,7 +35,7 @@ from . import config as rc
 log = logging.getLogger("resume_builder.queue")
 ACTIVE = ("queued", "generating")
 DONE = ("done", "failed", "cancelled", "skipped")
-DEFAULTS = {"concurrency": 1, "retries": 1, "timeout_minutes": 45, "batch_warn": 5, "claude": "~/.local/bin/claude",
+DEFAULTS = {"concurrency": 1, "retries": 1, "timeout_minutes": 30, "batch_warn": 5, "claude": "~/.local/bin/claude",
             "idle_exit_seconds": 30}
 WORKER_LABEL = "com.nikhil.hirescope.worker"
 
@@ -221,6 +221,74 @@ def stop_group(pid: int, grace: float = 8.0) -> None:
                 pass
         if not _alive(pid):
             return
+
+
+WATCHDOG_KEY = "queue_watchdog_retried"     # job ids the watchdog already re-queued once (never twice)
+
+
+def watchdog(conn, running: set[int], minutes: float = 30, retries: int = 1) -> list[str]:
+    """Builds stuck in "Generating" with nothing running them (a worker or a Terminal session that died):
+    - a queue item "generating" for over `minutes` that this worker isn't running: retried once, then Failed;
+    - a job whose resume status says "generating" for over `minutes` with no queue item and no live job lock (an
+      abandoned /resume-builder session): marked Failed with the reason, its generation abandoned, and queued once.
+    Returns what it did."""
+    from . import hirescope_bridge, pipeline, versions
+    out: list[str] = []
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    for it in conn.execute("SELECT * FROM resume_queue WHERE status='generating' AND started_at < ?", (cutoff,)).fetchall():
+        if it["id"] in running or (it["pid"] and _alive(it["pid"]) and _is_build(it["pid"])):
+            continue                                # still running (the build timeout stops it)
+        why = f"stuck in Generating for more than {minutes:g} minutes with no build running"
+        if it["attempts"] <= retries:
+            retry_locked(_exec, conn, "UPDATE resume_queue SET status='queued', pid=NULL, started_at=NULL, message=? "
+                         "WHERE id=?", (f"{why}; retrying", it["id"]))
+            out.append(f"watchdog: job {it['job_pk']}: {why}; retrying")
+        else:
+            retry_locked(_exec, conn, "UPDATE resume_queue SET status='failed', pid=NULL, finished_at=?, result='failed', "
+                         "message=? WHERE id=?", (now(), why, it["id"]))
+            hirescope_bridge.set_status(it["job_pk"], "failed", why, db_path=_db_path(conn))
+            out.append(f"watchdog: job {it['job_pk']}: {why}; marked Failed")
+    try:
+        done = set(json.loads(db.get_meta(conn, WATCHDOG_KEY) or "[]"))
+    except ValueError:
+        done = set()
+    for r in conn.execute("SELECT job_pk, updated_at FROM resume_status WHERE status IN ('generating','validating') "
+                          "AND updated_at < ?", (cutoff,)).fetchall():
+        pk = r["job_pk"]
+        if active_item(conn, pk):
+            continue
+        j = _job(conn, pk)
+        if not j:
+            continue
+        jd = pipeline.job_dir(j["company"], pk, j["title"])
+        lock = versions.JobLock(jd)
+        if lock.path.exists() and not lock._stale():
+            continue                                # a live session holds the job
+        work = jd / pipeline.WORK
+        recent = time.time() - minutes * 60
+        if work.is_dir() and any(f.stat().st_mtime > recent for f in work.rglob("*") if f.is_file()
+                                 and f.name != "state.json"):
+            continue                                # a Terminal session still drafting (its drafts are changing; the
+            #                                         state file is also written by this watchdog, so it doesn't count)
+        why = (f"stuck in Generating since {str(r['updated_at'])[:16].replace('T', ' ')} UTC with no build running "
+               "(an interrupted session)")
+        st = pipeline._state(work) if work.is_dir() else None
+        if st and st.get("status") in ("generating", "validating"):
+            st.update(status="abandoned", abandoned_by="queue watchdog")
+            (work / "state.json").write_text(json.dumps(st, indent=1), encoding="utf-8")
+        if lock.path.exists():
+            lock.path.unlink(missing_ok=True)       # a stale lock (its process is gone)
+        hirescope_bridge.set_status(pk, "failed", why, db_path=_db_path(conn))
+        if pk in done:
+            out.append(f"watchdog: job {pk}: {why}; marked Failed (already retried once)")
+            continue
+        done.add(pk)
+        db.set_meta(conn, WATCHDOG_KEY, json.dumps(sorted(done)))
+        conn.commit()
+        add(conn, [pk], regenerate=True, origin="watchdog")
+        kick()
+        out.append(f"watchdog: job {pk}: {why}; marked Failed and queued once")
+    return out
 
 
 def recover(conn) -> int:
@@ -541,13 +609,19 @@ class Worker:
             if rc_ is None and time.time() - r["t0"] > timeout:
                 stop_group(r["proc"].pid)
                 r["proc"].wait()
-                self.finish(conn, iid, None, forced=f"timed out after {self.s['timeout_minutes']} minutes")
+                self.finish(conn, iid, None, forced=f"stuck in Generating for more than {self.s['timeout_minutes']} "
+                                                   "minutes: stopped")
                 continue
             if rc_ is not None:
                 self.finish(conn, iid, rc_)
         self.paused = run_lock_held()
         if self.paused:
             return
+        try:
+            for line in watchdog(conn, set(self.running), float(self.s["timeout_minutes"]), self.s["retries"]):
+                log.warning(line)
+        except sqlite3.OperationalError:
+            pass                                    # busy: the next tick looks again
         try:                                        # links saved while a run held the database
             from jobsearch import launcher
             if launcher.spooled():

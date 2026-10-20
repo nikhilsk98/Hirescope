@@ -191,3 +191,36 @@ def test_workday_says_when_searches_stopped_early():
     res = WorkdayAdapter(c).fetch(co, FetchContext(want=want_swe, full=False, max_pages=25, max_details=0,
                                                    queries={"workday": ["software"]}))
     assert res.complete is False and res.partial is None
+
+
+def test_workday_unread_tail_is_verified_by_requisition_search():
+    """2026-10-20 spot check: 4 of 20 reopened listings were gone; Caterpillar/Travelers/Amgen answer 403 to the
+    detail API, so a listing is looked up by its requisition number on the board's own search."""
+    import json as _json
+    from jobsearch.adapters.workday import WorkdayAdapter
+
+    def handler(req):
+        if req.url.path == "/robots.txt":
+            return httpx.Response(404)
+        if "/job/" in req.url.path and req.method == "GET":
+            return httpx.Response(403)
+        body = _json.loads(req.content or b"{}")
+        text = body.get("searchText") or ""
+        if body.get("limit") == 1:
+            return httpx.Response(200, json={"total": 1, "jobPostings": [], "facets": []})
+        if text.startswith("R") or text.startswith("r"):          # a requisition lookup
+            listed = text.lower() == "r11111"
+            return httpx.Response(200, json={"total": int(listed), "jobPostings": [
+                {"title": "Nurse", "externalPath": "/job/Boston/Nurse_R11111"}] if listed else []})
+        page = body["offset"] // 20
+        return httpx.Response(200, json={"total": 5000, "jobPostings": [
+            {"title": "Software Engineer" if page < 1 else "Nurse", "externalPath": f"/job/x/Job_{body['offset'] + i}",
+             "locationsText": "Boston, MA"} for i in range(20)]})
+    co = Company(name="DemoW", source="workday", host="demo.wd1.myworkdayjobs.com", board="demo", site="Ext")
+    a = WorkdayAdapter(mock_client(handler))
+    ctx = FetchContext(want=lambda t, loc: "software" in t.lower(), full=False, max_pages=25, max_details=0,
+                       queries={"workday": ["software"]},
+                       known_open={"nurse_r11111": "2026-10-01T00:00:00+00:00", "nurse_r22222": "2026-10-02T00:00:00+00:00"})
+    res = a.fetch(co, ctx)
+    assert res.complete is False and res.confirmed_open == {"nurse_r11111"} and res.confirmed_closed == {"nurse_r22222"}
+    assert a.check_open(co, "nurse_r22222", "https://demo.wd1.myworkdayjobs.com/Ext/job/Boston/Nurse_R22222") is False

@@ -83,8 +83,10 @@ class Boosts(BaseModel):
 
 class Ghost(BaseModel):
     age_days: int = 90              # posted longer ago than this -> "ghost risk"
-    stale_days: int = 365           # posted longer ago than this -> filtered (rules.stale_posting)
+    stale_days: int = 365           # posted longer ago than this -> filtered (rules.stale_posting), unless the source
+                                    # still lists it (an official job system, seen in the last 3 days): shown "Old posting"
     age_penalty: float = 5
+    stale_penalty: float = 8        # an old posting the source still lists (instead of age_penalty)
     repost_penalty: float = 4       # reopened / reposted
     evergreen_penalty: float = 4    # "talent pool", "evergreen", "future opportunities"
 
@@ -162,10 +164,10 @@ class Applications(BaseModel):
 
 
 class ExcelApplications(BaseModel):
-    """~/Desktop/Generated Resumes/HireScope Applications.xlsx, regenerated from SQLite after every change
+    """~/HireScope Resumes/HireScope Applications.xlsx, regenerated from SQLite after every change
     (ops/applications_excel.py). JOBSEARCH_EXCEL_PATH overrides the path (tests)."""
     enabled: bool = True
-    path: str = "~/Desktop/Generated Resumes/HireScope Applications.xlsx"
+    path: str = "~/HireScope Resumes/HireScope Applications.xlsx"
 
 
 class Scoring(BaseModel):

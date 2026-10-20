@@ -9,13 +9,14 @@ naming:
 
 page_count: 1
 
-# Desktop copy (src/resume_builder/desktop.py): each READY version's employer-facing PDF is copied to
+# Resume copies (src/resume_builder/desktop.py): each READY version's employer-facing PDF is copied to
 # <dir>/<Company>/<Role>_<JobID>/ (current as <First>_<Last>_Resume_<Company>.pdf, older READY versions as _v<N>.pdf;
 # the default resume in <dir>/Default/). Re-sync anytime: ./scripts/sync_desktop_resumes.sh. Not part of the
 # settings hash: changing it never forces a rebuild.
 desktop_copy:
   enabled: true
-  dir: ~/Desktop/Generated Resumes
+  dir: ~/HireScope Resumes      # not a macOS-protected folder: background builds write here without asking
+                                # (~/Desktop/Generated Resumes is a Finder alias to it)
 
 # Section order (rules 24–25, v4.1): the same for every application and every level, never reordered. The audience
 # (student vs experienced, from HireScope's track and level) decides only whether a 3rd project is allowed (rule 47).
@@ -149,7 +150,8 @@ related_groups:
 resume_queue:
   concurrency: 1            # builds at once (max 2); never the same job twice at once
   retries: 1                # a failed build is retried this many times, then marked Failed with the reason
-  timeout_minutes: 45       # a build still running after this long is stopped and counts as a failure
+  timeout_minutes: 30       # a build "Generating" longer than this is stopped (or, with nothing running it, found by the
+                            # watchdog), marked Failed with the reason and retried once
   batch_warn: 5             # "Generate resumes for all" asks first (count + usage warning) above this many jobs
   claude: ~/.local/bin/claude
   idle_exit_seconds: 30     # the worker exits this long after the queue empties (launchd starts it again on demand)

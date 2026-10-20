@@ -73,6 +73,8 @@ def _badges(job: dict, today: str, latest_day: str, tz: str, mine: set[str], clo
         b.append("closing")
     if sig.get("ghost"):
         b.append("ghost")
+    if sig.get("old_posting"):
+        b.append("old")            # posted 365+ days ago, still listed by the employer
     if sig.get("new_grad"):
         b.append("newgrad")
     if sig.get("check_eligibility"):

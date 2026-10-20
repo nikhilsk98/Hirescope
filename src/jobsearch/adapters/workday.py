@@ -27,6 +27,7 @@ from .util import join_locations, parse_dt
 PAGE = 20
 FULL_PAGES = 120          # full runs: up to 2,400 results per search (RTX lists ~2,050; Leidos, NVIDIA ~1,200)
 STALE_PAGES = 3           # a keyword search stops after this many pages in a row with no relevant title
+TAIL_CHECKS = 40          # listings beyond where searches stopped, verified per company per run
 # Role searches come from config/title_rules.yaml -> search_queries.workday (why those phrases: see that file).
 # Co-op/intern roles come from each site's own early-career facets.
 _US = {"united states of america", "united states", "usa", "us"}
@@ -180,9 +181,20 @@ class WorkdayAdapter(Adapter):
             jobs.append(self._raw(company.name, host, tenant, site, item, info, now))
         partial = "; ".join(capped) or None
         notes = [] if facet else ["no United States location facet found; searched all locations"]
+        res_open, res_gone = set(), set()
+        if early:                  # the unread tail: verify a few unseen listings each run (oldest first)
+            seen = {p.rstrip("/").split("/")[-1].lower() for p in items}
+            tail = sorted(((jid, ts) for jid, ts in ctx.known_open.items() if jid not in seen and jid not in ctx.known_relevant),
+                          key=lambda t: t[1] or "")[:TAIL_CHECKS]       # least recently seen first
+            for jid, _ in tail:
+                st = self._listed(host, site, f"/job/x/{jid}")
+                (res_open if st else res_gone if st is False else set()).add(jid)
+            if res_gone or res_open:
+                notes.append(f"unread listings checked: {len(res_open)} still open, {len(res_gone)} gone")
         if details >= ctx.max_details:
             notes.append(f"detail fetches capped at {ctx.max_details}; remaining fetched next run")
-        return FetchResult(jobs=jobs, partial=partial, notes=notes, complete=not early)
+        return FetchResult(jobs=jobs, partial=partial, notes=notes, complete=not early, confirmed_open=res_open,
+                           confirmed_closed=res_gone)
 
     def check_open(self, company: Company, job_id: str, apply_url: str | None) -> bool | None:
         u = urlparse(apply_url or "")
@@ -192,8 +204,27 @@ class WorkdayAdapter(Adapter):
         try:
             info = self._detail(u.hostname, u.hostname.split(".")[0], m.group(1), m.group(2))
         except httpx.HTTPStatusError as e:
-            return False if e.response.status_code in (404, 410) else None
+            if e.response.status_code in (404, 410):
+                return False
+            return self._listed(u.hostname, m.group(1), m.group(2))   # some tenants refuse the detail API (403)
+        except Exception:  # noqa: BLE001
+            return self._listed(u.hostname, m.group(1), m.group(2))
         return bool(info.get("title")) if info.get("posted", True) else False
+
+    def _listed(self, host: str, site: str, path: str) -> bool | None:
+        """Is the posting on its board? Search the board for its requisition number (Caterpillar, Travelers and Amgen
+        answer 403 to the detail API but search normally). None when that can't be told either."""
+        slug = path.rstrip("/").split("/")[-1]
+        m = re.search(r"_([A-Za-z]{0,4}-?\d{4,})(?:-\d{1,2})?$", slug)
+        req = m.group(1) if m else None
+        if not req:
+            return None
+        try:
+            page = self.http.post_json(f"https://{host}/wday/cxs/{host.split('.')[0]}/{site}/jobs",
+                                       {"appliedFacets": {}, "limit": 10, "offset": 0, "searchText": req})
+        except Exception:  # noqa: BLE001
+            return None
+        return any(req.lower() in (p.get("externalPath") or "").lower() for p in page.get("jobPostings") or [])
 
     def fetch_one(self, url: str, company: str | None = None) -> RawJob | None:
         u = urlparse(url)
