@@ -1258,6 +1258,40 @@ history, never the current file.
 - `--dry-run` now prints the summary too (nothing written). `--verbose` shows everything as before.
 - Tests: `tests/test_terminal_output.py`; the end-to-end test checks the terminal ends on the summary. Suite: 883 passed.
 
+## Imports, external resumes, Macquarie, coverage audit (2026-10-20)
+- **A. Stuck "Importing…"**: the launcher received all 7 Resume Builder links and the worker imported 6 of them; the
+  tab kept them at "Importing…" because it matched a submission to a dashboard job by company + role, and URL-only
+  submissions were stored as (hostname, "(from the URL)"). The 7th (role text typed as Company, URL not kept) failed
+  and its error was overwritten in `launcher_last`. Now every submission is answered by id in live.js (`external`:
+  imported / linked / failed + reason); 5 minutes without an answer shows "Import failed" with Retry; failures offer
+  "Paste JD instead" (form pre-filled). URL imports check for the posting before and after reading the page
+  (canonical keys incl. Jibe / Rippling / Workable / Eightfold / Oracle…, the company's posting number by brand,
+  company + role + JD). Replayed the six: all linked (NVIDIA 75144, Cisco 132175 by posting number, AMD 151371,
+  Keurig Dr Pepper 151372, Tive 33399, IBM 151373); each already had a READY v1. AMD 91180 existed 3 times (Jibe,
+  SimplifyJobs, by URL): merged into 151371 (your application). The merge now keeps the applied / built job and moves
+  Bucket, question and queue rows, and runs every run (66 duplicates merged).
+- **B. External jobs auto-queue** from every way in (drop folder, dashboard files, add_job.sh, add_url.sh, Resume
+  Builder tab) through the one queue; the build command is the same for every origin (tested).
+- **C.** Already done in c671cbf; verified live (two exports in Downloads → newest imported, both moved).
+- **D. Rule 39 (rules v4.8)**: Accenture's client is never named; `no_client_name` fails a build whose PDF text has
+  "Macquarie" (content checked earlier too); job packages scrub quoted resume lines; Desktop drops older versions that
+  name it. Inputs backed up to inputs/resume/archive/*.before-macquarie-removal.*. 33 READY resumes + the Default
+  named it: Default v4 rebuilt; 33 regenerated through the queue (20 first failed on Claude's usage limit — the queue
+  now waits for the reset instead of failing).
+- **E. Coverage audit** (logs in data.nosync/logs/audit/): before (copy of the data, --all) 412 OK · 2 failed · 53
+  manual · 34 partial, 106,921 listed, 6,606 visible (5,998 full-time, 602 co-op) → after (real data, --all, second
+  run) 427 OK · 5 failed (4 SmartRecruiters API 500/400 blips and Rapid7, all fine minutes later) · 35 manual · 7
+  partial, 107,926 listed, 7,838 visible (7,212 full-time, 616 co-op). New job systems: Oracle Recruiting Cloud,
+  SuccessFactors (sitemap + microdata), Radancy, BambooHR, JazzHR, Paylocity, Avature — 19 companies, 998 visible
+  jobs (JPMorgan Chase 568, Oracle 219, NTT DATA 97). Fixes: Workday tier pages + relevance stop + 429 keeps results;
+  US towns named like places abroad; DE-/IN- codes; SimplifyJobs JD enrichment after capped runs / edits, sponsorship
+  field; wrong fuzzy merges (and detaching them); Eightfold / myworkdaysite keys; title gaps (AI / FDE / SW / data /
+  mobile), graduation "X or Y", management / fellow levels, YOE "up to"; test requisitions; HN plurals / dashes /
+  body roles / city lists; LinkedIn alert layouts and exact sender; meaning-rescued jobs get JDs; stale source rows
+  pruned; a test leak into inputs/external_jobs fixed (DEMO job removed). A first after-run closed 5,992 unread
+  Workday listings (relevance stop); fixed (incomplete searches only close verified-gone listings or irrelevant ones
+  unseen 21 days) and reopened.
+
 ## Needs Nikhil (this work)
 1. **macOS folder access for background jobs** (recommended): System Settings → Privacy & Security → Files and Folders →
    allow **Python** and **HireScope Launcher** the Desktop and Downloads folders (or answer the prompts when shown).
