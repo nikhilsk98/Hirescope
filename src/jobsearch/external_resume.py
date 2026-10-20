@@ -19,16 +19,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import external, paths
 from .storage import db
 
+log = logging.getLogger(__name__)
 JSON_PREFIX = "hirescope-external-job-"
 FILE_TYPES = (".json", ".txt", ".md", ".pdf", ".docx")
 _NAME = re.compile(r"^[A-Za-z0-9 ._()\[\]+,-]{1,200}$")
@@ -111,19 +113,66 @@ def request(file_arg: str | None = None, payload: dict | None = None) -> Path:
     return p
 
 
-def import_payload_and_queue(conn, cfg, payload: dict) -> dict:
-    """A pasted JD sent inside the link: import it (usual dedupe) and queue its resume. No file anywhere."""
+OUTCOMES_KEY = "external_outcomes"     # what happened to each Resume Builder submission (live.js → the tab)
+OUTCOME_DAYS = 7
+
+
+def queue_resume(conn, pk: int, origin: str = "external") -> dict:
+    """Queue the job's resume through the one resume queue (skipped when it already has a current READY resume, not
+    queued twice) and start the worker. Every way an external job comes in ends here: same queue, same build."""
     from resume_builder import queue
-    res = import_file(conn, cfg, None, payload)
+    q = queue.add(conn, [pk], origin=origin)[0]
+    queue.kick()
+    return q
+
+
+def _queued_text(q: dict) -> str:
+    return "queued" if q["status"] == "queued" else q["message"].split(": ", 1)[-1]
+
+
+def _finish(conn, res: dict, note: str = "") -> dict:
+    """An imported (or linked) job: dashboard republish pending, its resume queued; the answer for live.js."""
     db.set_meta(conn, "publish_pending", db.utcnow())
     conn.commit()
-    q = queue.add(conn, [res["job_pk"]], origin="resume_builder")[0]
-    queue.kick()
+    q = queue_resume(conn, res["job_pk"], origin="resume_builder")
     j = conn.execute("SELECT company, title FROM jobs WHERE id=?", (res["job_pk"],)).fetchone()
     name = f"{j['company']} — {j['title']}" if j else f"job {res['job_pk']}"
-    msg = (f"{'matched existing' if res['status'] == 'duplicate' else 'imported'} {name} (job {res['job_pk']}); resume "
-           + ("queued" if q["status"] == "queued" else q["message"].split(": ", 1)[-1]))
-    return {"job_pk": res["job_pk"], "imported": res["status"], "queue": q["status"], "message": msg, "note": ""}
+    dup = res["status"] == "duplicate"
+    msg = (f"{'linked to existing job' if dup else 'imported'} {name} (job {res['job_pk']}"
+           + (f"; {res['why']}" if dup and res.get("why") else "") + f"); resume {_queued_text(q)}")
+    return {"job_pk": res["job_pk"], "imported": res["status"], "queue": q["status"], "message": msg, "note": note,
+            "company": j["company"] if j else "", "title": j["title"] if j else ""}
+
+
+def import_payload_and_queue(conn, cfg, payload: dict) -> dict:
+    """A pasted JD (or a URL) sent inside the link: import it (usual dedupe) and queue its resume. No file anywhere."""
+    return _finish(conn, import_file(conn, cfg, None, payload))
+
+
+def request_id(req: dict) -> str:
+    """The id the dashboard knows a submission by: its `rid`, else its created_at (older pages), else the file name."""
+    pl = req.get("payload") or {}
+    return str(pl.get("rid") or pl.get("created_at") or req.get("rid") or req.get("file") or req.get("at") or "")[:80]
+
+
+def record_outcome(conn, rid: str, **o) -> dict:
+    """Remember what happened to one submission (the last week's, newest last) for the Resume Builder tab."""
+    try:
+        cur = json.loads(db.get_meta(conn, OUTCOMES_KEY) or "[]")
+    except ValueError:
+        cur = []
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=OUTCOME_DAYS)).isoformat(timespec="seconds")
+    rec = {"rid": rid, "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **o}
+    keep = [x for x in cur if isinstance(x, dict) and x.get("rid") != rid and str(x.get("at", "")) >= cutoff]
+    db.set_meta(conn, OUTCOMES_KEY, json.dumps([*keep, rec][-200:]))
+    return rec
+
+
+def outcomes(conn) -> list[dict]:
+    try:
+        return [x for x in json.loads(db.get_meta(conn, OUTCOMES_KEY) or "[]") if isinstance(x, dict)]
+    except ValueError:
+        return []
 
 
 def pending_requests(include_blocked: bool = True) -> list[Path]:
@@ -170,18 +219,33 @@ def process_requests(conn, cfg=None) -> list[dict]:
             from .config import load_config
             cfg = load_config(paths.PREFERENCES)
         at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        rid, pl = request_id(req), req.get("payload") or {}
+        sent = {"company": str(pl.get("company") or "").strip(), "role": str(pl.get("role") or "").strip(),
+                "url": str(pl.get("url") or "").strip()}
         try:
             res = (import_payload_and_queue(conn, cfg, req["payload"]) if req.get("payload")
                    else import_and_queue(conn, cfg, req["file"]))
             msg, ok = (f"{res['note']}; {res['message']}" if res["note"] else res["message"]), True
+            record_outcome(conn, rid, **sent, status="linked" if res["imported"] == "duplicate" else "imported",
+                           job_pk=res["job_pk"], job_company=res.get("company"), job_title=res.get("title"),
+                           queue=res["queue"], message=msg)
         except sqlite3.OperationalError:
             break                                         # the database is busy: try again on the next round
-        except (FileRefused, ValueError, external.ExternalError) as e:
-            msg, ok = f"{Path(str(req.get('file') or 'the pasted job')).name}: {e}", False
-        db.set_meta(conn, "launcher_last", json.dumps({"at": at, "action": "external", "ok": ok, "message": msg}))
+        except Exception as e:  # noqa: BLE001 — any failure is reported on the tab (never "Importing…" forever)
+            from .add_url import UnreadableURL
+            what = Path(str(req.get("file") or "")).name or sent["url"] or "the pasted job"
+            reason = e.reason if isinstance(e, UnreadableURL) else str(e) if isinstance(
+                e, (FileRefused, ValueError, external.ExternalError)) else f"{type(e).__name__}: {str(e)[:200]}"
+            if not isinstance(e, (FileRefused, ValueError, external.ExternalError)):
+                log.warning("external job not imported: %s", e, exc_info=True)
+            msg, ok = f"{what}: import failed: {reason}", False
+            record_outcome(conn, rid, **sent, status="failed", reason=reason, message=msg,
+                           paste=bool(sent["url"]) and not str(pl.get("jd_text") or "").strip())
+        db.set_meta(conn, "launcher_last", json.dumps({"at": at, "action": "external", "ok": ok, "message": msg,
+                                                       "rid": rid}))
         conn.commit()
         r.unlink(missing_ok=True)
-        out.append({"file": req.get("file"), "ok": ok, "message": msg})
+        out.append({"file": req.get("file"), "rid": rid, "ok": ok, "message": msg})
         try:
             from . import hooks
             hooks.after_change(conn, reason="external job")
@@ -237,17 +301,7 @@ def import_file(conn, cfg, p: Path | None, payload: dict | None = None) -> dict:
         raise FileRefused("not a HireScope external job")
     if payload is not None and payload.get("url") and not str(payload.get("jd_text") or "").strip() \
             and not payload.get("file"):
-        from .adapters.base import HttpClient
-        from .add_url import add_job
-        client = HttpClient()
-        try:
-            s = lambda k: (str(payload.get(k) or "").strip() or None)  # noqa: E731
-            pk, status, how = add_job(conn, cfg, s("url"), client, company=s("company"), title=s("role"),
-                                      location=s("location"), track=external.norm_track(s("track")))
-        finally:
-            client.close()
-        conn.commit()
-        return {"job_pk": pk, "status": status, "message": f"added by URL ({how}): job {pk}"}
+        return import_url(conn, cfg, payload)
     if payload is not None:
         ext, force = external.from_json(payload, origin="resume_builder" if payload.get("origin") == "resume_builder"
                                         else "dashboard")
@@ -259,10 +313,45 @@ def import_file(conn, cfg, p: Path | None, payload: dict | None = None) -> dict:
     return {"job_pk": out.job_pk, "status": out.status, "message": out.message}
 
 
+def import_url(conn, cfg, payload: dict) -> dict:
+    """A URL with no JD. A job HireScope already has (same posting — checked from the URL first, then from what the
+    page says: its canonical URL, posting number, or company + role + JD) is linked, not imported again. Otherwise the
+    page is read (ATS API, else schema.org JSON-LD) and added. Raises add_url.UnreadableURL (with the reason) when the
+    page can't be read — blocked, JavaScript-only, gone — so the tab can offer "Paste JD instead"."""
+    from .adapters.base import HttpClient
+    from .add_url import UnreadableURL, add_job, resolve
+    s = lambda k: (str(payload.get(k) or "").strip() or None)  # noqa: E731
+    url, company = s("url"), s("company")
+    if not re.match(r"^https?://", url or "", re.I):
+        raise external.ExternalError("the job URL must start with http:// or https://")
+    if not payload.get("force") and (d := external.find_by_url(conn, url, company)):
+        return {"job_pk": d["job_pk"], "status": "duplicate", "message": d["message"], "why": d["message"].rsplit("(", 1)[-1].rstrip(")")}
+    client = HttpClient()
+    try:
+        raw, how = resolved = resolve(url, client, company)
+        if raw is None:
+            raise UnreadableURL(url, how)
+        if not payload.get("force"):
+            d = external.find_by_url(conn, raw.apply_url or url, company or raw.company, extra_urls=(url,))
+            if d is None and len(raw.description or "") >= 200:
+                d = external.find_duplicate(conn, external.ExternalJob(
+                    company=company or raw.company, role=s("role") or raw.title, jd_text=raw.description), cfg.title_rules)
+            if d:
+                return {"job_pk": d["job_pk"], "status": "duplicate", "message": d["message"],
+                        "why": d["message"].rsplit("(", 1)[-1].rstrip(")")}
+        pk, status, how = add_job(conn, cfg, url, client, company=company, title=s("role"), location=s("location"),
+                                  track=external.norm_track(s("track")), resolved=resolved)
+    finally:
+        client.close()
+    conn.commit()
+    if status != "new":            # the upsert found it (same ATS posting from another source): a link, not a copy
+        return {"job_pk": pk, "status": "duplicate", "message": f"same posting as job {pk}", "why": "same posting"}
+    return {"job_pk": pk, "status": "new", "message": f"added by URL ({how}): job {pk}"}
+
+
 def import_and_queue(conn, cfg, file_arg: str, wait: float = 20.0) -> dict:
     """The launcher's / external_resume.sh's work: find the file (or the newest pending one), import it, queue its
     resume, start the worker, ask the worker to republish the dashboard data. Returns what happened."""
-    from resume_builder import queue
     note = ""
     try:
         p = allowed_path(file_arg)
@@ -281,18 +370,9 @@ def import_and_queue(conn, cfg, file_arg: str, wait: float = 20.0) -> dict:
     seen = external._seen(conn)
     if sig not in seen:
         db.set_meta(conn, "external_imported", json.dumps([*seen, sig][-1000:]))
-    db.set_meta(conn, "publish_pending", db.utcnow())
     conn.commit()
     external._archive(p, True, paths.EXTERNAL_INBOX)
-    q = queue.add(conn, [res["job_pk"]], origin="resume_builder")[0]
-    queue.kick()
-    j = conn.execute("SELECT company, title FROM jobs WHERE id=?", (res["job_pk"],)).fetchone()
-    name = f"{j['company']} — {j['title']}" if j else f"job {res['job_pk']}"
-    dup = res["status"] == "duplicate"
-    msg = (f"{'matched existing' if dup else 'imported'} {name} (job {res['job_pk']}); resume "
-           + ("queued" if q["status"] == "queued" else q["message"].split(": ", 1)[-1]))
-    return {"job_pk": res["job_pk"], "imported": res["status"], "queue": q["status"], "message": msg, "note": note,
-            "file": str(p)}
+    return {**_finish(conn, res, note), "file": str(p)}
 
 
 def main(argv=None) -> int:

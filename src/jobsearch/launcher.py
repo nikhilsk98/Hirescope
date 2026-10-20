@@ -142,7 +142,11 @@ def _data(v: str) -> dict:
             ("company", "role", "location", "url", "track", "jd_text", "origin", "created_at")}
     if not (keep["jd_text"].strip() or keep["url"].strip()):
         raise LinkError("data has neither a job description nor a URL")
-    return {"kind": "hirescope_external_job", "format": 1, "force": bool(obj.get("force")), **keep}
+    rid = str(obj.get("rid") or "")            # the page's id for this submission (its answer in live.js)
+    if rid and not re.match(r"^[A-Za-z0-9:._-]{1,80}$", rid):
+        raise LinkError("rid must be letters, digits and : . _ -")
+    return {"kind": "hirescope_external_job", "format": 1, "force": bool(obj.get("force")), **keep,
+            **({"rid": rid} if rid else {})}
 
 
 def _version(v: str) -> int:

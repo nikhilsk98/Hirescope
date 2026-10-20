@@ -105,6 +105,13 @@ def test_location_normalization(text, us, remote_us, display):
     ("https://jobs.smartrecruiters.com/ServiceNow/744000154891980-software-engineer", "smartrecruiters:744000154891980"),
     ("https://www.amazon.jobs/en/jobs/10575340/software-development-engineer", "amazon:10575340"),
     ("https://example.com/jobs/1", None),
+    # the same Jibe posting from its own site, SimplifyJobs (?icims=1) and a LinkedIn "Apply" link
+    ("https://careers.amd.com/careers-home/jobs/91180?lang=en-us&iis=Job%20Board", "jibe:careers.amd.com:91180"),
+    ("https://careers.amd.com/jobs/91180?icims=1", "jibe:careers.amd.com:91180"),
+    ("https://careers.demo.example/jobs/12?lang=en-us", None),
+    ("https://ats.rippling.com/demo-careers/jobs/c88ab3d3-a8e7-4639-b95b-d6c9b5290dd0",
+     "rippling:c88ab3d3-a8e7-4639-b95b-d6c9b5290dd0"),
+    ("https://apply.workable.com/demo/j/FD4C9770FF/apply", "workable:FD4C9770FF"),
 ])
 def test_canonical_key(url, key):
     assert canonical_key(url) == key

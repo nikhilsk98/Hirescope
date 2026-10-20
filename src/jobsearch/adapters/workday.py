@@ -21,6 +21,7 @@ import httpx
 from ..config import Company
 from ..extract.text import html_to_text
 from .base import Adapter, Capabilities, FetchContext, FetchResult, RawJob, SourceError, SourceUnavailable
+from .canonical import workday_key
 from .util import join_locations, parse_dt
 
 PAGE = 20
@@ -105,7 +106,7 @@ class WorkdayAdapter(Adapter):
             description=html_to_text(info.get("jobDescription") or "") if info else (None if info is None else ""),
             posted_date=posted if exact or info else None,
             employment_type=(info or {}).get("timeType"),
-            canonical_key=f"workday:{tenant}:{slug}",
+            canonical_key=workday_key(tenant, slug),
             extra={"req_id": (item.get("bulletFields") or [None])[0], "posted_on": item.get("postedOn")},
         )
 

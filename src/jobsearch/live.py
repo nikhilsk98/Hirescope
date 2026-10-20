@@ -5,6 +5,7 @@ connect-src 'none'), written by the hirescope:// launcher and the resume-queue w
   worker     running | paused (a HireScope run is writing) | idle | stopped, with a heartbeat
   excel      the applications Excel file: ok | pending (open in Excel; saved beside it, applied on the next sync) | off
   launcher   the last link handled (time + what happened), so the page knows a click arrived
+  external   what happened to each Resume Builder submission this week (by its id): imported / linked / failed
   bucket_at / sync_at   when the Bucket / your statuses last changed in SQLite (the page then re-reads sync.js)
 
 dashboard/launcher.js says whether the launcher is installed (scripts/install_launcher.sh writes it; the page shows
@@ -52,7 +53,12 @@ def payload(conn) -> dict:
                                  ).fetchone()[0]
     except sqlite3.OperationalError:
         bucket_at, questions = None, 0
-    return {"generated_at": db.utcnow(), "queue": [{k: r.get(k) for k in keep} for r in q],
+    try:
+        from .external_resume import outcomes
+        external = outcomes(conn)
+    except sqlite3.Error:
+        external = []
+    return {"generated_at": db.utcnow(), "queue": [{k: r.get(k) for k in keep} for r in q], "external": external,
             "worker": _meta(conn, "queue_worker"), "excel": _meta(conn, "excel_applications"),
             "launcher": _meta(conn, "launcher_last"), "bucket_at": bucket_at, "sync_at": db.get_meta(conn, "sync_at"),
             "questions_open": questions, "settings": settings}

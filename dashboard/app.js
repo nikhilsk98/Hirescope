@@ -1997,7 +1997,7 @@
     liveTimer = setTimeout(async () => { if (!liveBusy) { liveBusy = true; await reloadScript("live.js"); liveBusy = false; } pollLive(false); }, soon ? 1500 : fast ? 3000 : 20000);
   }
   const liveSig = (d) => JSON.stringify([(d.queue || []).map((x) => [x.id, x.status, x.attempts, x.message]), d.launcher, d.excel, d.questions_open, d.sync_at,
-    (d.worker || {}).state]);
+    (d.worker || {}).state, (d.external || []).map((x) => [x.rid, x.status, x.at])]);
   window.__hsLive = (d) => {
     if (!d || String(d.generated_at || "") === liveSeen) return;
     if (liveSig(d) === liveSig(LIVE)) { LIVE = d; liveSeen = String(d.generated_at || ""); return; }
@@ -2134,9 +2134,29 @@
   // The page saves the job as hirescope-external-job-*.json (your Downloads) and opens hirescope://external?file=…;
   // the launcher imports that file (dedupe: an existing job keeps its ID) and queues its resume. Without the launcher
   // the file waits for the next run (or ./scripts/external_resume.sh "<file>").
-  const EXT_KEY = "jobsearch.externalPending.v1";   // [{company, role, file, saved_at}] until the job is on the dashboard
-  const extMatch = (j, x) => j.company.toLowerCase() === String(x.company || "").toLowerCase() && C.tokenSortRatio(C.normTitle(j.title), C.normTitle(x.role || "")) >= 90;
-  const extPending = () => store.get(EXT_KEY, []).filter((x) => !JOBS.some((j) => extMatch(j, x)) && Date.now() - Date.parse(x.saved_at || 0) < 7 * 864e5);
+  // Each submission is remembered here for a week, by its id (rid; older entries: their created_at, or the saved file's
+  // name). The worker answers each one in live.js (LIVE.external: imported / linked to an existing job / failed + why);
+  // no answer within EXT_TIMEOUT_MS shows as failed with Retry, so nothing sits at "Importing…" forever.
+  const EXT_KEY = "jobsearch.externalPending.v1";   // [{rid, company, role, url, file, saved_at, payload}]
+  const EXT_TIMEOUT_MS = 5 * 60 * 1000;
+  const EXT_DAYS = 7;
+  const extId = (x) => x.file || x.rid || x.saved_at;
+  const extOutcome = (x) => (LIVE.external || []).find((o) => o.rid === extId(x)) || null;
+  const extEntries = () => store.get(EXT_KEY, []).filter((x) => Date.now() - Date.parse(x.saved_at || 0) < EXT_DAYS * 864e5);
+  function extState(x) {
+    const o = extOutcome(x);
+    if (o && (o.status === "imported" || o.status === "linked")) return { kind: o.status, o, pk: o.job_pk };
+    if (o && o.status === "failed") return { kind: "failed", o, reason: o.reason || o.message || "import failed" };
+    const age = Date.now() - Date.parse(x.saved_at || 0);
+    const w = (LIVE.worker || {}).state;
+    if (!LAUNCHER.installed) return { kind: "waiting" };
+    if (age < EXT_TIMEOUT_MS) return { kind: "importing", hint: w === "paused" ? "waiting: a HireScope run is writing the database" : "" };
+    return { kind: "failed", timeout: true, reason: `no answer from HireScope after ${Math.round(EXT_TIMEOUT_MS / 60000)} minutes` +
+      (w === "paused" ? " (a HireScope run is still writing the database; it is imported once the run ends)" :
+       w === "stopped" || !w ? " (the background worker isn't running; Retry starts it)" : "") };
+  }
+  // pending rows: everything not yet on the dashboard as an external job (a linked job stays listed: it isn't one)
+  const extPending = () => extEntries().filter((x) => { const st = extState(x); return !(st.kind === "imported" && externalJobs().some((j) => j.id === st.pk)); });
   const externalJobs = () => JOBS.filter((j) => (j.badges || []).includes("external"));
   const b64url = (str) => { const bytes = new TextEncoder().encode(str); let s2 = ""; for (let i = 0; i < bytes.length; i += 0x8000) s2 += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
     return btoa(s2).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
@@ -2194,29 +2214,73 @@
     const payload = { kind: "hirescope_external_job", format: 1, origin: "resume_builder", created_at: new Date().toISOString(), company: v("company"), role: v("role"),
       location: v("location"), url, track: v("track"), jd_text: v("jd"), force: !!(dup && extForce) };
     if (file) payload.file = { name: file.name, type: file.type, b64: b64(await file.arrayBuffer()) };
-    const slug = (v("company") || (url ? new URL(url).hostname : "job")).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "job";
+    const sent = await sendExternal(payload);
+    if (sent) { f.reset(); toast(`Saved and queued: ${payload.company || url} — importing, then building in the background`); }
+  }
+  // one submission → the launcher (a pasted JD or URL inside the link; a file saved to Downloads and named in it),
+  // remembered by its id so the worker's answer finds it. `again`: the entry Retry re-sends (keeps its row).
+  async function sendExternal(payload, again) {
+    const url = payload.url || "";
+    payload = Object.assign({}, payload, { rid: `rb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, created_at: new Date().toISOString() });
+    const slug = (payload.company || (url ? new URL(url).hostname : "job")).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "job";
     const name = `hirescope-external-job-${slug}-${payload.created_at.replace(/[-:]/g, "").slice(0, 15)}-${Math.random().toString(36).slice(2, 6)}.json`;
     // a pasted JD (or a URL) travels inside the link: nothing is downloaded and no folder permission is needed; a JD
     // file is saved to Downloads and named in the link (the worker reads it there)
-    const data = file ? null : b64url(JSON.stringify(payload));
+    const data = payload.file ? null : b64url(JSON.stringify(payload));
     const inline = LAUNCHER.installed && data && data.length < 110000;
     if (!inline) download(name, JSON.stringify(payload, null, 1), "application/json");
-    store.set(EXT_KEY, [...store.get(EXT_KEY, []).slice(-30), { company: payload.company || (url ? new URL(url).hostname : ""), role: payload.role || "(from the URL)", file: inline ? null : name, saved_at: payload.created_at }]);
-    extLast = { name: inline ? null : name, company: payload.company, role: payload.role, url, at: payload.created_at, sent: false };
+    const keep = payload.file ? null : (JSON.stringify(payload).length < 60000 ? payload : Object.assign({}, payload, { jd_text: "" }));
+    const entry = { rid: payload.rid, company: payload.company || (url ? new URL(url).hostname : ""), role: payload.role || "(from the URL)", url,
+      file: inline ? null : name, saved_at: payload.created_at, payload: keep && (keep.jd_text || !payload.jd_text) ? keep : null };
+    const rest = store.get(EXT_KEY, []).filter((x) => !again || extId(x) !== extId(again));
+    store.set(EXT_KEY, [...rest.slice(-30), entry]);
+    extLast = { rid: entry.rid, entry, name: inline ? null : name, company: payload.company, role: payload.role, url, at: payload.created_at, sent: false };
+    let sent = false;
     if (LAUNCHER.installed) {
-      const sent = await launch(inline ? `hirescope://external?data=${data}` : `hirescope://external?file=${encodeURIComponent(name)}`, "Build resume");
+      sent = await launch(inline ? `hirescope://external?data=${data}` : `hirescope://external?file=${encodeURIComponent(name)}`, "Build resume");
       extLast.sent = !!sent;
-      if (sent) { f.reset(); toast(`Saved and queued: ${payload.company || url} — importing, then building in the background`); }
     } else toast(`Saved ${name} to your Downloads`);
+    renderList(true); renderTopTabs();
+    return sent;
+  }
+  async function retryExternal(x) {
+    if (x.payload) { if (await sendExternal(x.payload, x)) toast(`Retrying: ${x.company || x.url}`); return; }
+    if (x.file && LAUNCHER.installed) {        // a JD file still in Downloads: name it again
+      const entry = Object.assign({}, x, { saved_at: new Date().toISOString() });
+      store.set(EXT_KEY, [...store.get(EXT_KEY, []).filter((y) => extId(y) !== extId(x)), entry]);
+      if (await launch(`hirescope://external?file=${encodeURIComponent(x.file)}`, "Retry import")) toast(`Retrying: ${x.file}`);
+      renderList(true); return;
+    }
+    pasteInstead(x, "This entry predates Retry (its URL wasn't kept): paste the job description and save it again");
+  }
+  function pasteInstead(x, why) {         // the form, filled in with what is known; the JD is yours to paste
+    const f = builderForm; if (!f) return;
+    const o = extOutcome(x) || {};
+    const pl = x.payload || {};
+    f.elements.company.value = pl.company || o.company || (x.company && x.company !== safeHost(x.url) && x.company !== o.role ? x.company : "");
+    f.elements.role.value = pl.role || o.role || (x.role !== "(from the URL)" ? x.role || "" : "");
+    f.elements.url.value = x.url || pl.url || o.url || "";
+    if (pl.location) f.elements.location.value = pl.location;
+    if (pl.track) f.elements.track.value = pl.track;
+    f.scrollIntoView({ block: "start" }); f.elements.jd.focus();
+    toast(why || "Paste the job description, then Save and build resume");
+  }
+  const safeHost = (u) => { try { return new URL(u).hostname; } catch (e) { return ""; } };
+  function dismissExternal(x) {
+    store.set(EXT_KEY, store.get(EXT_KEY, []).filter((y) => extId(y) !== extId(x)));
+    if (extLast && extLast.rid === x.rid) extLast = null;
     renderList(true); renderTopTabs();
   }
   function extStatus(x) {
     const cmd = `cd ${JSON.stringify(META.repo_root || ".")} && ./scripts/external_resume.sh ${JSON.stringify(x.name)}`;
-    const ack = LIVE.launcher && String(LIVE.launcher.at || "") >= String(x.at || "").slice(0, 19) && LIVE.launcher.action === "external" ? LIVE.launcher : null;
+    const st = x.entry ? extState(x.entry) : { kind: "importing" };
+    const L = LIVE.launcher;      // the worker's last answer (before this page knew its id: by time)
+    const ack = !st.o && L && L.action === "external" && (L.rid ? L.rid === x.rid : String(L.at || "") >= String(x.at || "").slice(0, 19)) ? L : null;
+    if (ack) { st.o = { message: ack.ok ? ack.message : `Launcher: ${ack.message || "failed"}` }; if (!ack.ok) st.kind = "failed"; }
     const lines = [el("b", { text: `${x.company || x.url} — ${x.role || "from the URL"}` }), x.name ? [" · saved as ", el("code", { class: "mono", text: x.name })] : " · sent to HireScope"];
     const msg = !LAUNCHER.installed ? "Waiting for the next run (or run the command below in Terminal)." : !x.sent ? "Not sent to the launcher." :
-      ack ? (ack.ok ? ack.message : `Launcher: ${ack.message || "failed"}`) : "Sent to the launcher — importing…";
-    return el("div", { class: `banner ${ack && !ack.ok ? "err" : "info"} ext-status`, "aria-live": "polite" }, el("div", null, el("div", null, lines), el("div", { text: msg }),
+      st.o ? st.o.message : st.kind === "failed" ? `Import failed: ${st.reason}` : "Sent to the launcher — importing…" + (st.hint ? ` (${st.hint})` : "");
+    return el("div", { class: `banner ${st.kind === "failed" ? "err" : "info"} ext-status`, "aria-live": "polite" }, el("div", null, el("div", null, lines), el("div", { text: msg }),
       x.name ? el("div", { style: "margin-top:6px" }, el("button", { class: "btn small", type: "button", onclick: async () => toast((await copyText(cmd)) ? "Command copied — paste it in Terminal" : cmd) }, "Copy Terminal fallback")) : null));
   }
   function renderExternalList(box) {
@@ -2226,12 +2290,25 @@
     if (!jobs.length && !pend.length) { box.append(el("div", { class: "empty", text: "No external jobs yet. Add one above: its resume builds on its own and shows up here." })); return; }
     const body = el("tbody");
     for (const x of pend) {
-      const it = (LIVE.queue || []).find((q) => q.company && extMatch({ company: q.company, title: q.title || "" }, x));
-      body.append(el("tr", null, el("td", { class: "role" }, el("b", { text: x.role }), el("div", { class: "muted", text: x.company })),
+      const st = extState(x); const o = st.o || {};
+      const name = o.job_title ? [o.job_title, o.job_company] : [x.role, x.company];
+      const rs = st.pk ? resumeStatus({ id: st.pk }) : "";
+      let state; const acts = [];
+      if (st.kind === "imported" || st.kind === "linked") {
+        state = [st.kind === "linked" ? el("span", { class: "chip info", title: o.message || "", text: `Linked to job ${st.pk} (already in HireScope)` }) : el("span", { class: "chip good", text: "Imported" }),
+          " ", rs ? resumeBadge(rs, resumeTitle({ id: st.pk })) : el("span", { class: "muted", text: o.queue === "skipped" ? "Resume: already READY" : "" })];
+        acts.push(el("button", { class: "btn small", type: "button", onclick: () => openJob(st.pk) }, "Open job"));
+      } else if (st.kind === "failed") {
+        state = [el("span", { class: "chip flag", text: "Import failed" }), el("div", { class: "muted ext-reason", text: st.reason })];
+        acts.push(el("button", { class: "btn small", type: "button", onclick: () => retryExternal(x) }, "Retry"));
+        if (x.url || o.paste || st.timeout) acts.push(el("button", { class: "btn small primary", type: "button", onclick: () => pasteInstead(x) }, "Paste JD instead"));
+        acts.push(el("button", { class: "btn small ghost", type: "button", "aria-label": `Remove ${x.company || x.url} from this list`, onclick: () => dismissExternal(x) }, "Remove"));
+      } else state = el("span", { class: "muted", text: st.kind === "waiting" ? "Waiting for the next run" : `Importing…${st.hint ? ` (${st.hint})` : ""}` });
+      body.append(el("tr", { "data-ext-pending": extId(x), "data-ext-state": st.kind }, el("td", { class: "role" }, el("b", { text: name[0] }), el("div", { class: "muted", text: name[1] }),
+          x.url ? el("div", { class: "muted small-links" }, el("a", { href: x.url, target: "_blank", rel: "noopener" }, safeHost(x.url))) : null),
         el("td", { class: "muted", text: "—" }), el("td", { class: "nowrap", text: fmtDate(String(x.saved_at).slice(0, 10)) }),
-        el("td", null, it ? resumeBadge(it.status === "done" ? (it.result === "ready_questions" ? "ready_q" : "ready") : it.status === "generating" ? "generating" : it.status === "failed" ? "failed" : "queued", it.message || "")
-          : el("span", { class: "muted", text: LAUNCHER.installed ? "Importing…" : "Waiting for the next run" })),
-        el("td", { class: "muted", text: "on the dashboard after the import" }), el("td")));
+        el("td", null, state), el("td", { class: "muted", text: st.kind === "linked" ? "the existing job" : st.kind === "imported" ? "on the dashboard after the next refresh" : "—" }),
+        el("td", null, el("div", { class: "row-actions" }, acts))));
     }
     for (const j of jobs) {
       const rs = resumeStatus(j); const r = resumeOf(j); const app = appForJob(j); const v = r && r.current;
@@ -2254,6 +2331,8 @@
       el("thead", null, el("tr", null, ["Role", "Track", "Added", "Resume", "Application", "Actions"].map((h) => el("th", { scope: "col", text: h })))), body)));
   }
   $("#add-ext-open").addEventListener("click", () => switchPage("builder"));
+  // an import with no answer turns into "Import failed" + Retry on its own (no live.js change needed)
+  setInterval(() => { if (ui.page === "builder" && !(builderForm && builderForm.contains(document.activeElement)) && extEntries().some((x) => extState(x).kind === "importing")) { renderList(true); renderTopTabs(); } }, 15000);
 
   // ---------- saved views (per track: filters + sort + search + salary + view) ----------
   function loadSavedView(sv) {

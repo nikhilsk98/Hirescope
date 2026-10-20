@@ -94,7 +94,8 @@ def posting_to_raw(company: str, d: dict, page_url: str, source: str) -> RawJob:
         et = ", ".join(et)
     org = d.get("hiringOrganization")
     return RawJob(
-        company=company or (org.get("name") if isinstance(org, dict) else None) or urlparse(url).hostname or "?",
+        company=" ".join(str(company or (org.get("name") if isinstance(org, dict) else None) or urlparse(url).hostname
+                         or "?").split()),     # " Keurig Dr Pepper " on their pages
         job_id=str(jid),
         title=unescape(d.get("title") or "").strip(),
         source=source,

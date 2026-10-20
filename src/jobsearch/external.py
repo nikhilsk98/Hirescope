@@ -328,26 +328,104 @@ def _jd_sim(a: str, b: str) -> float:
     return fuzz.token_set_ratio(" ".join(a[:6000].split()), " ".join(b[:6000].split()))
 
 
+def brand_key(name: str | None) -> str:
+    """Company key that ignores legal names and suffixes: "Advanced Micro Devices, Inc" and "AMD" are one company
+    (config/company_aliases.yaml), so are "Tive Inc" and "Tive"."""
+    from .watchlist import brand_name, load_aliases
+    aliases, _, suffixes = load_aliases(paths.CONFIG / "company_aliases.yaml")
+    b = brand_name(" ".join(str(name or "").split()), aliases, suffixes)
+    return db.company_key(aliases.get(db.company_key(b), b))
+
+
+def _company_keys(conn, name: str | None) -> list[str]:
+    """Every company_key in the database that is the same brand as `name`."""
+    want = brand_key(name)
+    if not want:
+        return []
+    return [k for (k,) in conn.execute("SELECT DISTINCT company_key FROM jobs") if k == want or brand_key(k) == want]
+
+
+_POSTING_ID = re.compile(r"(?<![A-Za-z0-9])((?:jr|r|req)?[-_]?\d{5,})(?:-\d{1,2})?(?![0-9])", re.I)
+
+
+def posting_ids(*urls_or_ids: str | None) -> set[str]:
+    """Requisition / posting numbers in URLs or source ids (5+ digits, optionally "JR"/"R"-prefixed), e.g. Cisco's
+    careers.cisco.com/global/en/job/2026923 and its Workday slug software-engineer-ii…_2026923: {"2026923"}."""
+    out: set[str] = set()
+    for v in urls_or_ids:
+        if not v:
+            continue
+        s = urlsplit(v) if re.match(r"^https?://", v, re.I) else None
+        text = f"{s.path} {s.query}" if s else v
+        for m in _POSTING_ID.finditer(text):
+            out.add(re.sub(r"^(?:jr|r|req)[-_]?|^[-_]", "", m.group(1).casefold()))
+    return out
+
+
+def _preferred(conn, rows) -> "sqlite3.Row | None":
+    """Of several records of one posting: the one you applied to / built a resume for / acted on, then an open one
+    from an official source, then the oldest."""
+    rows = list(rows)
+    if len(rows) < 2:
+        return rows[0] if rows else None
+    ids = [r["id"] for r in rows]
+    marks = ",".join("?" * len(ids))
+    has = lambda t: {x[0] for x in conn.execute(f"SELECT DISTINCT job_pk FROM {t} WHERE job_pk IN ({marks})", ids)}  # noqa: E731
+    applied, built = has("applications"), has("resume_status")
+    return sorted(rows, key=lambda r: (r["id"] not in applied, r["id"] not in built, r["user_status_at"] is None,
+                                       r["job_status"] == "closed", not r["source_official"], r["id"]))[0]
+
+
+def find_by_url(conn, url: str | None, company: str | None = None, extra_urls: tuple = ()) -> dict | None:
+    """The existing job behind a posting URL, without reading the page: the same ATS posting (canonical key), the
+    same URL (tracking parameters ignored), or — when the company is known — the same company with the same posting
+    number in its URL or source id (a company's own careers page vs its ATS). None when nothing matches."""
+    urls = [u for u in (url, *extra_urls) if u]
+    if not urls:
+        return None
+    def hit(r, why):
+        return {"job_pk": r["id"], "company": r["company"], "title": r["title"], "source": r["source"],
+                "job_status": r["job_status"], "kind": "same_url",
+                "message": f"Already in HireScope as job {r['id']}: {r['company']} — {r['title']} ({why})"}
+    for ck in dict.fromkeys(filter(None, (canonical_key(u) for u in urls))):
+        r = _preferred(conn, conn.execute("SELECT j.* FROM jobs j WHERE j.canonical_key=? OR j.id IN (SELECT job_pk "
+                                          "FROM job_sources WHERE canonical_key=?)", (ck, ck)))
+        if r:
+            return hit(r, "same posting URL")
+    normed = {n for n in (norm_url(u) for u in urls) if n}
+    if normed:
+        r = _preferred(conn, [r for r in conn.execute("SELECT * FROM jobs WHERE apply_url IS NOT NULL OR source_url IS "
+                                                      "NOT NULL") if {norm_url(r["apply_url"]), norm_url(r["source_url"])} & normed])
+        if r:
+            return hit(r, "same posting URL")
+    ids = posting_ids(*urls)
+    keys = _company_keys(conn, company) if (ids and company) else []
+    if keys:
+        marks = ",".join("?" * len(keys))
+        cands = []
+        for r in conn.execute(f"SELECT * FROM jobs WHERE company_key IN ({marks})", keys):
+            srcs = [s[0] for s in conn.execute("SELECT source_job_id FROM job_sources WHERE job_pk=?", (r["id"],))]
+            if ids & posting_ids(r["apply_url"], r["source_url"], r["job_id"], *srcs):
+                cands.append(r)
+        if r := _preferred(conn, cands):
+            return hit(r, f"same company, posting number {sorted(ids)[0]}")
+    return None
+
+
 def find_duplicate(conn, ext: ExternalJob, rules=None) -> dict | None:
-    """An existing job that is the same posting: same URL (or ATS posting), the same JD text, or the same company and
-    role with a similar JD. Closed jobs count too (you'd want the history, not a second record)."""
+    """An existing job that is the same posting: same URL (or ATS posting, or the company's posting number), the same
+    JD text, or the same company and role with a similar JD. Closed jobs count too (you'd want the history, not a
+    second record). The company is matched by brand ("Advanced Micro Devices, Inc" = "AMD")."""
     def hit(r, kind, why):
         return {"job_pk": r["id"], "company": r["company"], "title": r["title"], "source": r["source"],
                 "job_status": r["job_status"], "kind": kind,
                 "message": f"Already in HireScope as job {r['id']}: {r['company']} — {r['title']} ({why})"}
-    u, ck = norm_url(ext.url), canonical_key(ext.url) if ext.url else None
-    if ck:
-        r = conn.execute("SELECT j.* FROM jobs j WHERE j.canonical_key=? OR j.id IN (SELECT job_pk FROM job_sources "
-                         "WHERE canonical_key=?) LIMIT 1", (ck, ck)).fetchone()
-        if r:
-            return hit(r, "same_url", "same posting URL")
-    if u:
-        for r in conn.execute("SELECT * FROM jobs WHERE apply_url IS NOT NULL OR source_url IS NOT NULL"):
-            if u in (norm_url(r["apply_url"]), norm_url(r["source_url"])):
-                return hit(r, "same_url", "same posting URL")
+    if ext.url and (d := find_by_url(conn, ext.url, ext.company)):
+        return d
     h = jd_hash(ext.jd_text)
     norm = normalize_title(ext.role, rules) if rules is not None else " ".join(ext.role.casefold().split())
-    rows = conn.execute("SELECT * FROM jobs WHERE company_key=?", (db.company_key(ext.company),)).fetchall()
+    keys = _company_keys(conn, ext.company) or [db.company_key(ext.company)]
+    rows = conn.execute(f"SELECT * FROM jobs WHERE company_key IN ({','.join('?' * len(keys))})", keys).fetchall()
     for r in rows:
         if r["jd_hash"] == h:
             return hit(r, "same_jd", "same job description")

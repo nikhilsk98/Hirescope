@@ -810,15 +810,28 @@ def merge_canonical_duplicates(conn, key_of) -> int:
     for k, rows in groups.items():
         if len(rows) < 2:
             continue
-        acted = {r[0] for r in conn.execute(
-            f"SELECT DISTINCT job_pk FROM applications WHERE job_pk IN ({','.join('?' * len(rows))})", [r["id"] for r in rows])}
-        keep = sorted(rows, key=lambda r: (r["id"] not in acted, r["user_status_at"] is None, r["id"]))[0]["id"]
+        ids = [r["id"] for r in rows]
+        marks = ",".join("?" * len(ids))
+        has = lambda table: {x[0] for x in conn.execute(  # noqa: E731
+            f"SELECT DISTINCT job_pk FROM {table} WHERE job_pk IN ({marks})", ids)}
+        acted, built, bucketed = has("applications"), has("resume_status"), has("bucket")
+        # the job you applied to, else the one with a resume, in the Bucket or with a status, else the oldest
+        keep = sorted(rows, key=lambda r: (r["id"] not in acted, r["id"] not in built, r["id"] not in bucketed,
+                                           r["user_status_at"] is None, r["id"]))[0]["id"]
         for r in rows:
             if r["id"] == keep:
                 continue
-            conn.execute("UPDATE job_sources SET job_pk=?, canonical_key=? WHERE job_pk=?", (keep, k, r["id"]))
-            conn.execute("UPDATE applications SET job_pk=? WHERE job_pk=?", (keep, r["id"]))
-            conn.execute("DELETE FROM jobs WHERE id=?", (r["id"],))
+            old = r["id"]
+            conn.execute("UPDATE job_sources SET job_pk=?, canonical_key=? WHERE job_pk=?", (keep, k, old))
+            conn.execute("UPDATE applications SET job_pk=? WHERE job_pk=?", (keep, old))
+            conn.execute("UPDATE resume_queue SET job_pk=? WHERE job_pk=?", (keep, old))
+            for table in ("bucket", "resume_questions"):     # the kept job's own rows win
+                conn.execute(f"UPDATE OR IGNORE {table} SET job_pk=? WHERE job_pk=?", (keep, old))
+                conn.execute(f"DELETE FROM {table} WHERE job_pk=?", (old,))
+            if old in built and keep not in built:            # (keep has a resume whenever any of them does)
+                for table in ("resume_status", "resume_builds"):
+                    conn.execute(f"UPDATE {table} SET job_pk=? WHERE job_pk=?", (keep, old))
+            conn.execute("DELETE FROM jobs WHERE id=?", (old,))
             merged += 1
     conn.commit()
     return merged

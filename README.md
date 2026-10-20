@@ -203,7 +203,13 @@ pbpaste | ./scripts/add_job.sh --company "Acme" --role "Backend Engineer" --past
   `hirescope://external?file=<that file>`: the launcher imports exactly that file (dedupe as below: a job HireScope
   already has keeps its ID, no copy) and queues its resume; the worker rescores and republishes the dashboard data
   first (~30 s), then builds. Below the form: your external jobs with resume status, Preview / Download and **Mark
-  Applied**. When an external job's resume becomes READY it lands in My Applications at **Ready to apply** (the first
+  Applied**. Every submission gets an answer on the tab (the worker writes it to `dashboard/live.js` by the
+  submission's id): **Imported**, **Linked to job N** (HireScope already had it — e.g. from Workday, Jibe, Rippling or
+  SimplifyJobs — so that job's resume is queued if it has none, nothing is copied), or **Import failed** with the
+  reason (blocked by a bot check, a JavaScript-only page, the posting is gone, robots.txt, or a site whose terms rule
+  out automated reading) plus **Paste JD instead** (the form, filled in with company, role and URL) and **Retry**. A
+  submission with no answer after 5 minutes shows as failed with Retry (and says whether a run is holding the
+  database or the worker isn't running) — nothing stays at "Importing…". When an external job's resume becomes READY it lands in My Applications at **Ready to apply** (the first
   stage); Mark Applied moves it to Applied with today's date and the exact resume version
   (`preferences.yaml → applications.auto_mark_applied_external: true` marks it Applied right away instead).
   Terminal fallback: `./scripts/external_resume.sh "<file>"` (a name in ~/Downloads or `inputs/external_jobs/`, or a
@@ -220,7 +226,8 @@ pbpaste | ./scripts/add_job.sh --company "Acme" --role "Backend Engineer" --past
   (PDF / DOCX originals are kept in `data.nosync/external_jobs/<Company>/`); a file that can't be imported stays, with
   the reason in the log and the run summary. Each file is imported once.
 - **Duplicates**: an external job that matches a job HireScope already has — the same posting URL (tracking
-  parameters ignored) or ATS posting, the same JD text, or the same company + role with a similar JD — is **not**
+  parameters ignored) or ATS posting, the same company (by brand: "Advanced Micro Devices, Inc" = AMD) with the same
+  posting number in the URL (Cisco's careers page vs its Workday listing), the same JD text, or the same company + role with a similar JD — is **not**
   created; you get a warning naming the existing job and a link to it (the dashboard form checks company + role and
   URL before saving; the import checks the JD text too). `--force` (or "add it anyway" in the form) adds it as a
   separate job. Exit codes: `0` added, `3` duplicate, `2` error.

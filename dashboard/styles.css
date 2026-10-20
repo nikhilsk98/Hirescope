@@ -525,3 +525,4 @@ table.manual-table tr.due-row td:first-child { box-shadow: inset 3px 0 0 var(--s
 }
 .bucket-table td .muted, .ext-table td .muted { white-space: nowrap; }
 .bucket-table td.role .muted, .ext-table td.role .muted { white-space: normal; }
+.ext-table td .ext-reason { white-space: normal; max-width: 40ch; font-size: 12px; margin-top: 4px; }

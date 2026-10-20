@@ -526,6 +526,10 @@ def run(conn: sqlite3.Connection, cfg: Config, resume: Resume, companies: list[C
         for pool in pools.values():   # never wait for an abandoned (timed-out) fetch
             pool.shutdown(wait=not abandoned, cancel_futures=True)
 
+    # the same posting found by two sources (SimplifyJobs + the company's ATS, a re-posted Workday req): one job
+    from .adapters.canonical import canonical_key
+    if m := db.merge_canonical_duplicates(conn, canonical_key):
+        log.info("merged %d duplicate postings (same employer ATS posting)", m)
     score_all(conn, cfg, resume, embedder, summary, learned)
     return summary
 

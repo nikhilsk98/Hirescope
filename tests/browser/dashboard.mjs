@@ -191,6 +191,59 @@ const scenarios = {
     check("URL only: inside the link, no JD", j2 && j2.url === "https://jobs.demo.example/postings/7" && !j2.jd_text);
     check("URL only: one external link, still no download", (await p.eval(`window.__links.length`)) === 2 && (await p.eval(`window.__dl.length`)) === 0);
   },
+  async builder_imports(p) {
+    // submissions the worker answered (imported / linked / failed) or never answered (timed out): none stays "Importing…"
+    const now = Date.now(); const iso = (ms) => new Date(ms).toISOString();
+    const jobId = await p.eval(`Number(document.querySelector("#list .card").dataset.id)`);
+    const entries = [
+      { rid: "rb-timeout", company: "careers.demoslow.example", role: "(from the URL)", url: "https://careers.demoslow.example/job/1", file: null, saved_at: iso(now - 10 * 60e3),
+        payload: { kind: "hirescope_external_job", format: 1, origin: "resume_builder", company: "", role: "", url: "https://careers.demoslow.example/job/1", jd_text: "", track: "coop_intern", created_at: iso(now - 10 * 60e3) } },
+      { rid: "rb-failed", company: "DemoBlue", role: "Software Developer Co-op (DEMO)", url: "https://careers.demoblue.example/JobDetail?jobId=1", file: null, saved_at: iso(now - 60e3), payload: null },
+      { rid: "rb-linked", company: "careers.democo.example", role: "(from the URL)", url: "https://careers.democo.example/jobs/9", file: null, saved_at: iso(now - 120e3), payload: null },
+      { company: "careers.legacy.example", role: "(from the URL)", file: null, saved_at: "2026-10-20T00:06:38.246Z" },   // an older entry: no rid, no url
+      { rid: "rb-fresh", company: "DemoFresh", role: "Data Co-op (DEMO)", url: "https://jobs.demofresh.example/1", file: null, saved_at: iso(now - 20e3), payload: null },
+    ];
+    entries[3].saved_at = iso(now - 3 * 864e5);      // three days old (kept for a week); its id is its saved_at
+    const legacyId = entries[3].saved_at;
+    await p.eval(CAPTURE + `; localStorage.setItem("jobsearch.launcherTip.v1", "true"); localStorage.setItem("jobsearch.externalPending.v1", ${JSON.stringify(JSON.stringify(entries))})`);
+    await p.eval(`window.__hsLive({generated_at: "x1", queue: [{id: 7, job_pk: ${jobId}, company: "DemoCo", title: "T", status: "queued", attempts: 0, added_at: "${iso(now)}"}], worker: {state: "running"},
+      external: [{rid: "rb-failed", status: "failed", reason: "blocked: the site answered with an empty bot-check page (HTTP 202)", paste: true, company: "DemoBlue", role: "Software Developer Co-op (DEMO)", url: "https://careers.demoblue.example/JobDetail?jobId=1", message: "x"},
+                 {rid: "rb-linked", status: "linked", job_pk: ${jobId}, job_company: "DemoCo", job_title: "Linked Role (DEMO)", queue: "queued", message: "linked to existing job"},
+                 {rid: ${JSON.stringify(legacyId)}, status: "linked", job_pk: ${jobId}, job_company: "DemoCo", job_title: "Legacy Linked (DEMO)", queue: "skipped", message: "linked"}]})`);
+    await p.key("4"); await p.sleep(250);
+    const row = (rid) => `document.querySelector('[data-ext-pending="${rid}"]')`;
+    const state = (rid) => p.eval(`(${row(rid)} || {dataset: {}}).dataset.extState`);
+    check("never answered after 5 min → Import failed", await state("rb-timeout") === "failed" && /no answer from HireScope after 5 minutes/.test(await p.eval(`${row("rb-timeout")}.textContent`)));
+    check("timed out: Retry + Paste JD instead", /Retry/.test(await p.eval(`${row("rb-timeout")}.textContent`)) && /Paste JD instead/.test(await p.eval(`${row("rb-timeout")}.textContent`)));
+    check("worker answer: failed with the reason", await state("rb-failed") === "failed" && /bot-check page/.test(await p.eval(`${row("rb-failed")}.textContent`)));
+    check("linked to the existing job, its resume status shown", await state("rb-linked") === "linked" && /Linked to job \d+/.test(await p.eval(`${row("rb-linked")}.textContent`)) &&
+      /Resume: Queued/.test(await p.eval(`${row("rb-linked")}.textContent`)) && /Linked Role/.test(await p.eval(`${row("rb-linked")}.textContent`)));
+    check("older entry answered by its created_at", await state(legacyId) === "linked" && /Legacy Linked/.test(await p.eval(`${row(legacyId)}.textContent`)));
+    check("a fresh one is still Importing", await state("rb-fresh") === "importing" && /Importing…/.test(await p.eval(`${row("rb-fresh")}.textContent`)));
+    // Paste JD instead: the form, filled in, with the JD box focused
+    await p.eval(`[...${row("rb-failed")}.querySelectorAll("button")].find((b) => /Paste JD instead/.test(b.textContent)).click()`); await p.sleep(150);
+    const f = await p.eval(`(() => { const f = document.querySelector(".builder-form"); return { c: f.elements.company.value, r: f.elements.role.value, u: f.elements.url.value, focus: document.activeElement === f.elements.jd }; })()`);
+    check("Paste JD instead fills company, role, URL and focuses the JD", f.c === "DemoBlue" && f.r === "Software Developer Co-op (DEMO)" && f.u === "https://careers.demoblue.example/JobDetail?jobId=1" && f.focus, JSON.stringify(f));
+    // Retry re-sends the saved submission under a new id; the row is Importing again
+    await p.eval(`window.__links.length = 0`);
+    await p.eval(`[...${row("rb-timeout")}.querySelectorAll("button")].find((b) => b.textContent === "Retry").click()`); await p.sleep(300);
+    const sent = await p.eval(`window.__links[0] || ""`);
+    const m = /^hirescope:\/\/external\?data=([A-Za-z0-9_-]+)$/.exec(sent);
+    const job = m ? JSON.parse(Buffer.from(m[1], "base64url").toString("utf8")) : null;
+    check("Retry sends the same URL with a new id", job && job.url === "https://careers.demoslow.example/job/1" && job.rid && job.rid !== "rb-timeout", sent.slice(0, 80));
+    check("the retried row is Importing again (one row)", await p.eval(`document.querySelectorAll('[data-ext-pending="${job && job.rid}"]').length`) === 1 &&
+      !(await p.eval(`!!${row("rb-timeout")}`)) && await state(job && job.rid) === "importing");
+    // the worker answers the retry: imported
+    await p.eval(`window.__hsLive({generated_at: "x2", queue: [], worker: {state: "idle"}, external: [{rid: ${JSON.stringify(job && job.rid)}, status: "failed", reason: "the posting is gone (HTTP 404)", paste: true, message: "x"}]})`); await p.sleep(200);
+    check("the answer to the retry is shown", await state(job && job.rid) === "failed" && /HTTP 404/.test(await p.eval(`document.querySelector('[data-ext-pending="${job && job.rid}"]').textContent`)));
+    // an older entry with no URL: Retry falls back to the form
+    await p.eval(`window.__hsLive({generated_at: "x3", queue: [], worker: {state: "stopped"}, external: []})`); await p.sleep(200);
+    check("no answer + worker stopped: says so", /worker isn't running/.test(await p.eval(`${row(legacyId)}.textContent`)));
+    await p.eval(`[...${row(legacyId)}.querySelectorAll("button")].find((b) => b.textContent === "Retry").click()`); await p.sleep(150);
+    check("Retry without a saved URL opens the form", await p.eval(`document.activeElement === document.querySelector(".builder-form").elements.jd`));
+    await p.eval(`[...${row(legacyId)}.querySelectorAll("button")].find((b) => b.textContent === "Remove").click()`); await p.sleep(150);
+    check("Remove drops the row", !(await p.eval(`!!${row(legacyId)}`)));
+  },
   async queue_questions(p) {
     await p.eval(CAPTURE + `; localStorage.setItem("jobsearch.launcherTip.v1", "true")`);
     await p.key("1");

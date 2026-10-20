@@ -112,6 +112,10 @@ def test_resume_builder_tab_form_external_list_ready_to_apply(demo_dashboard):
     scenario(demo_dashboard, "builder")
 
 
+def test_resume_builder_imports_timeout_retry_paste_and_linked(demo_dashboard):
+    scenario(demo_dashboard, "builder_imports")
+
+
 def test_questions_view_and_queue_panel(demo_dashboard):
     scenario(demo_dashboard, "queue_questions")
 

@@ -10,16 +10,19 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+import httpx
+
 from . import paths
 from .adapters.base import HttpClient, RawJob
 from .adapters.canonical import canonical_key
 from .adapters.detect import from_url
-from .adapters.jsonld import CareersPageAdapter
+from .adapters.jsonld import HTML_ACCEPT, CareersPageAdapter, jobpostings_in_html, posting_to_raw
 from .adapters.registry import ADAPTERS
 from .config import load_config
 from .extract.resume import parse_resume
@@ -43,11 +46,56 @@ def no_fetch(url: str) -> bool:
     return any(host == h or host.endswith("." + h) for h in NO_FETCH_HOSTS)
 
 
+class UnreadableURL(ValueError):
+    """The posting page can't be read automatically; `reason` says why (blocked, needs JavaScript, gone, …). Paste
+    the JD instead."""
+
+    def __init__(self, url: str, reason: str):
+        super().__init__(f"Could not read {url} automatically ({reason}). Paste the job description instead "
+                         "(--jd-file FILE or --paste, plus --company and --title).")
+        self.url, self.reason = url, reason
+
+
+def _why_not(e: Exception) -> str:
+    """A short, honest reason a page could not be read."""
+    from .adapters.base import SourceUnavailable
+    if isinstance(e, SourceUnavailable):
+        return f"blocked: {e}" if e.kind == "blocked" else str(e)
+    if isinstance(e, httpx.HTTPStatusError):
+        code = e.response.status_code
+        if code in (401, 403, 429):
+            return f"blocked: the site refused automated reading (HTTP {code})"
+        if code in (404, 410):
+            return f"the posting is gone or the link is wrong (HTTP {code})"
+        return f"the site answered HTTP {code}"
+    if isinstance(e, httpx.TransportError):
+        return f"couldn't reach the site ({type(e).__name__})"
+    if "robots.txt" in str(e):
+        return "the site's robots.txt doesn't allow reading it"
+    return f"{type(e).__name__}: {str(e)[:120]}"
+
+
+def _page_reason(resp) -> str:
+    """Why a page that loaded has no readable posting: a bot check, a JavaScript-only page, or no job data."""
+    body = resp.text or ""
+    text = re.sub(r"<script\b.*?</script>|<style\b.*?</style>|<[^>]+>", " ", body, flags=re.S | re.I)
+    words = len(text.split())
+    if resp.status_code == 202 or not body.strip():
+        return f"blocked: the site answered with an empty bot-check page (HTTP {resp.status_code})"
+    if re.search(r"captcha|are you a robot|verify you are human|challenge-platform|perimeterx|akamai bot", body, re.I):
+        return "blocked: the site shows a bot check (not bypassed)"
+    if words < 150 and len(re.findall(r"<script\b", body, re.I)) >= 2:
+        return "the page builds itself with JavaScript; its HTML has no job data"
+    return "no job data (schema.org JobPosting) on the page"
+
+
 def resolve(url: str, client: HttpClient, company: str | None) -> tuple[RawJob | None, str]:
+    """(the posting, how it was read) or (None, why it couldn't be read)."""
     if no_fetch(url):
-        return None, "not read (this site's terms don't allow automated access): paste the JD with --paste"
+        return None, "not read: this site's terms don't allow automated access, so paste the JD"
     fields = from_url(url) or {}
     adapter_cls = ADAPTERS.get(fields.get("source", ""))
+    adapter_err = None
     if adapter_cls is not None:
         try:
             raw = adapter_cls(client).fetch_one(url, company=company)
@@ -55,24 +103,33 @@ def resolve(url: str, client: HttpClient, company: str | None) -> tuple[RawJob |
                 return raw, f"{adapter_cls.name} API"
         except Exception as e:  # noqa: BLE001
             log.info("%s adapter could not read %s: %s", adapter_cls.name, url, e)
+            adapter_err = e
     try:
-        raw = CareersPageAdapter(client).fetch_one(url, company=company)
-        if raw:
-            return raw, "JSON-LD on the page"
+        if not client.allowed(url):
+            return None, "the site's robots.txt doesn't allow reading it"
+        resp = client.get(url, headers=HTML_ACCEPT)
+        found = jobpostings_in_html(resp.text)
+        if found:
+            return posting_to_raw(company or "", found[0], url, CareersPageAdapter.name), "JSON-LD on the page"
+        why = _page_reason(resp)
     except Exception as e:  # noqa: BLE001
         log.info("JSON-LD read failed for %s: %s", url, e)
-    return None, "unreadable"
+        why = _why_not(e)
+    if adapter_err is not None and not why.startswith("blocked"):
+        why = f"{adapter_cls.name}: {_why_not(adapter_err)}; page: {why}"
+    return None, why
 
 
 def add_job(conn, cfg, url: str, client: HttpClient, *, company: str | None = None, title: str | None = None,
             jd_text: str | None = None, location: str | None = None, track: str | None = None,
-            jd_dir: Path | None = paths.JD_DIR) -> tuple[int, str, str]:
-    """Returns (job pk, status new|updated|seen, how it was read)."""
-    raw, how = (None, "manual") if jd_text else resolve(url, client, company)
+            jd_dir: Path | None = paths.JD_DIR, resolved: tuple[RawJob | None, str] | None = None
+            ) -> tuple[int, str, str]:
+    """Returns (job pk, status new|updated|seen, how it was read). Raises UnreadableURL when the page can't be read
+    and no JD was given. `resolved`: resolve()'s answer when the caller already read the page."""
+    raw, how = (None, "manual") if jd_text else (resolved or resolve(url, client, company))
     if raw is None:
         if not jd_text:
-            raise ValueError(f"Could not read {url} automatically ({how}). Re-run with --jd-file FILE (or --paste) "
-                             "plus --company and --title to add it manually.")
+            raise UnreadableURL(url, how)
         if not (company and title):
             raise ValueError("Manual entry needs --company and --title.")
         raw = RawJob(company=company, job_id=canonical_key(url) or url, title=title, source=SOURCE, source_url=url,

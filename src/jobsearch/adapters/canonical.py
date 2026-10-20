@@ -6,6 +6,9 @@
     workday:<tenant>:<job path slug>     (e.g. software-engineer_jr2015623)
     smartrecruiters:<posting id>
     amazon:<job id>
+    rippling:<posting uuid>
+    workable:<shortcode>
+    jibe:<host>:<job id>                 (careers.amd.com/careers-home/jobs/91180 = careers.amd.com/jobs/91180?icims=1)
 """
 from __future__ import annotations
 
@@ -13,6 +16,12 @@ import re
 from urllib.parse import parse_qs, urlparse
 
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+
+
+def workday_key(tenant: str, slug: str) -> str:
+    """"..._R260021450-1" is the same requisition re-posted (another location): same job, same key (the workday
+    adapter and links to the posting from elsewhere must agree)."""
+    return f"workday:{tenant.lower()}:{re.sub(r'(_[a-z]{0,4}-?\d{4,})-\d{1,2}$', r'\1', slug.lower())}"
 
 
 def canonical_key(url: str | None) -> str | None:
@@ -39,11 +48,17 @@ def canonical_key(url: str | None) -> str | None:
     if host.endswith("myworkdayjobs.com") or host.endswith("myworkdaysite.com"):
         tenant = host.split(".")[0]
         if m := re.search(r"/job/(?:[^/]+/)*([^/?#]+)", path):
-            # "..._R260021450-1" is the same requisition re-posted (another location): same job
-            slug = re.sub(r"(_[a-z]{0,4}-?\d{4,})-\d{1,2}$", r"\1", m.group(1).lower())
-            return f"workday:{tenant}:{slug}"
+            return workday_key(tenant, m.group(1))
     if "smartrecruiters.com" in host and (m := re.search(r"/(\d{6,})", path)):
         return f"smartrecruiters:{m.group(1)}"
     if host.endswith("amazon.jobs") and (m := re.search(r"/jobs/(\d+)", path)):
         return f"amazon:{m.group(1)}"
+    if host == "ats.rippling.com" and (m := re.search(_UUID, path)):
+        return f"rippling:{m.group(0)}"
+    if host.endswith("workable.com") and (m := re.search(r"/j/([0-9A-F]{6,12})(?:/|$)", path, re.I)):
+        return f"workable:{m.group(1).upper()}"
+    # Jibe career sites (the jibe adapter's key): the site's own job page, or the same page linked with ?icims=1
+    if (m := re.match(r"^(?:/[a-z]{2}(?:-[a-z]{2})?)?/careers-home/jobs/(\d+)", path)) or \
+            ("icims" in qs and (m := re.match(r"^/jobs/(\d+)", path))):
+        return f"jibe:{host.removeprefix('www.')}:{m.group(1)}"
     return None

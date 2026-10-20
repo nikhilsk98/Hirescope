@@ -9,6 +9,7 @@ import pytest
 
 from jobsearch import external_resume as ER
 from jobsearch import launcher, paths
+from jobsearch.adapters.base import RawJob
 from jobsearch.storage import db
 from jobsearch.tracker import applications as A
 from jobsearch.tracker import ready_apps, statuses
@@ -82,7 +83,7 @@ def test_external_link_imports_and_queues_in_one_click(env):
     # the same job again (a new file): dedupe → the existing job's ID, no second job, no second build
     p2 = saved(downloads, name="hirescope-external-job-DemoCorp-20261017T130000-cd34.json")
     msg = external_link(conn, p2.name)
-    assert "matched existing" in msg and f"job {pk}" in msg
+    assert "linked to existing job" in msg and f"job {pk}" in msg
     assert conn.execute("SELECT COUNT(*) FROM jobs WHERE source='external'").fetchone()[0] == 1
     assert conn.execute("SELECT COUNT(*) FROM resume_queue WHERE job_pk=? AND status='queued'", (pk,)).fetchone()[0] == 1
 
@@ -103,17 +104,17 @@ def test_url_only_uses_add_job_by_url(env, monkeypatch):
     conn, downloads = env
     calls = []
 
-    def fake_add_job(conn_, cfg_, url, client, **kw):
-        calls.append((url, kw))
-        conn_.execute("INSERT INTO jobs (company, company_key, title, normalized_title, job_id, first_seen, last_checked, "
-                      "source, jd_hash, job_status) VALUES ('DemoUrl','demourl','Backend Co-op','backend co-op','u1',"
-                      "'2026-10-17','2026-10-17','added_url','h','new')")
-        return conn_.execute("SELECT id FROM jobs WHERE job_id='u1'").fetchone()[0], "new", "JSON-LD on the page"
-    monkeypatch.setattr("jobsearch.add_url.add_job", fake_add_job)
+    def fake_resolve(url, client, company):
+        calls.append(url)
+        return RawJob(company="DemoUrl", job_id="u1", title="Backend Co-op (DEMO)", source="careers_page",
+                      source_url=url, apply_url=url, description=JD.replace("DemoCorp", "DemoUrl")), "JSON-LD on the page"
+    monkeypatch.setattr("jobsearch.add_url.resolve", fake_resolve)
     p = saved(downloads, name="hirescope-external-job-demo-url-20261017T120000-q1.json", company="", role="",
               jd_text="", url="https://jobs.demo.example/postings/42")
     msg = external_link(conn, p.name)
-    assert calls and calls[0][0] == "https://jobs.demo.example/postings/42" and "resume queued" in msg
+    assert calls == ["https://jobs.demo.example/postings/42"] and "imported DemoUrl" in msg and "resume queued" in msg
+    pk = conn.execute("SELECT id FROM jobs WHERE source='added_url'").fetchone()[0]
+    assert queue.active_item(conn, pk)
 
 
 def test_external_resume_script_terminal_fallback(env, capsys):
