@@ -51,7 +51,7 @@ def test_desktop_sync_child_runs_for_real(monkeypatch):
     from resume_builder import desktop
     monkeypatch.delenv("HIRESCOPE_DESKTOP_DIRECT")
     code, lines = desktop.sync_all()
-    assert code == 0 and "Desktop folder" in lines[0]
+    assert code == 0 and "Resume folder" in lines[0]
 
 
 def test_downloads_read_check(tmp_path, hanging_child):

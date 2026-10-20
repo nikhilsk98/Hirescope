@@ -178,7 +178,7 @@ def test_unreadable_preferences_fall_back_to_defaults(xconn, monkeypatch):
     monkeypatch.setattr(config, "load_preferences", broken)
     monkeypatch.delenv("JOBSEARCH_EXCEL_PATH")
     enabled, path = X.settings()
-    assert enabled and path.name == "HireScope Applications.xlsx" and "Generated Resumes" in str(path)
+    assert enabled and path.name == "HireScope Applications.xlsx" and "HireScope Resumes" in str(path)
     launcher.handle(f"hirescope://status?job={a}&stage=applied&app=aA&date=2026-10-15")
     ws = X.build(conn, today=date(2026, 10, 18))["Applications"]
     assert ws["M2"].value == "2026-10-22"                                  # the default 7–10 day follow-up window
